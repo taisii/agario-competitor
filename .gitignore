@@ -40,3 +40,5 @@ todo.md
 
 # Local running outputs
 .agario/
+bot_metrics*.jsonl
+app*.log

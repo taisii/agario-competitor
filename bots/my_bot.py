@@ -1,36 +1,40 @@
+import os
+from time import perf_counter
+
 from helper.game import Game
-from lib.interface.events.moves.move_player import MovePlayer
 from lib.interface.queries.query_move import QueryMovePlayer
-from lib.models.penguin_model import DirectionModel
-
-
-def choose_direction(game: Game) -> tuple[float, float]:
-    if game.state.visible_food:
-        target = min(
-            game.state.visible_food,
-            key=lambda food: (food.pos[0] - game.state.me.x) ** 2
-            + (food.pos[1] - game.state.me.y) ** 2,
-        )
-        return (target.pos[0] - game.state.me.x, target.pos[1] - game.state.me.y)
-    return (1.0, 0.0)
+from strategies.base import StrategyContext
+from strategies.registry import create_strategy
+from telemetry import MetricsLogger
 
 
 def main() -> None:
     game = Game()
+    strategy = create_strategy(os.environ.get("BOT_STRATEGY", "champion"))
+    metrics = MetricsLogger()
 
-    while True:
-        query = game.get_next_query()
-        match query:
-            case QueryMovePlayer():
-                dx, dy = choose_direction(game)
-                game.send_move(
-                    MovePlayer(
-                        player_id=game.state.me.player_id,
-                        direction=DirectionModel(x=dx, y=dy),
+    try:
+        while True:
+            try:
+                query = game.get_next_query()
+            except EOFError:
+                break
+            match query:
+                case QueryMovePlayer():
+                    started_at = perf_counter()
+                    decision = strategy.choose(StrategyContext(game=game, query=query))
+                    elapsed_ms = (perf_counter() - started_at) * 1000.0
+                    metrics.record(
+                        game=game,
+                        strategy_name=strategy.name,
+                        decision=decision,
+                        elapsed_ms=elapsed_ms,
                     )
-                )
-            case _:
-                raise RuntimeError(f"Unsupported query type: {type(query)}")
+                    game.send_move(decision.to_move(game.state.me.player_id))
+                case _:
+                    raise RuntimeError(f"Unsupported query type: {type(query)}")
+    finally:
+        metrics.close()
 
 
 if __name__ == "__main__":
