@@ -33,10 +33,12 @@ class SurvivalGreedyStrategy:
                 },
             )
 
-        origin = (state.me.x, state.me.y)
         if features.nearest_prey is not None:
             return StrategyDecision(
-                direction=vector_from_to(origin, features.nearest_prey.blob.pos),
+                direction=vector_from_to(
+                    features.nearest_prey.nearest_own_blob.pos,
+                    features.nearest_prey.blob.pos,
+                ),
                 target_kind="prey",
                 target_id=self._blob_id(features.nearest_prey),
                 reason="nearest_safe_prey",
@@ -44,8 +46,15 @@ class SurvivalGreedyStrategy:
             )
 
         if features.nearest_food is not None:
+            origin_blob = min(
+                features.own_blobs,
+                key=lambda blob: (
+                    (blob.pos[0] - features.nearest_food.pos[0]) ** 2
+                    + (blob.pos[1] - features.nearest_food.pos[1]) ** 2
+                ),
+            )
             return StrategyDecision(
-                direction=vector_from_to(origin, features.nearest_food.pos),
+                direction=vector_from_to(origin_blob.pos, features.nearest_food.pos),
                 target_kind="food",
                 target_id=str(features.nearest_food.food_id),
                 reason="nearest_food",

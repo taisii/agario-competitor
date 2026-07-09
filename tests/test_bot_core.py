@@ -23,11 +23,14 @@ from bot_core import (  # noqa: E402
     split_can_hit_prey,
 )
 from strategies.champion import (  # noqa: E402
+    Action as ChampionAction,
     ChampionStrategy,
     EnemyBlob,
     OwnBlob,
+    SearchNode as ChampionSearchNode,
     _split_attack_reach,
 )
+from lib.models.food_model import FoodModel  # noqa: E402
 
 
 def make_state(
@@ -48,10 +51,10 @@ def make_state(
     )
 
 
-def test_radius_eat_threshold() -> None:
-    assert can_eat(1.2, 1.0)
-    assert not can_eat(1.19, 1.0)
-    assert is_threat(1.0, 1.2)
+def test_mass_eat_threshold() -> None:
+    assert can_eat(1.1, 1.0)
+    assert not can_eat(1.09, 1.0)
+    assert is_threat(1.0, 1.1)
 
 
 def test_escape_from_visible_threat() -> None:
@@ -120,3 +123,116 @@ def test_champion_prices_enemy_split_reach_not_only_current_radius() -> None:
     assert penalty > 400.0
     assert margin < 0.0
     assert unavoidable
+
+
+def test_champion_can_collect_food_touching_a_safe_wall() -> None:
+    strategy = ChampionStrategy(depth=1, width=1, angular_samples=8)
+    own = OwnBlob(blob_id=0, x=2.0, y=30.0, radius=1.0)
+    node = ChampionSearchNode(
+        own_blobs=(own,),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+    edge_food = FoodModel(food_id=1, pos=(0.2, 30.0))
+
+    toward_wall = strategy._step(
+        node=node,
+        action=ChampionAction((-1.0, 0.0), reason="edge_food"),
+        foods=(edge_food,),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+        safety_weight=1.0,
+        aggression=1.0,
+    )
+    away_from_wall = strategy._step(
+        node=node,
+        action=ChampionAction((1.0, 0.0), reason="away"),
+        foods=(edge_food,),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+        safety_weight=1.0,
+        aggression=1.0,
+    )
+
+    assert toward_wall.node.projected_food == 1
+    assert away_from_wall.node.projected_food == 0
+    assert strategy._terminal_score(toward_wall.node) > strategy._terminal_score(away_from_wall.node)
+
+
+def test_champion_still_prices_a_predator_near_the_wall() -> None:
+    strategy = ChampionStrategy(depth=1, width=1, angular_samples=8)
+    own = OwnBlob(blob_id=0, x=1.0, y=30.0, radius=1.0)
+    interior_predator = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=6.0,
+        y=30.0,
+        radius=1.5,
+    )
+    penalty, margin, unavoidable = strategy._risk_score(
+        [own],
+        (interior_predator,),
+        safety_weight=1.0,
+    )
+
+    assert penalty > 0.0
+    assert margin > 0.0
+    assert not unavoidable
+
+
+def test_champion_turn_budget_tracks_remaining_time_bank() -> None:
+    strategy = ChampionStrategy(depth=3, width=4, angular_samples=18)
+    strategy.compute_budget_seconds = 7.2
+    strategy.max_turn_seconds = 0.005
+
+    initial = strategy._turn_budget_seconds(round_number=0, max_rounds=1400)
+    assert math.isclose(initial, 0.005)
+
+    strategy.compute_spent_seconds = 7.0
+    constrained = strategy._turn_budget_seconds(round_number=700, max_rounds=1400)
+    assert math.isclose(constrained, 0.2 / 700)
+
+    strategy.compute_spent_seconds = 7.2
+    assert strategy._turn_budget_seconds(round_number=1000, max_rounds=1400) == 0.0
+
+
+def test_champion_anytime_root_considers_escape_before_angle_grid() -> None:
+    strategy = ChampionStrategy(depth=3, width=4, angular_samples=18)
+    own = OwnBlob(blob_id=0, x=10.0, y=30.0, radius=1.0)
+    predator = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=16.0,
+        y=30.0,
+        radius=2.0,
+    )
+    node = ChampionSearchNode(
+        own_blobs=(own,),
+        enemies=(predator,),
+        score=0.0,
+        first_direction=(0.0, 1.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(0.0, 1.0),
+    )
+
+    actions = strategy._candidate_actions(
+        node=node,
+        foods=(),
+        food_targets=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+        allow_split=True,
+        angle_offset=7,
+    )
+
+    reasons = [action.reason for action in actions]
+    assert reasons[0] == "escape"
+    assert reasons.index("angle") > reasons.index("center")

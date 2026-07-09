@@ -45,6 +45,27 @@ strategies, run:
 uv run simulation 1:bots/entries/champion.py 7:bots/entries/random_opponent.py --headless
 ```
 
+## Building the official submission
+
+The 2026 submission portal accepts one `.py` file. Keep the modular strategy
+sources for development and generate the upload artifact with:
+
+```bash
+uv run python scripts/build_submission.py
+uv run python -m py_compile dist/my_bot.py
+uv run simulation 1:dist/my_bot.py 7:bots/entries/random_opponent.py --headless
+```
+
+Upload `dist/my_bot.py` at `https://syncs.org.au/competition2026/game`.
+`dist/` is ignored because the file is generated; the builder prints its
+SHA-256 hash so the uploaded revision can be recorded separately.
+
+For the advertised 40 PEP hours, the organisers require a SYNCS account using
+a USyd email with `Needs pep hours` enabled, membership in a competition team,
+and at least five submissions by that team. The portal submission history is
+the authoritative count; keep the hash and successful portal status for each
+meaningful iteration.
+
 `bots/entries/champion.py` defaults to the submission-safe `champion` strategy. Override it with
 `BOT_CHAMPION_STRATEGY=<strategy_name>`. `random_opponent` samples from
 `food_greedy`, `survival_greedy`, `beam_survival`, and `potential_hunter` by
@@ -71,7 +92,7 @@ Available local strategy entry points:
 - `bots/entries/beam_survival.py`: shallow rollout focused on survival and food/prey.
 - `bots/entries/potential_hunter.py`: potential-field hunter inspired by the public bot style.
 - `bots/entries/beam_hunter.py`: beam rollout with move/split candidates, predator, wall, virus, food, and prey scoring.
-- `bots/entries/champion.py`: robust receding-horizon submission strategy using public opponent moves, adversarial predator prediction, and engine-matched split physics.
+- `bots/entries/champion.py`: robust receding-horizon submission strategy using censored-state adversarial predator prediction and engine-matched split physics.
 - `bots/entries/champion_reference.py`: deliberately expensive reference profile for strength experiments before optimizing the same logic for submission.
 - `bots/entries/beam_rl_*.py`: imported beam/RL profile bots with submission-safe caps.
 - `bots/entries/random_opponent.py`: picks one stable strategy at process startup.

@@ -237,6 +237,7 @@ async def run_match(
         log_path = run_dir / "simulation.log"
         env = os.environ.copy()
         env.update(variant.env)
+        env["BOT_METRICS_ENABLED"] = "1"
         env["BOT_METRICS_EVERY_N"] = metrics_every_n
         env["PYTHONUNBUFFERED"] = "1"
 

@@ -9,15 +9,19 @@ class FoodGreedyStrategy:
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         state = context.game.state
-        origin = (state.me.x, state.me.y)
-        if state.visible_food:
-            target = min(
-                state.visible_food,
-                key=lambda food: (food.pos[0] - origin[0]) ** 2
-                + (food.pos[1] - origin[1]) ** 2,
+        own_blobs = tuple(state.me.blobs.values())
+        if state.visible_food and own_blobs:
+            origin_blob, target = min(
+                (
+                    (blob, food)
+                    for blob in own_blobs
+                    for food in state.visible_food
+                ),
+                key=lambda pair: (pair[1].pos[0] - pair[0].pos[0]) ** 2
+                + (pair[1].pos[1] - pair[0].pos[1]) ** 2,
             )
             return StrategyDecision(
-                direction=vector_from_to(origin, target.pos),
+                direction=vector_from_to(origin_blob.pos, target.pos),
                 target_kind="food",
                 target_id=str(target.food_id),
                 reason="nearest_food",

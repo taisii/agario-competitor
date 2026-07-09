@@ -19,7 +19,7 @@ import random
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-# Current public constants from agario-kit 2026.1.11.  Keep local fallbacks so
+# Current public constants from agario-kit 2026.1.12. Keep local fallbacks so
 # the bot can still import if config module names change during the competition.
 try:  # pragma: no cover - depends on contest package
     from lib.config.arena import ARENA_SIZE, MAX_BLOB_COUNT, MAX_ROUNDS
@@ -28,12 +28,15 @@ try:  # pragma: no cover - depends on contest package
         EAT_SIZE_RATIO,
         FOOD_RADIUS,
         MASS_DECAY_RATE,
+        MERGE_ATTRACTION_SPEED,
         MIN_PLAYER_SPEED,
         PLAYER_SPEED_RADIUS_FACTOR,
+        SAME_PLAYER_OVERLAP_EPSILON,
         SPLIT_COOLDOWN_FRAMES,
         SPLIT_EJECT_DRAG,
         SPLIT_EJECT_SPEED,
         SPLIT_MIN_MASS,
+        STARTING_RADIUS,
     )
 except Exception:  # pragma: no cover - local testing fallback
     ARENA_SIZE = 60.0
@@ -43,12 +46,15 @@ except Exception:  # pragma: no cover - local testing fallback
     EAT_SIZE_RATIO = 1.2
     FOOD_RADIUS = 0.15
     MASS_DECAY_RATE = 0.002
+    MERGE_ATTRACTION_SPEED = 0.08
     MIN_PLAYER_SPEED = 0.25
     PLAYER_SPEED_RADIUS_FACTOR = 0.08
+    SAME_PLAYER_OVERLAP_EPSILON = 0.0001
     SPLIT_COOLDOWN_FRAMES = 18
     SPLIT_EJECT_SPEED = 1.6
     SPLIT_EJECT_DRAG = 0.82
     SPLIT_MIN_MASS = 2.0
+    STARTING_RADIUS = 0.9
 
 EPS = 1e-9
 TAU = 2.0 * pi
@@ -101,6 +107,8 @@ class BlobState:
     radius: float
     merge_cooldown: int = 0
     is_self: bool = False
+    eject_vx: float = 0.0
+    eject_vy: float = 0.0
 
     @property
     def mass(self) -> float:
@@ -353,11 +361,16 @@ def squared_distance(a: Vec2, b: Vec2) -> float:
 
 
 def can_eat(my_radius: float, enemy_radius: float, margin: float = 1.0) -> bool:
-    return my_radius >= enemy_radius * EAT_SIZE_RATIO * margin
+    return my_radius * my_radius >= (
+        enemy_radius * enemy_radius * EAT_SIZE_RATIO * margin * margin
+    )
 
 
 def is_threat(my_radius: float, enemy_radius: float, margin: float = 1.0) -> bool:
-    return enemy_radius >= my_radius * EAT_SIZE_RATIO / max(margin, EPS)
+    safe_margin = max(margin, EPS)
+    return enemy_radius * enemy_radius >= (
+        my_radius * my_radius * EAT_SIZE_RATIO / (safe_margin * safe_margin)
+    )
 
 
 def speed_for_radius(radius: float) -> float:
@@ -506,28 +519,41 @@ def food_score_along_direction(
 
 
 def classify_enemies(state: WorldState, config: StrategyConfig) -> tuple[list[BlobState], list[BlobState], list[BlobState]]:
-    my_radius = state.largest_blob.radius
     threats: list[BlobState] = []
     prey: list[BlobState] = []
     neutral: list[BlobState] = []
     for enemy in state.enemies:
-        if is_threat(my_radius, enemy.radius, config.threat_margin):
+        if any(
+            is_threat(blob.radius, enemy.radius, config.threat_margin)
+            for blob in state.self_blobs
+        ):
             threats.append(enemy)
-        elif can_eat(my_radius, enemy.radius, config.prey_margin):
+        elif any(
+            can_eat(blob.radius, enemy.radius, config.prey_margin)
+            for blob in state.self_blobs
+        ):
             prey.append(enemy)
         else:
             neutral.append(enemy)
     return threats, prey, neutral
 
 
-def combined_escape_vector(state: WorldState, threats: Sequence[BlobState]) -> Vec2:
-    center = state.center
+def combined_escape_vector(
+    state: WorldState,
+    threats: Sequence[BlobState],
+    config: StrategyConfig,
+) -> Vec2:
     vec = Vec2(0.0, 0.0)
-    for t in threats:
-        rel = t.pos - center
-        d2 = max(rel.norm2(), 0.08)
-        # Weight larger and closer threats more.  The vector points away.
-        vec = vec + (rel * (-(t.radius * t.radius + 0.4) / d2))
+    for threat in threats:
+        for own in state.self_blobs:
+            if not is_threat(own.radius, threat.radius, config.threat_margin):
+                continue
+            rel = threat.pos - own.pos
+            d2 = max(rel.norm2(), 0.08)
+            # Weight larger and closer threats more. The vector points away
+            # from the fragment that is actually vulnerable.
+            weight = own.mass * (threat.radius * threat.radius + 0.4) / d2
+            vec = vec + rel * -weight
     return vec
 
 
@@ -556,15 +582,16 @@ def wall_escape_vector(state: WorldState) -> Vec2:
 def virus_escape_vector(state: WorldState) -> Vec2:
     if not state.viruses:
         return Vec2(0.0, 0.0)
-    center = state.center
-    largest = state.largest_blob
     vec = Vec2(0.0, 0.0)
-    for virus in state.viruses:
-        rel = virus.pos - center
-        d = max(rel.norm(), EPS)
-        danger_radius = largest.radius + virus.radius + 1.5
-        if d < danger_radius:
-            vec = vec + rel * (-(danger_radius - d) / (danger_radius * d))
+    for blob in state.self_blobs:
+        for virus in state.viruses:
+            if blob.mass <= virus.radius * virus.radius * EAT_SIZE_RATIO:
+                continue
+            rel = virus.pos - blob.pos
+            d = max(rel.norm(), EPS)
+            danger_radius = blob.radius + virus.radius + 1.5
+            if d < danger_radius:
+                vec = vec + rel * (-(danger_radius - d) / (danger_radius * d))
     return vec
 
 
@@ -594,21 +621,30 @@ def split_is_legal(state: WorldState) -> bool:
 def split_can_hit_prey(state: WorldState, action: Action, config: StrategyConfig) -> bool:
     if not config.allow_split or not split_is_legal(state):
         return False
-    largest = state.largest_blob
-    split_radius = largest.radius / sqrt(2.0)
-    min_target_radius = split_radius / max(EAT_SIZE_RATIO * config.prey_margin, EPS)
     direction = action.vec
-    reach = largest.radius + SPLIT_EJECT_SPEED * config.split_reach_bonus + split_radius
-    for enemy in state.enemies:
-        if enemy.radius > min_target_radius:
-            continue
-        rel = enemy.pos - largest.pos
-        forward = rel.x * direction.x + rel.y * direction.y
-        if forward < -0.1 or forward > reach:
-            continue
-        lateral2 = max(0.0, rel.norm2() - forward * forward)
-        if lateral2 <= (split_radius + 0.25) ** 2:
-            return True
+    eligible = [blob for blob in state.self_blobs if blob.mass >= SPLIT_MIN_MASS]
+    for blob in eligible:
+        split_radius = blob.radius / sqrt(2.0)
+        min_target_radius = split_radius / (
+            sqrt(EAT_SIZE_RATIO) * max(config.prey_margin, EPS)
+        )
+        # Initial child offset + this round's movement/ejection + its eating
+        # radius. This is the engine's exact one-round center-distance reach.
+        reach = (
+            3.0 * split_radius
+            + SPLIT_EJECT_SPEED
+            + speed_for_radius(split_radius) * PLANNING_DT
+        )
+        for enemy in state.enemies:
+            if enemy.radius > min_target_radius:
+                continue
+            rel = enemy.pos - blob.pos
+            forward = rel.x * direction.x + rel.y * direction.y
+            if forward < -0.1 or forward > reach:
+                continue
+            lateral2 = max(0.0, rel.norm2() - forward * forward)
+            if lateral2 <= split_radius * split_radius:
+                return True
     return False
 
 
@@ -625,7 +661,7 @@ def generate_actions(state: WorldState, config: StrategyConfig) -> list[Action]:
         grid_actions.append(Action.from_vec(Vec2.from_angle(angle), False, "grid"))
 
     threats, prey, _neutral = classify_enemies(state, config)
-    escape = combined_escape_vector(state, threats)
+    escape = combined_escape_vector(state, threats, config)
     if escape.norm2() > EPS:
         actions.append(Action.from_vec(escape, False, "escape"))
         wall_vec = wall_escape_vector(state)
@@ -654,10 +690,25 @@ def generate_actions(state: WorldState, config: StrategyConfig) -> list[Action]:
         actions.append(Action.from_vec(nearest_food.pos - center, False, "nearest_food"))
 
     if prey:
-        ranked_prey = sorted(prey, key=lambda b: squared_distance(center, b.pos))
+        def prey_origin(enemy: BlobState) -> BlobState:
+            capable = [
+                blob
+                for blob in state.self_blobs
+                if can_eat(blob.radius, enemy.radius, config.prey_margin)
+            ]
+            return min(
+                capable,
+                key=lambda blob: squared_distance(blob.pos, enemy.pos),
+            )
+
+        ranked_prey = sorted(
+            prey,
+            key=lambda enemy: squared_distance(prey_origin(enemy).pos, enemy.pos),
+        )
         for enemy in ranked_prey[:6]:
-            if (enemy.pos - center).norm() <= config.prey_chase_max_distance:
-                base = Action.from_vec(enemy.pos - center, False, "prey")
+            origin = prey_origin(enemy)
+            if (enemy.pos - origin.pos).norm() <= config.prey_chase_max_distance:
+                base = Action.from_vec(enemy.pos - origin.pos, False, "prey")
                 actions.append(base)
                 if split_can_hit_prey(state, base, config):
                     actions.append(Action(base.dx, base.dy, True, "split_prey"))
@@ -683,140 +734,303 @@ def generate_actions(state: WorldState, config: StrategyConfig) -> list[Action]:
 
 def _move_blob(blob: BlobState, direction: Vec2, arena_size: float) -> BlobState:
     step = speed_for_radius(blob.radius) * PLANNING_DT
-    new_pos = blob.pos + direction * step
+    new_pos = blob.pos + direction * step + Vec2(blob.eject_vx, blob.eject_vy)
     r = blob.radius
     new_pos = Vec2(clamp(new_pos.x, r, arena_size - r), clamp(new_pos.y, r, arena_size - r))
-    return replace(blob, pos=new_pos, merge_cooldown=max(0, blob.merge_cooldown - 1))
+    eject_vx = blob.eject_vx * SPLIT_EJECT_DRAG
+    eject_vy = blob.eject_vy * SPLIT_EJECT_DRAG
+    return replace(
+        blob,
+        pos=new_pos,
+        merge_cooldown=max(0, blob.merge_cooldown - 1),
+        eject_vx=0.0 if abs(eject_vx) < 1e-4 else eject_vx,
+        eject_vy=0.0 if abs(eject_vy) < 1e-4 else eject_vy,
+    )
 
 
 def _apply_mass_decay(radius: float) -> float:
     mass = radius * radius
-    return sqrt(max(0.01, mass * (1.0 - MASS_DECAY_RATE)))
+    minimum_mass = STARTING_RADIUS * STARTING_RADIUS
+    if mass <= minimum_mass:
+        return radius
+    return sqrt(max(minimum_mass, mass * (1.0 - MASS_DECAY_RATE)))
 
 
 def _merge_self_blobs(blobs: list[BlobState], arena_size: float) -> list[BlobState]:
-    # Approximate automatic merge after cooldown.  Engine details may differ, but
-    # this makes multi-step planning less pessimistic after safe splitting.
+    if len(blobs) <= 1:
+        return blobs
+
+    # Match the engine's mass-weighted attraction before checking whether
+    # cooldown-free fragments touch and merge.
+    total_mass = sum(blob.mass for blob in blobs)
+    center = Vec2(
+        sum(blob.pos.x * blob.mass for blob in blobs) / total_mass,
+        sum(blob.pos.y * blob.mass for blob in blobs) / total_mass,
+    )
+    attracted: list[BlobState] = []
+    for blob in blobs:
+        delta = center - blob.pos
+        distance = delta.norm()
+        if distance <= EPS:
+            attracted.append(blob)
+            continue
+        step = min(MERGE_ATTRACTION_SPEED, distance)
+        pos = blob.pos + delta * (step / distance)
+        pos = Vec2(
+            clamp(pos.x, blob.radius, arena_size - blob.radius),
+            clamp(pos.y, blob.radius, arena_size - blob.radius),
+        )
+        attracted.append(replace(blob, pos=pos))
+    blobs = attracted
+
     changed = True
     while changed:
         changed = False
-        out: list[BlobState] = []
-        used = [False] * len(blobs)
-        for i, a in enumerate(blobs):
-            if used[i]:
-                continue
-            merged = a
-            used[i] = True
-            for j in range(i + 1, len(blobs)):
-                b = blobs[j]
-                if used[j] or merged.merge_cooldown > 0 or b.merge_cooldown > 0:
+        ordered = sorted(blobs, key=lambda blob: blob.blob_id)
+        for index, blob_a in enumerate(ordered):
+            for blob_b in ordered[index + 1 :]:
+                if blob_a.merge_cooldown > 0 or blob_b.merge_cooldown > 0:
                     continue
-                if (merged.pos - b.pos).norm() <= max(merged.radius, b.radius) * 0.65:
-                    mass = merged.mass + b.mass
-                    pos = (merged.pos * merged.mass + b.pos * b.mass) * (1.0 / mass)
-                    r = sqrt(mass)
-                    pos = Vec2(clamp(pos.x, r, arena_size - r), clamp(pos.y, r, arena_size - r))
-                    merged = BlobState(merged.player_id, merged.blob_id, pos, r, 0, True)
-                    used[j] = True
-                    changed = True
-            out.append(merged)
-        blobs = out
+                if (
+                    (blob_a.pos - blob_b.pos).norm()
+                    > blob_a.radius + blob_b.radius + SAME_PLAYER_OVERLAP_EPSILON
+                ):
+                    continue
+                survivor, consumed = sorted(
+                    (blob_a, blob_b),
+                    key=lambda blob: (-blob.mass, blob.blob_id),
+                )
+                mass = survivor.mass + consumed.mass
+                radius = sqrt(mass)
+                pos = (
+                    survivor.pos * survivor.mass + consumed.pos * consumed.mass
+                ) * (1.0 / mass)
+                pos = Vec2(
+                    clamp(pos.x, radius, arena_size - radius),
+                    clamp(pos.y, radius, arena_size - radius),
+                )
+                merged = replace(
+                    survivor,
+                    pos=pos,
+                    radius=radius,
+                    merge_cooldown=0,
+                    eject_vx=(
+                        survivor.eject_vx * survivor.mass
+                        + consumed.eject_vx * consumed.mass
+                    )
+                    / mass,
+                    eject_vy=(
+                        survivor.eject_vy * survivor.mass
+                        + consumed.eject_vy * consumed.mass
+                    )
+                    / mass,
+                )
+                blobs = [
+                    blob
+                    for blob in blobs
+                    if blob.blob_id not in {survivor.blob_id, consumed.blob_id}
+                ]
+                blobs.append(merged)
+                changed = True
+                break
+            if changed:
+                break
     return blobs
 
 
-def _split_largest_blob(blobs: list[BlobState], action: Action, arena_size: float) -> list[BlobState]:
+def _split_blobs(blobs: list[BlobState], action: Action, arena_size: float) -> list[BlobState]:
     if len(blobs) >= MAX_BLOB_COUNT:
         return blobs
-    largest_index = max(range(len(blobs)), key=lambda i: blobs[i].radius)
-    b = blobs[largest_index]
-    if b.mass < SPLIT_MIN_MASS:
-        return blobs
     direction = action.vec
-    new_radius = b.radius / sqrt(2.0)
-    back_pos = b.pos - direction * min(0.15 * b.radius, 0.4)
-    front_pos = b.pos + direction * (new_radius + SPLIT_EJECT_SPEED * 0.9)
-    back_pos = Vec2(clamp(back_pos.x, new_radius, arena_size - new_radius), clamp(back_pos.y, new_radius, arena_size - new_radius))
-    front_pos = Vec2(clamp(front_pos.x, new_radius, arena_size - new_radius), clamp(front_pos.y, new_radius, arena_size - new_radius))
-    base_id = max((blob.blob_id for blob in blobs), default=0) + 1
-    blobs[largest_index] = BlobState(b.player_id, b.blob_id, back_pos, new_radius, SPLIT_COOLDOWN_FRAMES, True)
-    blobs.append(BlobState(b.player_id, base_id, front_pos, new_radius, SPLIT_COOLDOWN_FRAMES, True))
-    return blobs
+    starting_ids = [blob.blob_id for blob in sorted(blobs, key=lambda blob: blob.blob_id)]
+    next_id = max(starting_ids, default=-1) + 1
+    by_id = {blob.blob_id: blob for blob in blobs}
+    for blob_id in starting_ids:
+        if len(by_id) >= MAX_BLOB_COUNT:
+            break
+        blob = by_id[blob_id]
+        if blob.mass < SPLIT_MIN_MASS:
+            continue
+        child_radius = blob.radius / sqrt(2.0)
+        parent = replace(
+            blob,
+            radius=child_radius,
+            merge_cooldown=SPLIT_COOLDOWN_FRAMES,
+        )
+        child_pos = blob.pos + direction * (
+            2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON
+        )
+        child_pos = Vec2(
+            clamp(child_pos.x, child_radius, arena_size - child_radius),
+            clamp(child_pos.y, child_radius, arena_size - child_radius),
+        )
+        child = BlobState(
+            player_id=blob.player_id,
+            blob_id=next_id,
+            pos=child_pos,
+            radius=child_radius,
+            merge_cooldown=SPLIT_COOLDOWN_FRAMES,
+            is_self=True,
+            eject_vx=direction.x * SPLIT_EJECT_SPEED,
+            eject_vy=direction.y * SPLIT_EJECT_SPEED,
+        )
+        by_id[blob_id] = parent
+        by_id[next_id] = child
+        next_id += 1
+    return list(by_id.values())
 
 
 def _predict_enemies(state: WorldState, config: StrategyConfig) -> tuple[BlobState, ...]:
-    center = state.center
     next_enemies: list[BlobState] = []
-    largest_radius = state.largest_blob.radius
     for enemy in state.enemies:
         direction = Vec2(0.0, 0.0)
-        if is_threat(largest_radius, enemy.radius, config.threat_margin):
-            direction = (center - enemy.pos).normalized() * config.predicted_enemy_aggression
-        elif can_eat(largest_radius, enemy.radius, config.prey_margin):
+        vulnerable = [
+            blob
+            for blob in state.self_blobs
+            if is_threat(blob.radius, enemy.radius, config.threat_margin)
+        ]
+        hunters = [
+            blob
+            for blob in state.self_blobs
+            if can_eat(blob.radius, enemy.radius, config.prey_margin)
+        ]
+        if vulnerable:
+            target = min(vulnerable, key=lambda blob: squared_distance(enemy.pos, blob.pos))
+            direction = (target.pos - enemy.pos).normalized() * config.predicted_enemy_aggression
+        elif hunters:
             # Prey tends to run away from us.
-            direction = (enemy.pos - center).normalized() * config.predicted_prey_escape
+            hunter = min(hunters, key=lambda blob: squared_distance(enemy.pos, blob.pos))
+            direction = (enemy.pos - hunter.pos).normalized() * config.predicted_prey_escape
         else:
             # Neutral players weakly drift toward nearby visible food.
             close_food = nearest(state.food, enemy.pos)
             if close_food is not None:
                 direction = (close_food.pos - enemy.pos).normalized() * 0.25
-        moved = _move_blob(enemy, direction.normalized() if direction.norm2() > EPS else Vec2(0.0, 0.0), state.arena_size)
-        next_enemies.append(moved)
+        # Preserve the configured partial-speed prediction. Re-normalising here
+        # used to erase all three aggression/escape/drift multipliers.
+        moved = _move_blob(enemy, direction, state.arena_size)
+        next_enemies.append(replace(moved, radius=_apply_mass_decay(moved.radius)))
     return tuple(next_enemies)
+
+
+def _resolve_food(
+    blobs: list[BlobState],
+    enemies: list[BlobState],
+    food: tuple[FoodState, ...],
+) -> tuple[list[BlobState], list[BlobState], list[FoodState], float]:
+    by_key = {
+        (blob.player_id, blob.blob_id): blob
+        for blob in (*blobs, *enemies)
+    }
+    remaining_food: list[FoodState] = []
+    food_gain_mass = 0.0
+    for item in food:
+        candidates = [
+            blob
+            for blob in by_key.values()
+            if squared_distance(blob.pos, item.pos) <= blob.radius * blob.radius
+        ]
+        if not candidates:
+            remaining_food.append(item)
+            continue
+        eater = min(
+            candidates,
+            key=lambda blob: (-blob.radius, blob.player_id, blob.blob_id),
+        )
+        gain = FOOD_RADIUS * FOOD_RADIUS
+        by_key[(eater.player_id, eater.blob_id)] = replace(
+            eater,
+            radius=sqrt(eater.mass + gain),
+        )
+        if eater.is_self:
+            food_gain_mass += gain
+
+    return (
+        [blob for blob in by_key.values() if blob.is_self],
+        [blob for blob in by_key.values() if not blob.is_self],
+        remaining_food,
+        food_gain_mass,
+    )
+
+
+def _resolve_player_eating(
+    blobs: list[BlobState],
+    enemies: list[BlobState],
+) -> tuple[list[BlobState], list[BlobState], float, int]:
+    by_key = {
+        (blob.player_id, blob.blob_id): blob
+        for blob in (*blobs, *enemies)
+    }
+    prey_gain_mass = 0.0
+    lost_blob_count = 0
+
+    changed = True
+    while changed:
+        changed = False
+        living = sorted(
+            by_key,
+            key=lambda key: (
+                -by_key[key].radius,
+                by_key[key].player_id,
+                by_key[key].blob_id,
+            ),
+        )
+        for eater_key in living:
+            eater = by_key.get(eater_key)
+            if eater is None:
+                continue
+            for target_key in living:
+                target = by_key.get(target_key)
+                if target is None or target.player_id == eater.player_id:
+                    continue
+                if not can_eat(eater.radius, target.radius):
+                    continue
+                if squared_distance(eater.pos, target.pos) > eater.radius * eater.radius:
+                    continue
+                by_key[eater_key] = replace(
+                    eater,
+                    radius=sqrt(eater.mass + target.mass),
+                )
+                del by_key[target_key]
+                if eater.is_self and not target.is_self:
+                    prey_gain_mass += target.mass
+                elif target.is_self and not eater.is_self:
+                    lost_blob_count += 1
+                changed = True
+                break
+            if changed:
+                break
+
+    return (
+        [blob for blob in by_key.values() if blob.is_self],
+        [blob for blob in by_key.values() if not blob.is_self],
+        prey_gain_mass,
+        lost_blob_count,
+    )
 
 
 def simulate_step(state: WorldState, action: Action, config: StrategyConfig) -> tuple[WorldState, dict[str, float]]:
     direction = action.vec
-    blobs = [_move_blob(b, direction, state.arena_size) for b in state.self_blobs]
+    blobs = list(state.self_blobs)
     if action.split:
-        blobs = _split_largest_blob(blobs, action, state.arena_size)
-
-    # Eat food.
-    remaining_food: list[FoodState] = []
-    food_gain_mass = 0.0
-    for item in state.food:
-        eaten_by: int | None = None
-        for i, blob in enumerate(blobs):
-            if squared_distance(blob.pos, item.pos) <= (blob.radius + FOOD_RADIUS) ** 2:
-                eaten_by = i
-                break
-        if eaten_by is None:
-            remaining_food.append(item)
-        else:
-            b = blobs[eaten_by]
-            gain = FOOD_RADIUS * FOOD_RADIUS
-            food_gain_mass += gain
-            blobs[eaten_by] = replace(b, radius=sqrt(b.mass + gain))
+        blobs = _split_blobs(blobs, action, state.arena_size)
+    blobs = [_move_blob(b, direction, state.arena_size) for b in blobs]
+    # The engine decays mass before resolving food and player collisions.
+    blobs = [replace(b, radius=_apply_mass_decay(b.radius)) for b in blobs]
+    blobs = _merge_self_blobs(blobs, state.arena_size)
 
     enemies = list(_predict_enemies(state, config))
+    blobs, enemies, remaining_food, food_gain_mass = _resolve_food(
+        blobs,
+        enemies,
+        state.food,
+    )
+    blobs, enemies, prey_gain_mass, lost_blob_count = _resolve_player_eating(
+        blobs,
+        enemies,
+    )
 
-    # Resolve player eating approximately.  Larger blob center must contain smaller center.
-    prey_gain_mass = 0.0
-    eaten_enemy_indices: set[int] = set()
-    eaten_self_indices: set[int] = set()
-    for i, my_blob in enumerate(list(blobs)):
-        if i in eaten_self_indices:
-            continue
-        for j, enemy in enumerate(enemies):
-            if j in eaten_enemy_indices:
-                continue
-            d = (my_blob.pos - enemy.pos).norm()
-            if can_eat(my_blob.radius, enemy.radius) and d <= my_blob.radius:
-                eaten_enemy_indices.add(j)
-                prey_gain_mass += enemy.mass
-                blobs[i] = replace(my_blob, radius=sqrt(my_blob.mass + enemy.mass))
-                my_blob = blobs[i]
-            elif can_eat(enemy.radius, my_blob.radius) and d <= enemy.radius:
-                eaten_self_indices.add(i)
-                break
-
-    if eaten_enemy_indices:
-        enemies = [e for j, e in enumerate(enemies) if j not in eaten_enemy_indices]
-    if eaten_self_indices:
-        blobs = [b for i, b in enumerate(blobs) if i not in eaten_self_indices]
-
-    # Decay and merge.
-    decayed_blobs = [replace(b, radius=_apply_mass_decay(b.radius)) for b in blobs]
-    decayed_blobs = _merge_self_blobs(decayed_blobs, state.arena_size)
+    decayed_blobs = _merge_self_blobs(blobs, state.arena_size)
 
     alive = bool(decayed_blobs) and state.alive
     next_state = WorldState(
@@ -834,7 +1048,7 @@ def simulate_step(state: WorldState, action: Action, config: StrategyConfig) -> 
     info = {
         "food_gain_mass": food_gain_mass,
         "prey_gain_mass": prey_gain_mass,
-        "lost_blob_count": float(len(eaten_self_indices)),
+        "lost_blob_count": float(lost_blob_count),
         "split_used": 1.0 if action.split else 0.0,
     }
     return next_state, info
@@ -865,6 +1079,8 @@ def virus_risk(state: WorldState) -> float:
     risk = 0.0
     for blob in state.self_blobs:
         for virus in state.viruses:
+            if blob.mass <= virus.radius * virus.radius * EAT_SIZE_RATIO:
+                continue
             dist = (virus.pos - blob.pos).norm()
             margin = blob.radius + virus.radius + 0.5
             if dist < margin:
@@ -900,15 +1116,23 @@ def split_risk(state: WorldState, action: Action, config: StrategyConfig) -> flo
 
 
 def prey_opportunity(state: WorldState, config: StrategyConfig) -> float:
-    largest = state.largest_blob
     value = 0.0
     for enemy in state.enemies:
-        if not can_eat(largest.radius, enemy.radius, config.prey_margin):
+        capable = [
+            blob
+            for blob in state.self_blobs
+            if can_eat(blob.radius, enemy.radius, config.prey_margin)
+        ]
+        if not capable:
             continue
-        dist = (enemy.pos - largest.pos).norm()
-        if dist > config.prey_chase_max_distance + largest.radius:
+        hunter = min(
+            capable,
+            key=lambda blob: squared_distance(blob.pos, enemy.pos),
+        )
+        dist = (enemy.pos - hunter.pos).norm()
+        if dist > config.prey_chase_max_distance + hunter.radius:
             continue
-        value += enemy.mass / (1.0 + max(0.0, dist - largest.radius))
+        value += enemy.mass / (1.0 + max(0.0, dist - hunter.radius))
     return value
 
 

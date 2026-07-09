@@ -10,12 +10,13 @@ from lib.config.player import (
     EAT_SIZE_RATIO,
     MIN_PLAYER_SPEED,
     PLAYER_SPEED_RADIUS_FACTOR,
+    SPLIT_EJECT_SPEED,
     SPLIT_MIN_MASS,
 )
 from lib.models.blob_model import BlobModel, VisibleBlobModel
 from lib.models.virus_model import VirusModel
 from strategies.base import StrategyContext, StrategyDecision
-from strategies.features import normalise, squared_distance
+from strategies.features import can_eat_player_blob, normalise, squared_distance
 
 
 SQRT2 = math.sqrt(2.0)
@@ -176,12 +177,12 @@ class PotentialHunterStrategy:
         max_level = 0.0
         for own in own_blobs:
             for enemy in enemies:
-                if enemy.radius < own.radius * EAT_SIZE_RATIO:
+                if not can_eat_player_blob(enemy.radius, own.radius):
                     continue
                 distance = math.dist(own.pos, enemy.pos)
                 split_capable = (
                     _mass(enemy.radius) >= SPLIT_MIN_MASS
-                    and enemy.radius / SQRT2 >= own.radius * EAT_SIZE_RATIO
+                    and can_eat_player_blob(enemy.radius / SQRT2, own.radius)
                 )
                 reach = enemy.radius + _speed(enemy.radius) * 4.0 + 1.2
                 if split_capable:
@@ -274,9 +275,9 @@ class PotentialHunterStrategy:
         y = 0.0
         count = 0
         for enemy in enemies:
-            if primary.radius >= enemy.radius * EAT_SIZE_RATIO:
+            if can_eat_player_blob(primary.radius, enemy.radius):
                 continue
-            if enemy.radius >= primary.radius * EAT_SIZE_RATIO:
+            if can_eat_player_blob(enemy.radius, primary.radius):
                 continue
             reach = primary.radius + enemy.radius + 8.0
             distance = math.dist(primary.pos, enemy.pos)
@@ -301,7 +302,9 @@ class PotentialHunterStrategy:
         early: bool,
     ) -> PreyPlan | None:
         eatable = [
-            enemy for enemy in enemies if primary.radius >= enemy.radius * EAT_SIZE_RATIO
+            enemy
+            for enemy in enemies
+            if can_eat_player_blob(primary.radius, enemy.radius)
         ]
         if not eatable:
             return None
@@ -313,11 +316,15 @@ class PotentialHunterStrategy:
             distance = math.dist(primary.pos, enemy.pos)
             split_kill = (
                 _mass(primary.radius) >= split_min_mass
-                and primary.radius / SQRT2 >= enemy.radius * EAT_SIZE_RATIO
-                and distance <= primary.radius + 6.5
+                and can_eat_player_blob(primary.radius / SQRT2, enemy.radius)
+                and distance <= _split_capture_reach(primary.radius)
                 and own_blob_count < MAX_BLOB_COUNT
             )
-            walkable = primary.radius >= enemy.radius * EAT_SIZE_RATIO * chase_margin
+            walkable = can_eat_player_blob(
+                primary.radius,
+                enemy.radius,
+                radius_margin=chase_margin,
+            )
             if not split_kill and not walkable:
                 continue
 
@@ -418,6 +425,13 @@ def _speed(radius: float) -> float:
 
 def _mass(radius: float) -> float:
     return radius * radius
+
+
+def _split_capture_reach(radius: float) -> float:
+    """Maximum one-round center distance for a directly aimed split capture."""
+
+    child_radius = radius / SQRT2
+    return 3.0 * child_radius + SPLIT_EJECT_SPEED + _speed(child_radius)
 
 
 def _can_consume_virus(blob_radius: float, virus_radius: float) -> bool:

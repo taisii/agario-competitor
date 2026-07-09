@@ -4,13 +4,14 @@ from __future__ import annotations
 
 The strategy deliberately separates prediction from evaluation:
 
-* public MovePlayer events provide an opponent's most recent direction;
-* predators are still rolled forward adversarially, so a stale direction never
-  makes an unsafe line look safe;
+* opponent movement events are optional because current competition payloads
+  censor them;
+* predators are rolled forward adversarially when no public direction exists,
+  so censored or stale movement never makes an unsafe line look safe;
 * own movement, splitting, eject velocity, decay, food, and eating follow the
   engine's update order closely;
-* every first action competes in the beam before locally-steered continuations
-  are explored.
+* semantic actions are ordered by safety and usefulness, allowing the search
+  to return its best completed root candidate when the time budget expires.
 
 Only standard-library code and public agario-kit models are used at runtime.
 """
@@ -18,6 +19,7 @@ Only standard-library code and public agario-kit models are used at runtime.
 import math
 import os
 from dataclasses import dataclass, field, replace
+from time import perf_counter
 
 from lib.config.arena import ARENA_SIZE, MAX_BLOB_COUNT
 from lib.config.player import (
@@ -39,7 +41,7 @@ from lib.interface.events.moves.move_player import MovePlayer
 from lib.models.food_model import FoodModel
 from lib.models.virus_model import VirusModel
 from strategies.base import StrategyContext, StrategyDecision
-from strategies.features import normalise, squared_distance
+from strategies.features import can_eat_player_blob, normalise, squared_distance
 
 
 SQRT2 = math.sqrt(2.0)
@@ -171,11 +173,42 @@ class ChampionStrategy:
         )
         self.max_food = int(os.environ.get("BOT_CHAMPION_MAX_FOOD", "24"))
         self.max_enemies = int(os.environ.get("BOT_CHAMPION_MAX_ENEMIES", "12"))
+        # The engine's eight-second cumulative limit includes pipe I/O, model
+        # validation, and state updates outside this strategy. Reserve nearly
+        # half of it for that runtime overhead instead of spending it on search.
+        self.compute_budget_seconds = float(os.environ.get("BOT_CHAMPION_TOTAL_BUDGET_SECONDS", "4.2"))
+        self.max_turn_seconds = float(os.environ.get("BOT_CHAMPION_MAX_TURN_SECONDS", "0.003"))
+        self.min_search_seconds = float(os.environ.get("BOT_CHAMPION_MIN_SEARCH_SECONDS", "0.00075"))
+        self.compute_spent_seconds = 0.0
         self.previous_direction: tuple[float, float] = (1.0, 0.0)
         self.last_moves: dict[int, tuple[tuple[float, float], bool]] = {}
         self.enemy_tracks: dict[tuple[int, int], EnemyTrack] = {}
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
+        started_at = perf_counter()
+        state = context.game.state
+        turn_budget = self._turn_budget_seconds(
+            round_number=int(state.round),
+            max_rounds=int(state.max_rounds),
+        )
+        try:
+            if turn_budget < self.min_search_seconds:
+                return self._time_budget_fallback(context)
+            return self._choose(
+                context,
+                deadline=started_at + turn_budget,
+                turn_budget=turn_budget,
+            )
+        finally:
+            self.compute_spent_seconds += perf_counter() - started_at
+
+    def _choose(
+        self,
+        context: StrategyContext,
+        *,
+        deadline: float,
+        turn_budget: float,
+    ) -> StrategyDecision:
         state = context.game.state
         own_blobs = tuple(
             OwnBlob(
@@ -231,8 +264,11 @@ class ChampionStrategy:
         beam = [start]
         best_rejected: SearchNode | None = None
         reached_depth = 0
+        search_timed_out = False
         for depth_index in range(max(1, self.depth)):
             candidates: list[SearchNode] = []
+            depth_timed_out = False
+            evaluated_actions = 0
             for node in beam:
                 actions = self._candidate_actions(
                     node=node,
@@ -242,8 +278,15 @@ class ChampionStrategy:
                     arena_size=arena_size,
                     first_step=depth_index == 0,
                     allow_split=not (progress >= 0.78 and rank_position <= 2),
+                    angle_offset=round_number,
                 )
                 for action in actions:
+                    # Evaluate at least one action at each depth, then stop at
+                    # the deadline. Root actions are safety-first, so a partial
+                    # root remains useful; partial deeper layers are discarded.
+                    if evaluated_actions and perf_counter() >= deadline:
+                        depth_timed_out = True
+                        break
                     result = self._step(
                         node=node,
                         action=action,
@@ -254,16 +297,28 @@ class ChampionStrategy:
                         safety_weight=safety_weight,
                         aggression=aggression,
                     )
+                    evaluated_actions += 1
                     if result.fatal:
                         if best_rejected is None or result.node.score > best_rejected.score:
                             best_rejected = result.node
                         continue
                     candidates.append(result.node)
+                if depth_timed_out:
+                    break
 
+            if depth_timed_out:
+                search_timed_out = True
+                if depth_index == 0 and candidates:
+                    beam = self._prune(candidates)
+                    reached_depth = 1
+                break
             if not candidates:
                 break
             beam = self._prune(candidates)
             reached_depth = depth_index + 1
+            if perf_counter() >= deadline:
+                search_timed_out = True
+                break
 
         if beam and reached_depth:
             best = max(beam, key=self._terminal_score)
@@ -294,6 +349,57 @@ class ChampionStrategy:
                 "projected_captures": best.projected_captures,
                 "projected_blob_count": len(best.own_blobs),
                 "min_safety_margin": best.min_safety_margin,
+                "search_timed_out": search_timed_out,
+                "turn_budget_ms": round(turn_budget * 1000.0, 3),
+                "compute_spent_ms": round(self.compute_spent_seconds * 1000.0, 3),
+            },
+        )
+
+    def _turn_budget_seconds(self, *, round_number: int, max_rounds: int) -> float:
+        remaining_budget = max(0.0, self.compute_budget_seconds - self.compute_spent_seconds)
+        remaining_rounds = max(1, max_rounds - round_number)
+        return min(self.max_turn_seconds, remaining_budget / remaining_rounds)
+
+    def _time_budget_fallback(self, context: StrategyContext) -> StrategyDecision:
+        """Return a cheap visible-state action after the search bank is spent."""
+
+        state = context.game.state
+        own_blobs = tuple(state.me.blobs.values())
+        if not own_blobs:
+            return StrategyDecision(direction=self.previous_direction, reason="time_bank_dead")
+
+        away_x = 0.0
+        away_y = 0.0
+        for enemy in state.visible_blobs:
+            if not any(
+                can_eat_player_blob(enemy.radius, own.radius)
+                for own in own_blobs
+            ):
+                continue
+            nearest = min(own_blobs, key=lambda own: squared_distance(own.pos, enemy.pos))
+            distance = max(math.dist(nearest.pos, enemy.pos), 0.25)
+            away_x += (nearest.pos[0] - enemy.pos[0]) * enemy.radius / (distance * distance)
+            away_y += (nearest.pos[1] - enemy.pos[1]) * enemy.radius / (distance * distance)
+
+        direction = normalise((away_x, away_y))
+        reason = "time_bank_escape"
+        if direction == (0.0, 0.0) and state.visible_food:
+            center = (state.me.x, state.me.y)
+            food = min(state.visible_food, key=lambda item: squared_distance(center, item.pos))
+            direction = normalise((food.pos[0] - center[0], food.pos[1] - center[1]))
+            reason = "time_bank_food"
+        if direction == (0.0, 0.0):
+            direction = self.previous_direction
+            reason = "time_bank_keep"
+
+        self.previous_direction = direction
+        return StrategyDecision(
+            direction=direction,
+            target_kind="escape" if reason == "time_bank_escape" else "food",
+            reason=reason,
+            diagnostics={
+                "compute_spent_ms": round(self.compute_spent_seconds * 1000.0, 3),
+                "compute_budget_ms": round(self.compute_budget_seconds * 1000.0, 3),
             },
         )
 
@@ -314,11 +420,29 @@ class ChampionStrategy:
         round_number = int(state.round)
         visible_keys: set[tuple[int, int]] = set()
 
-        # Advance unseen tracks with the exact direction publicly sent on the
-        # preceding round. Visible data below always replaces this estimate.
+        # Current competition payloads censor opponent movement. Advance an
+        # unseen predator toward the nearest vulnerable fragment unless an
+        # explicit public move is available. Visible data below always replaces
+        # this conservative estimate.
         advanced: dict[tuple[int, int], EnemyTrack] = {}
         for key, track in self.enemy_tracks.items():
-            direction = self.last_moves.get(track.player_id, (track.direction, False))[0]
+            observed_move = self.last_moves.get(track.player_id)
+            if observed_move is not None:
+                direction = observed_move[0]
+            else:
+                vulnerable = tuple(
+                    own
+                    for own in own_blobs
+                    if can_eat_player_blob(track.radius, own.radius)
+                )
+                if vulnerable:
+                    target = min(
+                        vulnerable,
+                        key=lambda own: squared_distance((track.x, track.y), own.pos),
+                    )
+                    direction = normalise((target.x - track.x, target.y - track.y))
+                else:
+                    direction = track.direction
             speed = _speed(track.radius)
             radius = _decayed_radius(track.radius)
             advanced[key] = replace(
@@ -362,7 +486,7 @@ class ChampionStrategy:
             kept[key] = track
             # Stale prey is never chased. Retain only potentially dangerous
             # stale blobs close enough to matter within this search horizon.
-            if stale_rounds and track.radius < largest_own * EAT_SIZE_RATIO:
+            if stale_rounds and not can_eat_player_blob(track.radius, largest_own):
                 continue
             enemies.append(
                 EnemyBlob(
@@ -388,22 +512,13 @@ class ChampionStrategy:
         arena_size: float,
         first_step: bool,
         allow_split: bool,
+        angle_offset: int = 0,
     ) -> tuple[Action, ...]:
         actions: list[Action] = []
-        if first_step:
-            actions.extend(
-                Action(
-                    (math.cos(TAU * index / self.angular_samples), math.sin(TAU * index / self.angular_samples)),
-                    reason="angle",
-                )
-                for index in range(max(8, self.angular_samples))
-            )
-        else:
-            actions.append(Action(node.last_direction, reason="continue"))
-            for angle in (-math.pi / 6, -math.pi / 12, math.pi / 12, math.pi / 6):
-                actions.append(Action(_rotate(node.last_direction, angle), reason="steer"))
 
-        actions.append(Action(node.last_direction, reason="keep"))
+        # This order is part of the anytime-search contract: if the root is
+        # cut short, it must already have considered the tactically important
+        # options rather than an arbitrary prefix of the angular grid.
         escape = self._escape_vector(node)
         if escape != (0.0, 0.0):
             actions.append(Action(escape, reason="escape"))
@@ -412,12 +527,12 @@ class ChampionStrategy:
             actions.append(Action(_rotate(escape, math.pi / 8), reason="escape_tangent"))
             actions.append(Action(_rotate(escape, -math.pi / 8), reason="escape_tangent"))
 
-        center = node.center
-        wall = self._wall_vector(node.primary, arena_size)
-        if wall != (0.0, 0.0):
-            actions.append(Action(wall, reason="wall_escape"))
-        actions.append(Action(normalise((arena_size / 2.0 - center[0], arena_size / 2.0 - center[1])), reason="center"))
+        actions.append(Action(node.last_direction, reason="keep" if first_step else "continue"))
+        if not first_step:
+            for angle in (-math.pi / 6, -math.pi / 12, math.pi / 12, math.pi / 6):
+                actions.append(Action(_rotate(node.last_direction, angle), reason="steer"))
 
+        center = node.center
         available_food = [food for food in foods if food.food_id not in node.eaten_food_ids]
         if available_food:
             nearest_food = min(
@@ -438,7 +553,10 @@ class ChampionStrategy:
             enemy
             for enemy in node.enemies
             if enemy.stale_rounds == 0
-            and any(own.radius >= enemy.radius * EAT_SIZE_RATIO for own in node.own_blobs)
+            and any(
+                can_eat_player_blob(own.radius, enemy.radius)
+                for own in node.own_blobs
+            )
         ]
         prey.sort(key=lambda enemy: squared_distance(center, enemy.pos))
         for enemy in prey[: 3 if first_step else 2]:
@@ -451,6 +569,24 @@ class ChampionStrategy:
             farm_action = self._safe_farm_split(node, available_food, food_targets)
             if farm_action is not None:
                 actions.append(farm_action)
+
+        wall = self._wall_vector(node.primary, arena_size)
+        if wall != (0.0, 0.0):
+            actions.append(Action(wall, reason="wall_escape"))
+        actions.append(Action(normalise((arena_size / 2.0 - center[0], arena_size / 2.0 - center[1])), reason="center"))
+
+        if first_step:
+            sample_count = max(8, self.angular_samples)
+            actions.extend(
+                Action(
+                    (
+                        math.cos(TAU * ((index + angle_offset) % sample_count) / sample_count),
+                        math.sin(TAU * ((index + angle_offset) % sample_count) / sample_count),
+                    ),
+                    reason="angle",
+                )
+                for index in range(sample_count)
+            )
 
         return self._dedupe_actions(actions)
 
@@ -655,13 +791,16 @@ class ChampionStrategy:
         for enemy in enemies:
             target = min(own_blobs, key=lambda own: squared_distance(enemy.pos, own.pos))
             observed = normalise(enemy.direction)
-            if enemy.radius >= target.radius * EAT_SIZE_RATIO:
+            if can_eat_player_blob(enemy.radius, target.radius):
                 adversarial = normalise((target.x - enemy.x, target.y - enemy.y))
                 direction = normalise((
                     adversarial[0] * 0.82 + observed[0] * 0.18,
                     adversarial[1] * 0.82 + observed[1] * 0.18,
                 ))
-            elif any(own.radius >= enemy.radius * EAT_SIZE_RATIO for own in own_blobs):
+            elif any(
+                can_eat_player_blob(own.radius, enemy.radius)
+                for own in own_blobs
+            ):
                 hunter = min(own_blobs, key=lambda own: squared_distance(enemy.pos, own.pos))
                 flee = normalise((enemy.x - hunter.x, enemy.y - hunter.y))
                 direction = normalise((
@@ -699,7 +838,7 @@ class ChampionStrategy:
             eaten = [
                 index
                 for index, own in enumerate(survivors)
-                if enemy.radius >= own.radius * EAT_SIZE_RATIO
+                if can_eat_player_blob(enemy.radius, own.radius)
                 and squared_distance(enemy.pos, own.pos) <= enemy.radius * enemy.radius
             ]
             for index in sorted(eaten, reverse=True):
@@ -714,7 +853,7 @@ class ChampionStrategy:
             still_remaining: list[EnemyBlob] = []
             for enemy in remaining:
                 if (
-                    current.radius >= enemy.radius * EAT_SIZE_RATIO
+                    can_eat_player_blob(current.radius, enemy.radius)
                     and squared_distance(current.pos, enemy.pos) <= current.radius * current.radius
                 ):
                     current = replace(current, radius=math.sqrt(current.mass + enemy.mass))
@@ -738,7 +877,7 @@ class ChampionStrategy:
         endangered_blob_ids: set[int] = set()
         for own in own_blobs:
             for enemy in enemies:
-                if enemy.radius < own.radius * EAT_SIZE_RATIO:
+                if not can_eat_player_blob(enemy.radius, own.radius):
                     continue
                 distance = math.dist(own.pos, enemy.pos)
                 normal_margin = distance - enemy.radius
@@ -768,14 +907,6 @@ class ChampionStrategy:
     ) -> float:
         value = 0.0
         primary = max(own_blobs, key=lambda blob: blob.radius)
-        clearance = min(
-            primary.x - primary.radius,
-            primary.y - primary.radius,
-            arena_size - primary.radius - primary.x,
-            arena_size - primary.radius - primary.y,
-        )
-        if clearance < 4.5:
-            value -= (4.5 - clearance) ** 2 * 2.4
 
         available = [food for food in foods if food.food_id not in eaten_food_ids]
         if available:
@@ -786,10 +917,10 @@ class ChampionStrategy:
             if enemy.stale_rounds:
                 continue
             distance = math.dist(primary.pos, enemy.pos)
-            if primary.radius >= enemy.radius * EAT_SIZE_RATIO:
+            if can_eat_player_blob(primary.radius, enemy.radius):
                 gap = max(0.0, distance - primary.radius)
                 value += aggression * min(9.0, enemy.mass * 3.2 / (gap + 1.0))
-            elif not enemy.radius >= primary.radius * EAT_SIZE_RATIO and distance < 8.0:
+            elif not can_eat_player_blob(enemy.radius, primary.radius) and distance < 8.0:
                 value -= (8.0 - distance) * 0.3
         return value
 
@@ -798,7 +929,7 @@ class ChampionStrategy:
         y = 0.0
         for own in node.own_blobs:
             for enemy in node.enemies:
-                if enemy.radius < own.radius * EAT_SIZE_RATIO:
+                if not can_eat_player_blob(enemy.radius, own.radius):
                     continue
                 danger_radius = enemy.radius
                 if _can_split_eat(enemy.radius, own.radius):
@@ -872,7 +1003,7 @@ class ChampionStrategy:
             return False
         for blob in eligible:
             child_radius = blob.radius / SQRT2
-            if child_radius < enemy.radius * EAT_SIZE_RATIO:
+            if not can_eat_player_blob(child_radius, enemy.radius):
                 continue
             rel = (enemy.x - blob.x, enemy.y - blob.y)
             forward = rel[0] * direction[0] + rel[1] * direction[1]
@@ -892,7 +1023,7 @@ class ChampionStrategy:
             return None
         primary = node.primary
         if any(
-            enemy.radius >= primary.radius / SQRT2 * EAT_SIZE_RATIO
+            can_eat_player_blob(enemy.radius, primary.radius / SQRT2)
             and math.dist(primary.pos, enemy.pos) < 14.0
             for enemy in node.enemies
         ):
@@ -1046,7 +1177,7 @@ def _can_consume_virus(blob_radius: float, virus_radius: float) -> bool:
 def _can_split_eat(predator_radius: float, prey_radius: float) -> bool:
     return (
         predator_radius * predator_radius >= SPLIT_MIN_MASS
-        and predator_radius / SQRT2 >= prey_radius * EAT_SIZE_RATIO
+        and can_eat_player_blob(predator_radius / SQRT2, prey_radius)
     )
 
 

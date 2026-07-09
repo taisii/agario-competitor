@@ -63,18 +63,43 @@ def normalise(vector: tuple[float, float]) -> tuple[float, float]:
     return (vector[0] / magnitude, vector[1] / magnitude)
 
 
-def nearest_by_position(
-    origin: tuple[float, float],
+def can_eat_player_blob(
+    eater_radius: float,
+    target_radius: float,
+    radius_margin: float = 1.0,
+) -> bool:
+    """Return the engine's mass-ratio eating rule in radius coordinates."""
+
+    return eater_radius * eater_radius >= (
+        target_radius
+        * target_radius
+        * EAT_SIZE_RATIO
+        * radius_margin
+        * radius_margin
+    )
+
+
+def nearest_to_any_blob(
+    own_blobs: tuple[BlobModel, ...],
     items: Iterable[FoodModel | VirusModel],
 ) -> tuple[FoodModel | VirusModel | None, float | None]:
-    nearest = None
-    nearest_distance = None
+    nearest_item = None
+    nearest_distance_squared = None
     for item in items:
-        item_distance = distance(origin, item.pos)
-        if nearest_distance is None or item_distance < nearest_distance:
-            nearest = item
-            nearest_distance = item_distance
-    return nearest, nearest_distance
+        for blob in own_blobs:
+            distance_squared = squared_distance(blob.pos, item.pos)
+            if (
+                nearest_distance_squared is None
+                or distance_squared < nearest_distance_squared
+            ):
+                nearest_item = item
+                nearest_distance_squared = distance_squared
+    return (
+        nearest_item,
+        math.sqrt(nearest_distance_squared)
+        if nearest_distance_squared is not None
+        else None,
+    )
 
 
 def _own_blobs(game: Game) -> tuple[BlobModel, ...]:
@@ -96,21 +121,30 @@ def _relation_for_blob(
     own_blobs: tuple[BlobModel, ...],
     visible_blob: VisibleBlobModel,
 ) -> BlobRelation:
-    nearest_own_blob, blob_distance = _nearest_own_blob(own_blobs, visible_blob)
-    can_eat_us = any(
-        visible_blob.radius >= own_blob.radius * EAT_SIZE_RATIO
+    vulnerable_blobs = tuple(
+        own_blob
         for own_blob in own_blobs
+        if can_eat_player_blob(visible_blob.radius, own_blob.radius)
     )
-    can_be_eaten = any(
-        own_blob.radius >= visible_blob.radius * EAT_SIZE_RATIO
+    capable_eaters = tuple(
+        own_blob
         for own_blob in own_blobs
+        if can_eat_player_blob(own_blob.radius, visible_blob.radius)
     )
+
+    # A split player can have a large blob that is safe beside a small blob the
+    # same enemy can consume.  Measure threats from the nearest *vulnerable*
+    # blob; using the nearest arbitrary blob can point the shared movement in
+    # exactly the wrong escape direction.  For prey, use the nearest blob that
+    # is actually large enough to eat it.
+    relevant_own_blobs = vulnerable_blobs or capable_eaters or own_blobs
+    nearest_own_blob, blob_distance = _nearest_own_blob(relevant_own_blobs, visible_blob)
     return BlobRelation(
         blob=visible_blob,
         nearest_own_blob=nearest_own_blob,
         distance=blob_distance,
-        can_eat_us=can_eat_us,
-        can_be_eaten=can_be_eaten,
+        can_eat_us=bool(vulnerable_blobs),
+        can_be_eaten=bool(capable_eaters),
     )
 
 
@@ -135,19 +169,25 @@ def extract_visible_features(game: Game) -> VisibleFeatures:
         for visible_blob in game.state.visible_blobs
     ]
     predators = tuple(relation for relation in relations if relation.can_eat_us)
-    prey = tuple(relation for relation in relations if relation.can_be_eaten)
+    # Keep the categories disjoint.  In particular, a blob that can eat one of
+    # our small fragments is not "safe prey" merely because a different, large
+    # fragment could eat it.
+    prey = tuple(
+        relation
+        for relation in relations
+        if relation.can_be_eaten and not relation.can_eat_us
+    )
     neutral = tuple(
         relation
         for relation in relations
         if not relation.can_eat_us and not relation.can_be_eaten
     )
-    my_position = (game.state.me.x, game.state.me.y)
-    nearest_food, nearest_food_distance = nearest_by_position(
-        my_position,
+    nearest_food, nearest_food_distance = nearest_to_any_blob(
+        own_blobs,
         game.state.visible_food,
     )
-    nearest_virus, nearest_virus_distance = nearest_by_position(
-        my_position,
+    nearest_virus, nearest_virus_distance = nearest_to_any_blob(
+        own_blobs,
         game.state.visible_viruses,
     )
 

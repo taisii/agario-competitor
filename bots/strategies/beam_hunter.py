@@ -23,7 +23,7 @@ from lib.config.player import (
 from lib.models.food_model import FoodModel
 from lib.models.virus_model import VirusModel
 from strategies.base import StrategyContext, StrategyDecision
-from strategies.features import normalise, squared_distance
+from strategies.features import can_eat_player_blob, normalise, squared_distance
 
 
 SQRT2 = math.sqrt(2.0)
@@ -228,7 +228,8 @@ class BeamHunterStrategy:
         )
 
         threat = self._threat_vector(node)
-        if threat != (0.0, 0.0):
+        has_close_threat = threat != (0.0, 0.0)
+        if has_close_threat:
             directions.append(threat)
 
         prey_targets = self._prey_targets(node)
@@ -253,7 +254,7 @@ class BeamHunterStrategy:
         deduped_directions = self._dedupe_directions(directions)
         actions = [Action(direction=direction) for direction in deduped_directions]
 
-        if not self._has_close_threat(node):
+        if not has_close_threat:
             for target in prey_targets[:2]:
                 direction = normalise((target[0] - primary.x, target[1] - primary.y))
                 if direction != (0.0, 0.0):
@@ -345,14 +346,14 @@ class BeamHunterStrategy:
         if len(own_blobs) >= MAX_BLOB_COUNT:
             return own_blobs
 
-        next_id = max((blob.blob_id for blob in own_blobs), default=0) + 1
-        updated: list[SimOwnBlob] = []
-        for blob in sorted(own_blobs, key=lambda item: item.blob_id):
-            if len(updated) + (len(own_blobs) - len(updated)) >= MAX_BLOB_COUNT:
-                updated.append(blob)
-                continue
+        starting_ids = [blob.blob_id for blob in sorted(own_blobs, key=lambda item: item.blob_id)]
+        next_id = max(starting_ids, default=-1) + 1
+        by_id = {blob.blob_id: blob for blob in own_blobs}
+        for blob_id in starting_ids:
+            if len(by_id) >= MAX_BLOB_COUNT:
+                break
+            blob = by_id[blob_id]
             if blob.mass < SPLIT_MIN_MASS:
-                updated.append(blob)
                 continue
             child_radius = math.sqrt(blob.mass / 2.0)
             parent = SimOwnBlob(
@@ -361,6 +362,8 @@ class BeamHunterStrategy:
                 y=blob.y,
                 radius=child_radius,
                 merge_cooldown=SPLIT_COOLDOWN_FRAMES,
+                eject_vx=blob.eject_vx,
+                eject_vy=blob.eject_vy,
             )
             child_x = self._clamp(
                 blob.x + direction[0] * (parent.radius + child_radius + SAME_PLAYER_OVERLAP_EPSILON),
@@ -381,11 +384,10 @@ class BeamHunterStrategy:
                 eject_vx=direction[0] * SPLIT_EJECT_SPEED,
                 eject_vy=direction[1] * SPLIT_EJECT_SPEED,
             )
+            by_id[blob_id] = parent
+            by_id[next_id] = child
             next_id += 1
-            updated.extend((parent, child))
-            if len(updated) >= MAX_BLOB_COUNT:
-                break
-        return updated[:MAX_BLOB_COUNT]
+        return list(by_id.values())
 
     def _move_own_blob(
         self,
@@ -433,14 +435,18 @@ class BeamHunterStrategy:
         arena_size: float,
     ) -> SimEnemyBlob:
         edible_own = [
-            blob for blob in own_blobs if enemy.radius >= blob.radius * EAT_SIZE_RATIO
+            blob
+            for blob in own_blobs
+            if can_eat_player_blob(enemy.radius, blob.radius)
         ]
         if edible_own:
             target = min(edible_own, key=lambda blob: squared_distance(enemy.pos, blob.pos))
             direction = normalise((target.x - enemy.x, target.y - enemy.y))
         else:
             threatening_own = [
-                blob for blob in own_blobs if blob.radius >= enemy.radius * EAT_SIZE_RATIO
+                blob
+                for blob in own_blobs
+                if can_eat_player_blob(blob.radius, enemy.radius)
             ]
             if threatening_own:
                 hunter = min(threatening_own, key=lambda blob: squared_distance(enemy.pos, blob.pos))
@@ -522,7 +528,7 @@ class BeamHunterStrategy:
             eaten_indices = [
                 index
                 for index, own in enumerate(survivors)
-                if enemy.radius >= own.radius * EAT_SIZE_RATIO
+                if can_eat_player_blob(enemy.radius, own.radius)
                 and squared_distance(enemy.pos, own.pos) <= enemy.radius * enemy.radius
             ]
             for index in sorted(eaten_indices, reverse=True):
@@ -542,7 +548,7 @@ class BeamHunterStrategy:
             still_remaining: list[SimEnemyBlob] = []
             for enemy in remaining_enemies:
                 if (
-                    current.radius >= enemy.radius * EAT_SIZE_RATIO
+                    can_eat_player_blob(current.radius, enemy.radius)
                     and squared_distance(current.pos, enemy.pos) <= current.radius * current.radius
                 ):
                     current = self._replace_own_radius(
@@ -575,17 +581,17 @@ class BeamHunterStrategy:
         score -= self._wall_penalty(primary, arena_size)
         for enemy in enemies:
             distance = math.dist(primary.pos, enemy.pos)
-            if enemy.radius >= primary.radius * EAT_SIZE_RATIO:
+            if can_eat_player_blob(enemy.radius, primary.radius):
                 split_capable = (
                     enemy.mass >= SPLIT_MIN_MASS
-                    and enemy.radius / SQRT2 >= primary.radius * EAT_SIZE_RATIO
+                    and can_eat_player_blob(enemy.radius / SQRT2, primary.radius)
                 )
                 danger_reach = enemy.radius + _speed(enemy.radius) * 4.0 + 1.2
                 if split_capable:
                     danger_reach += 6.5
                 margin = max(distance - danger_reach, 0.05)
                 score -= 28.0 / margin
-            elif primary.radius >= enemy.radius * EAT_SIZE_RATIO:
+            elif can_eat_player_blob(primary.radius, enemy.radius):
                 margin = max(distance - primary.radius, 0.0)
                 score += min(8.0, 2.5 * enemy.mass / (margin + 1.0))
             else:
@@ -608,7 +614,7 @@ class BeamHunterStrategy:
         prey = [
             enemy
             for enemy in node.enemies
-            if primary.radius >= enemy.radius * EAT_SIZE_RATIO
+            if can_eat_player_blob(primary.radius, enemy.radius)
         ]
         scored: list[tuple[float, tuple[float, float]]] = []
         for enemy in prey:
@@ -628,7 +634,7 @@ class BeamHunterStrategy:
                 score = enemy.mass / (distance + 1.0)
             split_ready = (
                 node.total_mass >= SPLIT_MIN_MASS
-                and primary.radius / SQRT2 >= enemy.radius * EAT_SIZE_RATIO
+                and can_eat_player_blob(primary.radius / SQRT2, enemy.radius)
                 and len(node.own_blobs) < MAX_BLOB_COUNT
             )
             if split_ready:
@@ -642,11 +648,14 @@ class BeamHunterStrategy:
         y = 0.0
         for own in node.own_blobs:
             for enemy in node.enemies:
-                if enemy.radius < own.radius * EAT_SIZE_RATIO:
+                if not can_eat_player_blob(enemy.radius, own.radius):
                     continue
                 distance = math.dist(own.pos, enemy.pos)
                 reach = enemy.radius + _speed(enemy.radius) * 4.0 + 1.2
-                if enemy.mass >= SPLIT_MIN_MASS and enemy.radius / SQRT2 >= own.radius * EAT_SIZE_RATIO:
+                if (
+                    enemy.mass >= SPLIT_MIN_MASS
+                    and can_eat_player_blob(enemy.radius / SQRT2, own.radius)
+                ):
                     reach += 6.5
                 if distance >= reach:
                     continue
@@ -655,9 +664,6 @@ class BeamHunterStrategy:
                 x += away[0] * severity * own.mass
                 y += away[1] * severity * own.mass
         return normalise((x, y))
-
-    def _has_close_threat(self, node: BeamNode) -> bool:
-        return self._threat_vector(node) != (0.0, 0.0)
 
     def _virus_avoidance_vector(
         self,
