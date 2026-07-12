@@ -277,3 +277,10 @@ therefore applies replay-fitted, regime-specific deterministic quantization
 rates on top of its environment-driven direction. This lowers autonomous LOMO
 median error again from 26.2° to 22.5° and raises the within-30° rate from
 52.9% to 55.2%, while reproducing the observed grid rate without process RNG.
+
+Team 59's remaining direction errors are heavy-tailed rather than quantized.
+A team-specific 45° Huber refit prevents rare large turns from dominating the
+ordinary movement weights. Autonomous LOMO median error falls from 9.6° to
+6.2°, the within-30° rate rises from 67.9% to 69.9%, and direction-passing
+folds increase from zero to one. The overall verdict remains FAIL because the
+tail error and split timing still miss the strict per-fold gate.

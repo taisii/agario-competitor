@@ -278,18 +278,27 @@ def _solve(matrix: list[list[float]], target: list[float]) -> tuple[float, ...]:
     return tuple(augmented[row][-1] for row in range(n))
 
 
-def fit_direction(samples: Sequence[ReplaySample], ridge: float = 0.25) -> tuple[float, ...]:
+def fit_direction(
+    samples: Sequence[ReplaySample],
+    ridge: float = 0.25,
+    sample_weights: Sequence[float] | None = None,
+) -> tuple[float, ...]:
     size = len(FEATURE_NAMES)
     matrix = [[0.0 for _ in range(size)] for _ in range(size)]
     target = [0.0 for _ in range(size)]
-    for sample in samples:
+    if sample_weights is not None and len(sample_weights) != len(samples):
+        raise ValueError("sample_weights must align with samples")
+    for sample_index, sample in enumerate(samples):
+        sample_weight = sample_weights[sample_index] if sample_weights is not None else 1.0
         tx, ty = sample.target_direction
         if (tx, ty) == (0.0, 0.0):
             continue
         for i, first in enumerate(sample.direction_features):
-            target[i] += first[0] * tx + first[1] * ty
+            target[i] += sample_weight * (first[0] * tx + first[1] * ty)
             for j, second in enumerate(sample.direction_features):
-                matrix[i][j] += first[0] * second[0] + first[1] * second[1]
+                matrix[i][j] += sample_weight * (
+                    first[0] * second[0] + first[1] * second[1]
+                )
     for index in range(size):
         matrix[index][index] += ridge
     return _solve(matrix, target)
@@ -320,6 +329,7 @@ def fit_autonomous_directions(
     ridge: float = 0.25,
     iterations: int = 1,
     distinguish_fragmented: bool = False,
+    robust_delta_degrees: float | None = None,
 ) -> tuple[
     tuple[float, ...],
     tuple[tuple[float, ...], ...],
@@ -353,6 +363,7 @@ def fit_autonomous_directions(
 
     regime_weights = fit_regimes(samples)
 
+    fitting_samples: Sequence[ReplaySample] = samples
     for _ in range(iterations):
         previous_by_trace: dict[tuple[int, int], tuple[float, float]] = defaultdict(
             lambda: (0.0, 0.0)
@@ -376,7 +387,45 @@ def fit_autonomous_directions(
             previous_by_trace[key] = _unit(x, y)
 
         direction_weights = fit_direction(autonomous_samples, ridge)
+        fitting_samples = autonomous_samples
         regime_weights = fit_regimes(autonomous_samples)
+
+    if robust_delta_degrees is not None:
+        for _ in range(3):
+            robust_weights: list[tuple[float, ...]] = []
+            for regime_index in range(regime_count):
+                subset = [
+                    sample
+                    for sample in fitting_samples
+                    if regime(sample) == regime_index
+                ]
+                if len(subset) < 40:
+                    robust_weights.append(direction_weights)
+                    continue
+                current = regime_weights[regime_index]
+                weights: list[float] = []
+                for sample in subset:
+                    x = sum(
+                        weight * vector[0]
+                        for weight, vector in zip(current, sample.direction_features)
+                    )
+                    y = sum(
+                        weight * vector[1]
+                        for weight, vector in zip(current, sample.direction_features)
+                    )
+                    predicted = _unit(x, y)
+                    dot = max(
+                        -1.0,
+                        min(
+                            1.0,
+                            predicted[0] * sample.target_direction[0]
+                            + predicted[1] * sample.target_direction[1],
+                        ),
+                    )
+                    error = math.degrees(math.acos(dot))
+                    weights.append(min(1.0, robust_delta_degrees / max(error, 1e-6)))
+                robust_weights.append(fit_direction(subset, ridge, weights))
+            regime_weights = tuple(robust_weights)
 
     return (
         direction_weights,
@@ -531,6 +580,7 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
         direction_ridge,
         iterations=1 if team_id in autonomous_teams else 0,
         distinguish_fragmented=team_id == 9,
+        robust_delta_degrees=45.0 if team_id == 59 else None,
     )
     split_weights, split_threshold = fit_split(samples)
     angle_bins, angle_offset = detect_angle_grid(samples)
