@@ -97,6 +97,21 @@ def test_stateful_split_rule_respects_rearm_interval() -> None:
     assert blocked is False
 
 
+def test_direction_override_replaces_one_observation_regime() -> None:
+    base = _nearest_food_profile()
+    overrides = [[0.0] * len(FEATURE_NAMES) for _ in range(8)]
+    overrides[3][FEATURE_NAMES.index("nearest_predator_escape")] = 1.0
+    profile = ReplayProfile(
+        team_id=35,
+        direction_weights=base.direction_weights,
+        split_weights=base.split_weights,
+        split_threshold=math.inf,
+        direction_override_weights=tuple(tuple(weights) for weights in overrides),
+    )
+    direction = predict_direction(profile, _observation())
+    assert direction == (1.0, 0.0)
+
+
 def test_generated_profiles_cover_all_replay_opponents() -> None:
     expected = {
         1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 14, 15, 16, 17, 21, 22, 24,

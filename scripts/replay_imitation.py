@@ -435,10 +435,20 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
         59: ((0.80, 2.0, 0.15, 0.125, 0.0, 0.0), 17),
     }
     split_rule, split_cooldown_rounds = split_rules.get(team_id, ((), 0))
+    direction_override_weights: tuple[tuple[float, ...], ...] = ()
+    if team_id == 35:
+        overrides = [[0.0] * len(FEATURE_NAMES) for _ in range(8)]
+        overrides[1][FEATURE_NAMES.index("previous")] = 0.25
+        overrides[1][FEATURE_NAMES.index("predator_field")] = 2.0
+        overrides[3][FEATURE_NAMES.index("previous")] = 2.0
+        overrides[3][FEATURE_NAMES.index("predator_field")] = 0.5
+        overrides[3][FEATURE_NAMES.index("prey_field")] = 1.0
+        direction_override_weights = tuple(tuple(weights) for weights in overrides)
     return ReplayProfile(
         team_id=team_id,
         direction_weights=direction_weights,
         regime_direction_weights=regime_direction_weights,
+        direction_override_weights=direction_override_weights,
         split_weights=split_weights,
         split_threshold=split_threshold,
         split_rule=split_rule,
@@ -476,8 +486,14 @@ def evaluate_profile(profile: ReplayProfile, samples: Sequence[ReplaySample]) ->
         feature_vectors = list(sample.direction_features)
         feature_vectors[FEATURE_NAMES.index("previous")] = previous
         feature_vectors[FEATURE_NAMES.index("previous_left")] = (-previous[1], previous[0])
-        weights = (
-            profile.regime_direction_weights[_sample_regime(sample)]
+        regime = _sample_regime(sample)
+        override_weights = (
+            profile.direction_override_weights[regime]
+            if profile.direction_override_weights
+            else ()
+        )
+        weights = override_weights if override_weights and any(override_weights) else (
+            profile.regime_direction_weights[regime]
             if profile.regime_direction_weights
             else profile.direction_weights
         )
@@ -621,6 +637,7 @@ def _profile_with_validation(
         team_id=profile.team_id,
         direction_weights=profile.direction_weights,
         regime_direction_weights=profile.regime_direction_weights,
+        direction_override_weights=profile.direction_override_weights,
         split_weights=profile.split_weights,
         split_threshold=profile.split_threshold,
         split_rule=profile.split_rule,
@@ -655,6 +672,7 @@ def write_profiles(path: Path, profiles: Sequence[ReplayProfile]) -> None:
                 f"        team_id={profile.team_id},",
                 f"        direction_weights={profile.direction_weights!r},",
                 f"        regime_direction_weights={profile.regime_direction_weights!r},",
+                f"        direction_override_weights={profile.direction_override_weights!r},",
                 f"        split_weights={profile.split_weights!r},",
                 f"        split_threshold={split_threshold},",
                 f"        split_rule={profile.split_rule!r},",

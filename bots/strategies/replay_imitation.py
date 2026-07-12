@@ -97,6 +97,7 @@ class ReplayProfile:
     split_rule: tuple[float, ...] = ()
     split_cooldown_rounds: int = 0
     regime_direction_weights: tuple[tuple[float, ...], ...] = ()
+    direction_override_weights: tuple[tuple[float, ...], ...] = ()
     # Backward-compatible name used by an earlier profile generator.  Keeping
     # the schema tolerant prevents a freshly generated profile module from
     # failing during import while the fitter and runtime are updated together.
@@ -119,6 +120,7 @@ class ReplayProfile:
         for field_name, conditional_weights in (
             ("regime_direction_weights", self.regime_direction_weights),
             ("context_direction_weights", self.context_direction_weights),
+            ("direction_override_weights", self.direction_override_weights),
         ):
             if conditional_weights and (
                 len(conditional_weights) != 8
@@ -354,8 +356,14 @@ def predict_direction(
 ) -> tuple[float, float]:
     feature_vectors = direction_feature_vectors(observation, previous_direction)
     conditional_weights = profile.conditional_direction_weights
-    weights = (
-        conditional_weights[observation_regime(observation)]
+    regime = observation_regime(observation)
+    override_weights = (
+        profile.direction_override_weights[regime]
+        if profile.direction_override_weights
+        else ()
+    )
+    weights = override_weights if override_weights and any(override_weights) else (
+        conditional_weights[regime]
         if conditional_weights
         else profile.direction_weights
     )

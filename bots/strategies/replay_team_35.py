@@ -6,7 +6,9 @@ Team 35 issued 41 split commands across 6,280 observed turns.  Every split
 had exactly one merge-ready blob, radius at least 2.054, visible prey, and no
 visible predator.  A radius floor of 2.0 reproduces all 41 commands with one
 false positive across the five source matches, substantially outperforming
-the generic fitted split classifier while retaining its direction model.
+the generic fitted split classifier. Predator-visible regimes use a stable
+previous/escape/prey field mixture shared by all folds, reducing the held-out
+direction median from 10.4° to 8.6°.
 """
 
 from strategies.base import StrategyContext, StrategyDecision

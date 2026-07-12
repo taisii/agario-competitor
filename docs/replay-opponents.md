@@ -220,6 +220,8 @@ model remains below the direction gate, so the overall verdict stays FAIL.
 
 Team 35's runtime and evaluator now share its previously hand-verified split
 invariant. Mean held-out split F1 rises from 0.19 to 0.99. Team-specific ridge
-tuning also increases direction-passing folds from three to four out of five;
-only match 11739 remains outside the direction gate. The overall verdict stays
-FAIL because LOMO requires every fold to pass.
+tuning increases direction-passing folds from three to four out of five. A
+shared predator-visible direction mixture then lowers the median direction
+error from 10.4° to 8.6° and raises the within-30° rate from 79.4% to 81.6%.
+Only match 11739 remains outside the direction gate (p75 32.3°, 11.8% over
+90°). The overall verdict stays FAIL because LOMO requires every fold to pass.
