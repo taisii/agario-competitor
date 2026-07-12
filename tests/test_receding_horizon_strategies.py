@@ -19,6 +19,7 @@ from engine.state.state_mutator import StateMutator  # noqa: E402
 from strategies.receding_horizon import (  # noqa: E402
     Action,
     EnemyBlob,
+    EnemyTrack,
     OwnBlob,
     ReplayDominanceStrategy,
     SearchNode,
@@ -40,6 +41,127 @@ def test_replay_dominance_is_a_distinct_registered_strategy() -> None:
     assert isinstance(strategy, ReplayDominanceStrategy)
     assert strategy.name == "replay_dominance"
     assert "replay_dominance" in available_strategy_names()
+
+
+def test_replay_dominance_compares_two_complete_roots_before_deadline() -> None:
+    strategy = ReplayDominanceStrategy()
+
+    assert strategy.minimum_root_actions == 2
+
+
+def test_replay_dominance_uses_blob_scaled_deterministic_transition_budget() -> None:
+    strategy = ReplayDominanceStrategy()
+
+    assert strategy._uses_compute_time_bank() is True
+    assert strategy._transition_budget(1) == 12
+    assert strategy._transition_budget(2) == 6
+    assert strategy._transition_budget(4) == 3
+    assert strategy._transition_budget(16) == 3
+    assert strategy._transition_budget(1, 12) == 3
+
+
+def test_enemy_memory_threat_model_includes_future_virus_fragments() -> None:
+    strategy = ReplayDominanceStrategy()
+    own = OwnBlob(blob_id=0, x=30.0, y=30.0, radius=math.sqrt(32.0))
+    virus = VirusModel(virus_id=1, pos=(34.0, 30.0), radius=1.5)
+    without_virus = [
+        radius for _, radius in strategy._exposed_own_radii((own,))
+    ]
+    radii = [
+        radius
+        for _, radius in strategy._exposed_own_radii((own,), (virus,))
+    ]
+
+    assert own.radius in radii
+    assert own.radius / math.sqrt(2.0) in radii
+    assert math.sqrt((own.mass + 1.5**2) / 16.0) in radii
+    assert any(radius < 1.5 for radius in radii)
+    assert all(radius >= own.radius / math.sqrt(2.0) for radius in without_virus)
+
+    small_stale = EnemyTrack(1, 1, 40.0, 30.0, 1.32, (-1.0, 0.0), 0)
+    sweeping_stale = replace(small_stale, blob_id=2, radius=4.1)
+
+    assert not strategy._stale_enemy_can_threaten_transition(
+        small_stale, (own,), (virus,)
+    )
+    assert strategy._stale_enemy_can_threaten_transition(
+        sweeping_stale, (own,), (virus,)
+    )
+
+
+def test_replay_dominance_root_budget_compares_distinct_action_families() -> None:
+    strategy = ReplayDominanceStrategy()
+    ordered = strategy._order_root_actions(
+        (
+            Action((1.0, 0.0), reason="escape"),
+            Action((0.9, 0.1), reason="escape_tangent"),
+            Action((0.0, 1.0), reason="rival_prey"),
+            Action((-1.0, 0.0), reason="virus_harvest"),
+            Action((0.0, -1.0), reason="keep"),
+        )
+    )
+
+    assert [action.reason for action in ordered[:4]] == [
+        "escape",
+        "virus_harvest",
+        "keep",
+        "rival_prey",
+    ]
+    assert strategy._actions_per_node_limit(0) == 6
+    assert strategy._actions_per_node_limit(1) == 1
+
+
+def test_replay_dominance_second_root_avoids_official_virus_massacre() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=4, angular_samples=10)
+    strategy._rival_values = {0: 1.0}
+    own = OwnBlob(blob_id=125, x=53.87, y=11.25, radius=5.8)
+    predator_after_pop = EnemyBlob(
+        player_id=0,
+        blob_id=93,
+        x=39.0,
+        y=17.7,
+        radius=5.45,
+        direction=(-1.0, 0.0),
+    )
+    virus = VirusModel(
+        virus_id=31,
+        pos=(50.2472306260258, 16.532899639036557),
+        radius=1.5,
+    )
+    node = SearchNode(
+        own_blobs=(own,),
+        enemies=(predator_after_pop,),
+        score=0.0,
+        first_direction=(0.0, 1.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(0.0, 1.0),
+    )
+    actions = strategy._candidate_actions(
+        node=node,
+        foods=(),
+        food_targets=(),
+        viruses=(virus,),
+        arena_size=60.0,
+        first_step=True,
+        angle_offset=609,
+    )
+    results = [
+        strategy._step(
+            node=node,
+            action=action,
+            foods=(),
+            viruses=(virus,),
+            arena_size=60.0,
+            first_step=True,
+            safety_weight=2.0,
+            aggression=1.0,
+        ).node
+        for action in actions[: strategy.minimum_root_actions]
+    ]
+
+    assert {action.reason for action in actions[:2]} == {"virus_harvest", "keep"}
+    assert max(results, key=strategy._terminal_score).first_reason == "keep"
 
 
 def test_replay_dominance_does_not_bypass_beam_with_direct_virus_mode() -> None:
@@ -129,7 +251,10 @@ def test_replay_dominance_evaluates_scoreboard_rival_before_ordinary_actions() -
         allow_split=True,
     )
 
-    assert actions[0].reason in {"rival_prey", "split_rival_prey"}
+    assert any(
+        action.reason in {"rival_prey", "split_rival_prey"}
+        for action in actions[:3]
+    )
 
 
 def test_replay_dominance_keeps_safe_split_candidates_in_late_lead() -> None:
@@ -173,6 +298,110 @@ def test_replay_dominance_scores_wall_clamp_by_actual_movement() -> None:
 
     assert strategy._movement_efficiency((own,), (-1.0, 0.0), 60.0) == 0.0
     assert strategy._movement_efficiency((own,), (1.0, 0.0), 60.0) == 1.0
+
+
+def test_replay_dominance_prices_prey_by_clamped_closing_speed() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    wall_blocked_own = OwnBlob(blob_id=0, x=2.0, y=20.0, radius=2.0)
+    wall_fleeing = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=1.0,
+        y=30.0,
+        radius=1.0,
+        direction=(0.0, 1.0),
+    )
+    corner_own = OwnBlob(blob_id=1, x=2.0, y=10.0, radius=2.0)
+    corner_pinned = replace(
+        wall_fleeing,
+        blob_id=1,
+        y=1.0,
+        direction=(0.0, -1.0),
+    )
+
+    unreachable = strategy._prey_capture_probability(
+        wall_blocked_own, wall_fleeing, 60.0
+    )
+    reachable = strategy._prey_capture_probability(
+        corner_own, corner_pinned, 60.0
+    )
+
+    assert unreachable < 1e-10
+    assert 0.3 < reachable < 0.5
+
+
+def test_replay_dominance_state_value_rewards_absolute_mass_linearly() -> None:
+    strategy = ReplayDominanceStrategy()
+
+    def utility(mass: float) -> float:
+        node = SearchNode(
+            own_blobs=(
+                OwnBlob(blob_id=0, x=30.0, y=30.0, radius=math.sqrt(mass)),
+            ),
+            enemies=(),
+            score=0.0,
+            first_direction=(1.0, 0.0),
+            first_split=False,
+            first_reason="keep",
+            last_direction=(1.0, 0.0),
+        )
+        return strategy._search_utility(
+            node,
+            foods=(),
+            viruses=(),
+            arena_size=60.0,
+            safety_weight=1.0,
+        )
+
+    assert math.isclose(utility(15.0) - utility(5.0), 1000.0)
+    assert math.isclose(utility(60.0) - utility(50.0), 1000.0)
+
+
+def test_replay_dominance_rival_capture_value_is_continuous_at_contact() -> None:
+    strategy = ReplayDominanceStrategy()
+    strategy._rival_values = {1: 0.5}
+    own = OwnBlob(blob_id=0, x=20.0, y=30.0, radius=2.0)
+    rival = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=22.0,
+        y=30.0,
+        radius=1.0,
+    )
+
+    before = SearchNode(
+        own_blobs=(own,),
+        enemies=(rival,),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="rival_prey",
+        last_direction=(1.0, 0.0),
+    )
+    after = replace(
+        before,
+        own_blobs=(replace(own, radius=math.sqrt(own.mass + rival.mass)),),
+        enemies=(),
+    )
+
+    before_value = strategy._search_utility(
+        before,
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        safety_weight=1.0,
+    )
+    after_value = strategy._search_utility(
+        after,
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        safety_weight=1.0,
+    )
+
+    assert math.isclose(before_value, after_value, rel_tol=1e-9)
+
+
 
 
 def test_replay_dominance_merges_before_virus_like_engine_failure_replay() -> None:

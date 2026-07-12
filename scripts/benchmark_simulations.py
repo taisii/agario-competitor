@@ -58,6 +58,7 @@ def main() -> None:
             metrics_every_n=args.metrics_every_n,
             random_seed=args.random_seed,
             headless=not args.no_headless,
+            fast=args.fast,
         )
     )
     write_outputs(workspace_root, results)
@@ -118,6 +119,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Open the visualiser GUI. Not recommended for parallel benchmark runs.",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help=(
+            "Skip the visualiser, startup countdown, game recording, and review "
+            "video. Intended for development screens, not final verification."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -170,6 +179,7 @@ def write_run_config(
         "metrics_every_n": args.metrics_every_n,
         "random_seed": args.random_seed,
         "headless": not args.no_headless,
+        "fast": args.fast,
     }
     (workspace_root / "run_config.json").write_text(
         json.dumps(config, indent=2, sort_keys=True) + "\n"
@@ -188,6 +198,7 @@ async def run_all(
     metrics_every_n: str,
     random_seed: int,
     headless: bool,
+    fast: bool,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(max(jobs, 1))
     tasks = []
@@ -206,6 +217,7 @@ async def run_all(
                         metrics_every_n=metrics_every_n,
                         random_seed=random_seed,
                         headless=headless,
+                        fast=fast,
                     )
                 )
             )
@@ -234,6 +246,7 @@ async def run_match(
     metrics_every_n: str,
     random_seed: int,
     headless: bool,
+    fast: bool = False,
 ) -> dict[str, Any]:
     async with semaphore:
         run_dir = workspace_root / variant.name / f"run_{trial:03d}"
@@ -241,16 +254,33 @@ async def run_match(
         run_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_dir / "simulation.log"
         env = os.environ.copy()
-        env.update(variant.env)
         env["BOT_BENCHMARK_TRIAL"] = str(trial)
         env["BOT_RANDOM_SEED"] = str(random_seed)
+        env["AGARIO_ENGINE_RANDOM_SEED"] = str(random_seed + trial)
         env["BOT_METRICS_ENABLED"] = "1"
         env["BOT_METRICS_EVERY_N"] = metrics_every_n
         env["PYTHONUNBUFFERED"] = "1"
 
-        command = ["uv", "run", "simulation", *submissions]
-        if headless:
-            command.append("--headless")
+        if fast:
+            env["BOT_BENCHMARK_VARIANT_ENV_JSON"] = json.dumps(variant.env)
+            env["BOT_BENCHMARK_VARIANT_SLOTS"] = ",".join(
+                str(slot) for slot in tracked_slots
+            )
+            command = [
+                "uv",
+                "run",
+                "python",
+                "scripts/run_fast_simulation.py",
+                *submissions,
+            ]
+        else:
+            # The official launcher provides one environment to every bot.
+            # It remains a final-format smoke test; paired strategy comparisons
+            # use the fast runner, which scopes variant values to tracked slots.
+            env.update(variant.env)
+            command = ["uv", "run", "simulation", *submissions]
+            if headless:
+                command.append("--headless")
         command.extend(["--workspace", str(simulation_workspace)])
 
         started = time.monotonic()

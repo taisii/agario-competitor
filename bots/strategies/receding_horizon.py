@@ -21,7 +21,7 @@ import os
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 
-from lib.config.arena import ARENA_SIZE, MAX_BLOB_COUNT
+from lib.config.arena import ARENA_SIZE, MAX_BLOB_COUNT, VIRUS_SIZE
 from lib.config.player import (
     BASE_PLAYER_SPEED,
     EAT_SIZE_RATIO,
@@ -242,6 +242,7 @@ class ThreatAwareRecedingHorizonStrategy:
                 "0.00075",
             )
         )
+        self.minimum_root_actions = 1
         self.endgame_adaptation = (
             endgame_adaptation
             if endgame_adaptation is not None
@@ -267,7 +268,7 @@ class ThreatAwareRecedingHorizonStrategy:
             max_rounds=int(state.max_rounds),
         )
         try:
-            if turn_budget < self.min_search_seconds:
+            if self._uses_compute_time_bank() and turn_budget < self.min_search_seconds:
                 return self._time_budget_fallback(context)
             return self._choose(
                 context,
@@ -301,7 +302,13 @@ class ThreatAwareRecedingHorizonStrategy:
         round_number = int(state.round)
         arena_size = float(state.map.size or ARENA_SIZE)
         self._read_public_moves(context)
-        enemies = self._update_enemy_memory(context, own_blobs, arena_size)
+        visible_viruses = tuple(state.visible_viruses)
+        enemies = self._update_enemy_memory(
+            context,
+            own_blobs,
+            arena_size,
+            viruses=visible_viruses,
+        )
 
         center = self._mass_center(own_blobs)
         foods = tuple(
@@ -310,7 +317,7 @@ class ThreatAwareRecedingHorizonStrategy:
                 key=lambda food: squared_distance(center, food.pos),
             )[: self.max_food]
         )
-        viruses = tuple(state.visible_viruses)
+        viruses = visible_viruses
         enemies = tuple(
             sorted(
                 enemies,
@@ -344,35 +351,66 @@ class ThreatAwareRecedingHorizonStrategy:
         best_rejected: SearchNode | None = None
         reached_depth = 0
         search_timed_out = False
+        search_stop_reason = "complete"
+        root_action_count = 0
+        root_actions_generated = 0
+        evaluated_by_depth: list[int] = []
+        transitions_evaluated = 0
+        uses_time_bank = self._uses_compute_time_bank()
+        transition_budget = self._transition_budget(
+            len(own_blobs),
+            len(enemies),
+        )
         for depth_index in range(max(1, self.depth)):
             candidates: list[SearchNode] = []
             depth_timed_out = False
+            depth_budget_exhausted = False
             evaluated_actions = 0
-            action_rows = [
-                (
-                    node,
-                    self._candidate_actions(
-                        node=node,
-                        foods=foods,
-                        food_targets=food_targets,
-                        viruses=viruses,
-                        arena_size=arena_size,
-                        first_step=depth_index == 0,
-                        angle_offset=round_number,
-                    ),
+            action_rows: list[tuple[SearchNode, tuple[Action, ...]]] = []
+            for node in beam:
+                actions = self._candidate_actions(
+                    node=node,
+                    foods=foods,
+                    food_targets=food_targets,
+                    viruses=viruses,
+                    arena_size=arena_size,
+                    first_step=depth_index == 0,
+                    angle_offset=round_number,
                 )
-                for node in beam
-            ]
+                if depth_index == 0:
+                    root_actions_generated += len(actions)
+                    actions = self._order_root_actions(actions)
+                else:
+                    actions = self._order_deeper_actions(actions)
+                action_limit = self._actions_per_node_limit(depth_index)
+                if action_limit is not None:
+                    actions = actions[:action_limit]
+                action_rows.append((node, actions))
             max_actions = max((len(actions) for _, actions in action_rows), default=0)
+            if depth_index == 0:
+                root_action_count = sum(len(actions) for _, actions in action_rows)
             for action_index in range(max_actions):
                 for node, actions in action_rows:
                     if action_index >= len(actions):
                         continue
                     action = actions[action_index]
+                    if (
+                        transition_budget is not None
+                        and transitions_evaluated >= transition_budget
+                    ):
+                        depth_budget_exhausted = True
+                        break
                     # Evaluate at least one action at each depth, then stop at
                     # the deadline. Deeper parents are expanded round-robin so
                     # the first beam node cannot consume the whole budget.
-                    if evaluated_actions and perf_counter() >= deadline:
+                    required_actions = (
+                        self.minimum_root_actions if depth_index == 0 else 1
+                    )
+                    if (
+                        uses_time_bank
+                        and evaluated_actions >= required_actions
+                        and perf_counter() >= deadline
+                    ):
                         depth_timed_out = True
                         break
                     result = self._step(
@@ -386,16 +424,20 @@ class ThreatAwareRecedingHorizonStrategy:
                         aggression=aggression,
                     )
                     evaluated_actions += 1
+                    transitions_evaluated += 1
                     if result.fatal:
                         if best_rejected is None or result.node.score > best_rejected.score:
                             best_rejected = result.node
                         continue
                     candidates.append(result.node)
-                if depth_timed_out:
+                if depth_timed_out or depth_budget_exhausted:
                     break
+
+            evaluated_by_depth.append(evaluated_actions)
 
             if depth_timed_out:
                 search_timed_out = True
+                search_stop_reason = "deadline"
                 if candidates:
                     # All candidates here have the same simulated depth. Keep
                     # useful partial work instead of discarding an interrupted
@@ -403,12 +445,19 @@ class ThreatAwareRecedingHorizonStrategy:
                     beam = self._prune(candidates)
                     reached_depth = depth_index + 1
                 break
+            if depth_budget_exhausted:
+                search_stop_reason = "transition_budget"
+                if candidates:
+                    beam = self._prune(candidates)
+                    reached_depth = depth_index + 1
+                break
             if not candidates:
                 break
             beam = self._prune(candidates)
             reached_depth = depth_index + 1
-            if perf_counter() >= deadline:
+            if uses_time_bank and perf_counter() >= deadline:
                 search_timed_out = True
+                search_stop_reason = "deadline"
                 break
 
         if beam and reached_depth:
@@ -442,6 +491,15 @@ class ThreatAwareRecedingHorizonStrategy:
                 "projected_blob_count": len(best.own_blobs),
                 "min_safety_margin": best.min_safety_margin,
                 "search_timed_out": search_timed_out,
+                "search_stop_reason": search_stop_reason,
+                "root_actions_total": root_action_count,
+                "root_actions_generated": root_actions_generated,
+                "root_actions_evaluated": (
+                    evaluated_by_depth[0] if evaluated_by_depth else 0
+                ),
+                "transitions_evaluated": transitions_evaluated,
+                "transitions_by_depth": evaluated_by_depth,
+                "transition_budget": transition_budget,
                 "turn_budget_ms": round(turn_budget * 1000.0, 3),
                 "compute_spent_ms": round(self.compute_spent_seconds * 1000.0, 3),
             },
@@ -451,6 +509,20 @@ class ThreatAwareRecedingHorizonStrategy:
         remaining_budget = max(0.0, self.compute_budget_seconds - self.compute_spent_seconds)
         remaining_rounds = max(1, max_rounds - round_number)
         return min(self.max_turn_seconds, remaining_budget / remaining_rounds)
+
+    def _uses_compute_time_bank(self) -> bool:
+        """Whether wall time, rather than fixed work, limits this search."""
+
+        return True
+
+    def _transition_budget(
+        self,
+        own_blob_count: int,
+        enemy_count: int = 0,
+    ) -> int | None:
+        """Return a deterministic transition quota, or ``None`` for anytime search."""
+
+        return None
 
     def _time_budget_fallback(self, context: StrategyContext) -> StrategyDecision:
         """Return a cheap visible-state action after the search bank is spent."""
@@ -511,28 +583,52 @@ class ThreatAwareRecedingHorizonStrategy:
         """Keep threats to current or post-split fragments before harmless blobs."""
 
         threat_margins: list[float] = []
-        for own in own_blobs:
-            candidate_radii = [own.radius]
-            if own.mass >= SPLIT_MIN_MASS:
-                candidate_radii.append(own.radius / SQRT2)
-            for candidate_radius in candidate_radii:
-                if not can_eat_player_blob(enemy.radius, candidate_radius):
-                    continue
-                danger_radius = enemy.radius
-                if _can_split_eat(enemy.radius, candidate_radius):
-                    danger_radius = max(danger_radius, _split_attack_reach(enemy.radius))
-                threat_margins.append(math.dist(own.pos, enemy.pos) - danger_radius)
+        for own, candidate_radius in self._exposed_own_radii(own_blobs):
+            if not can_eat_player_blob(enemy.radius, candidate_radius):
+                continue
+            danger_radius = enemy.radius
+            if _can_split_eat(enemy.radius, candidate_radius):
+                danger_radius = max(danger_radius, _split_attack_reach(enemy.radius))
+            threat_margins.append(math.dist(own.pos, enemy.pos) - danger_radius)
 
         center_distance = math.dist(center, enemy.pos)
         if threat_margins:
             return (0, min(threat_margins), center_distance)
         return (1, center_distance, center_distance)
 
+    def _exposed_own_radii(
+        self,
+        own_blobs: tuple[OwnBlob, ...],
+        viruses: tuple[VirusModel, ...] = (),
+    ) -> tuple[tuple[OwnBlob, float], ...]:
+        """Radii an enemy may face after one available public transition."""
+
+        exposed: list[tuple[OwnBlob, float]] = []
+        virus_piece_count = max(1, MAX_BLOB_COUNT - len(own_blobs) + 1)
+        for own in own_blobs:
+            exposed.append((own, own.radius))
+            if own.mass >= SPLIT_MIN_MASS:
+                exposed.append((own, own.radius / SQRT2))
+            virus_reachable = any(
+                _can_consume_virus(own.radius, virus.radius)
+                and max(0.0, math.dist(own.pos, virus.pos) - own.radius)
+                <= 18.0 * _speed(own.radius)
+                for virus in viruses
+            )
+            if virus_reachable:
+                virus_piece_radius = math.sqrt(
+                    (own.mass + VIRUS_SIZE * VIRUS_SIZE)
+                    / virus_piece_count
+                )
+                exposed.append((own, virus_piece_radius))
+        return tuple(exposed)
+
     def _update_enemy_memory(
         self,
         context: StrategyContext,
         own_blobs: tuple[OwnBlob, ...],
         arena_size: float,
+        viruses: tuple[VirusModel, ...] = (),
     ) -> tuple[EnemyBlob, ...]:
         state = context.game.state
         round_number = int(state.round)
@@ -608,10 +704,12 @@ class ThreatAwareRecedingHorizonStrategy:
                 continue
             kept[key] = track
             # Stale prey is never chased. Retain only potentially dangerous
-            # stale blobs close enough to matter within this search horizon.
-            if stale_rounds and not any(
-                can_eat_player_blob(track.radius, own.radius)
-                for own in own_blobs
+            # stale blobs, including enemies that become dangerous after our
+            # own legal split or virus transition.
+            if stale_rounds and not self._stale_enemy_can_threaten_transition(
+                track,
+                own_blobs,
+                viruses,
             ):
                 continue
             enemies.append(
@@ -628,6 +726,46 @@ class ThreatAwareRecedingHorizonStrategy:
             )
         self.enemy_tracks = kept
         return tuple(enemies)
+
+    def _stale_enemy_can_threaten_transition(
+        self,
+        track: EnemyTrack,
+        own_blobs: tuple[OwnBlob, ...],
+        viruses: tuple[VirusModel, ...],
+    ) -> bool:
+        # Existing fragments are authoritative state: any predator that can
+        # eat one remains relevant, even if it cannot eat our largest blob.
+        if any(
+            can_eat_player_blob(track.radius, own.radius)
+            for own in own_blobs
+        ):
+            return True
+
+        virus_piece_count = max(1, MAX_BLOB_COUNT - len(own_blobs) + 1)
+        for own in own_blobs:
+            if own.mass >= SPLIT_MIN_MASS and can_eat_player_blob(
+                track.radius,
+                own.radius / SQRT2,
+            ):
+                return True
+            virus_reachable = any(
+                _can_consume_virus(own.radius, virus.radius)
+                and max(0.0, math.dist(own.pos, virus.pos) - own.radius)
+                <= 18.0 * _speed(own.radius)
+                for virus in viruses
+            )
+            if not virus_reachable:
+                continue
+            virus_piece_radius = math.sqrt(
+                (own.mass + VIRUS_SIZE * VIRUS_SIZE)
+                / virus_piece_count
+            )
+            # A stale small blob may take one piece, but the replay collapse
+            # comes from a large enemy splitting through many pieces.  Preserve
+            # that tail risk without treating every unseen prey as a sweeper.
+            if _can_split_eat(track.radius, virus_piece_radius):
+                return True
+        return False
 
     def _candidate_actions(
         self,
@@ -684,7 +822,13 @@ class ThreatAwareRecedingHorizonStrategy:
                 for own in node.own_blobs
             )
         ]
-        prey.sort(key=lambda enemy: squared_distance(center, enemy.pos))
+        prey.sort(
+            key=lambda enemy: self._prey_candidate_priority(
+                node,
+                enemy,
+                arena_size,
+            )
+        )
         for enemy in prey[: 3 if first_step else 2]:
             intercept = self._intercept_direction(node.primary, enemy)
             actions.append(Action(intercept, reason="prey"))
@@ -714,6 +858,25 @@ class ThreatAwareRecedingHorizonStrategy:
             )
 
         return self._dedupe_actions(actions)
+
+    def _prey_candidate_priority(
+        self,
+        node: SearchNode,
+        enemy: EnemyBlob,
+        arena_size: float,
+    ) -> tuple[float, ...]:
+        """Cheap candidate ordering hook; lower tuples are explored first."""
+
+        return (squared_distance(node.center, enemy.pos),)
+
+    def _order_root_actions(self, actions: tuple[Action, ...]) -> tuple[Action, ...]:
+        return actions
+
+    def _order_deeper_actions(self, actions: tuple[Action, ...]) -> tuple[Action, ...]:
+        return actions
+
+    def _actions_per_node_limit(self, depth_index: int) -> int | None:
+        return None
 
     def _step(
         self,
@@ -2050,6 +2213,8 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
     # Spread that long-term value over the approach horizon so collecting one
     # incidental pellet cannot repeatedly interrupt a safe virus route.
     _VIRUS_POTENTIAL_SLOPE = 12.0
+    _CAPTURE_HORIZON = 8.0
+    _CAPTURE_CLOSING_TEMPERATURE = 0.05
 
     def __init__(
         self,
@@ -2067,7 +2232,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         # overruns do not switch the final third of a match to the simplistic
         # fallback while remaining well below the engine's eight-second limit.
         self.compute_budget_seconds = float(
-            os.environ.get("BOT_REPLAY_TOTAL_BUDGET_SECONDS", "5.2")
+            os.environ.get("BOT_REPLAY_TOTAL_BUDGET_SECONDS", "6.0")
         )
         self.survival_midpoint_base = float(
             os.environ.get(
@@ -2084,16 +2249,56 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         self.survival_temperature = float(
             os.environ.get("BOT_REPLAY_SURVIVAL_TEMPERATURE", "2.0")
         )
+        self.recovery_mass = float(
+            os.environ.get("BOT_REPLAY_RECOVERY_MASS", "3.0")
+        )
         self._rival_values: dict[int, float] = {}
         self._utility_cache: dict[tuple[object, ...], float] = {}
+        self._virus_retention_cache: dict[
+            tuple[int, int, int], tuple[SearchNode, float]
+        ] = {}
+        self._risk_envelope_cache: dict[
+            int, tuple[tuple[EnemyBlob, ...], tuple[EnemyBlob, ...]]
+        ] = {}
+        self.transition_budget_scale = int(
+            os.environ.get("BOT_REPLAY_TRANSITION_BUDGET_SCALE", "12")
+        )
+        self.minimum_transition_budget = int(
+            os.environ.get("BOT_REPLAY_MIN_TRANSITIONS", "3")
+        )
+        # An anytime search must compare at least two complete root
+        # transitions.  Otherwise the first semantic candidate (often a virus
+        # or prey) becomes a forced action when one exact transition consumes
+        # the deadline.  Root utility caching below makes this affordable.
+        self.minimum_root_actions = 2
+
+    def _uses_compute_time_bank(self) -> bool:
+        # Fixed work keeps candidate ordering reproducible, while the measured
+        # bank is still required because the competition worker is materially
+        # slower than the local runner.  The search loop enforces both limits.
+        return True
+
+    def _transition_budget(
+        self,
+        own_blob_count: int,
+        enemy_count: int = 0,
+    ) -> int:
+        # Exact transitions become roughly proportional to blob count because
+        # every fragment participates in movement, stabilisation, and
+        # interactions.  An inverse allocation therefore keeps per-turn work
+        # approximately constant without changing the state value function.
+        work_units = own_blob_count + enemy_count / 3.0
+        return max(
+            self.minimum_transition_budget,
+            round(self.transition_budget_scale / max(1.0, work_units)),
+        )
 
     def _choose(self, context, *, deadline: float, turn_budget: float):
-        # All resources and risk parameters are constant within one decision.
-        # A parent utility is shared by every outgoing action, and a child
-        # utility becomes the parent utility at the next depth.  Cache those
-        # exact values instead of recomputing virus retention and threat
-        # envelopes for every edge.
+        # Cache the complete value and its expensive virus/future-enemy
+        # subproblems across candidate generation and rollout evaluation.
         self._utility_cache.clear()
+        self._virus_retention_cache.clear()
+        self._risk_envelope_cache.clear()
         state = context.game.state
         rankings = tuple(int(player_id) for player_id in state.rankings)
         try:
@@ -2172,7 +2377,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             ]
             rivals.sort(
                 key=lambda enemy: (
-                    -self._rival_values[enemy.player_id] * enemy.mass,
+                    -self._prey_expected_mass(node, enemy, arena_size),
                     squared_distance(node.center, enemy.pos),
                     enemy.player_id,
                     enemy.blob_id,
@@ -2336,15 +2541,13 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         if not node.own_blobs:
             return -1_000_000.0
 
-        risk_enemies = (
-            *node.enemies,
-            *self._future_enemy_envelopes(node.enemies),
-        )
+        risk_enemies = self._risk_enemies(node.enemies)
         survival_midpoint = (
             self.survival_midpoint_base
             + self.survival_midpoint_scale * safety_weight
         )
         safe_mass = 0.0
+        survival_probabilities: list[float] = []
         for own in node.own_blobs:
             survival = 1.0
             for enemy in risk_enemies:
@@ -2369,7 +2572,13 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                     40.0,
                 )
                 survival = min(survival, 1.0 / (1.0 + math.exp(-scaled)))
+            survival_probabilities.append(survival)
             safe_mass += own.mass * survival
+
+        # Fragment outcomes are correlated: one predator can sweep several
+        # pieces in sequence.  An independent-union probability would make a
+        # 16-way split artificially look almost certain to survive.
+        continuation_probability = max(survival_probabilities, default=0.0)
 
         opportunities: list[float] = []
         for food in foods:
@@ -2391,6 +2600,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 for own in node.own_blobs
                 if self._can_still_consume_virus_at_contact(own, virus)
             ]
+            virus_values: list[float] = []
             for origin in candidates:
                 gap = max(0.0, math.dist(origin.pos, virus.pos) - origin.radius)
                 retention = self._virus_retained_mass_fraction(
@@ -2399,12 +2609,16 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                     virus,
                     arena_size,
                 )
-                opportunities.append(
+                virus_values.append(
                     virus.radius
                     * virus.radius
                     * retention
                     * math.exp(-gap / self._VIRUS_POTENTIAL_HORIZON)
                 )
+            if virus_values:
+                # One virus is one resource even when several of our blobs can
+                # reach it.  Count the best acquisition route, not every origin.
+                opportunities.append(max(virus_values))
 
         for enemy in node.enemies:
             if enemy.stale_rounds:
@@ -2416,13 +2630,8 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             ]
             if not edible:
                 continue
-            gap = min(
-                max(0.0, math.dist(own.pos, enemy.pos) - own.radius)
-                for own in edible
-            )
-            rival_weight = 1.0 + self._rival_values.get(enemy.player_id, 0.0)
             opportunities.append(
-                enemy.mass * rival_weight * math.exp(-gap / 8.0)
+                self._prey_expected_mass(node, enemy, arena_size)
             )
 
         opportunities.sort(reverse=True)
@@ -2430,30 +2639,151 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             value * weight
             for value, weight in zip(opportunities[:3], (1.0, 0.25, 0.1), strict=False)
         )
-        effective_mass = safe_mass + opportunity_mass
-
-        enemy_mass_by_player: dict[int, float] = {}
-        for enemy in node.enemies:
-            enemy_mass_by_player[enemy.player_id] = (
-                enemy_mass_by_player.get(enemy.player_id, 0.0) + enemy.mass
-            )
-        competitor_pressure = max(
-            (
-                self._rival_values.get(player_id, 0.0)
-                * math.log1p(mass / max(node.total_mass, EPSILON))
-                for player_id, mass in enemy_mass_by_player.items()
-            ),
-            default=0.0,
+        competitor_mass_debt = sum(
+            self._rival_values.get(enemy.player_id, 0.0) * enemy.mass
+            for enemy in node.enemies
         )
-        return (
-            100.0 * math.log(max(effective_mass, 0.05))
-            - 20.0 * competitor_pressure
+        return 100.0 * (
+            safe_mass
+            + continuation_probability * opportunity_mass
+            - competitor_mass_debt
+            - self.recovery_mass * (1.0 - continuation_probability)
         )
 
     def _terminal_score(self, node: SearchNode) -> float:
         # ``_search_utility`` is applied as a potential difference at every
         # transition, so the path score already contains the frontier value.
         return node.score
+
+    def _prey_candidate_priority(
+        self,
+        node: SearchNode,
+        enemy: EnemyBlob,
+        arena_size: float,
+    ) -> tuple[float, ...]:
+        return (
+            -self._prey_expected_mass(node, enemy, arena_size),
+            squared_distance(node.center, enemy.pos),
+            enemy.player_id,
+            enemy.blob_id,
+        )
+
+    def _order_root_actions(self, actions: tuple[Action, ...]) -> tuple[Action, ...]:
+        """Interleave semantic families before exact root evaluation.
+
+        A fixed work budget must compare different hypotheses, rather than
+        spending every transition on small variations of one escape or split
+        attack.  Scheduling changes here; every action still uses the same
+        exact transition and state value.
+        """
+
+        family_order = (
+            "escape",
+            "virus",
+            "baseline",
+            "prey",
+            "resource",
+            "position",
+            "explore",
+        )
+        grouped: dict[str, list[Action]] = {family: [] for family in family_order}
+        for action in actions:
+            reason = action.reason
+            if "escape" in reason:
+                family = "escape"
+            elif reason in {"keep", "continue"}:
+                family = "baseline"
+            elif "prey" in reason:
+                family = "prey"
+            elif "virus" in reason:
+                family = "virus"
+            elif "food" in reason or "farm" in reason:
+                family = "resource"
+            elif reason in {"center", "wall"} or "wall" in reason:
+                family = "position"
+            else:
+                family = "explore"
+            grouped[family].append(action)
+
+        ordered: list[Action] = []
+        max_family_size = max((len(group) for group in grouped.values()), default=0)
+        for index in range(max_family_size):
+            for family in family_order:
+                group = grouped[family]
+                if index < len(group):
+                    ordered.append(group[index])
+        return tuple(ordered)
+
+    def _order_deeper_actions(self, actions: tuple[Action, ...]) -> tuple[Action, ...]:
+        return self._order_root_actions(actions)
+
+    def _actions_per_node_limit(self, depth_index: int) -> int:
+        return 6 if depth_index == 0 else 1
+
+    def _prey_expected_mass(
+        self,
+        node: SearchNode,
+        enemy: EnemyBlob,
+        arena_size: float,
+    ) -> float:
+        capture_probability = max(
+            (
+                self._prey_capture_probability(own, enemy, arena_size)
+                for own in node.own_blobs
+                if can_eat_player_blob(own.radius, enemy.radius)
+            ),
+            default=0.0,
+        )
+        rival_value = self._rival_values.get(enemy.player_id, 0.0)
+        return capture_probability * enemy.mass * (1.0 + rival_value)
+
+    def _prey_capture_probability(
+        self,
+        own: OwnBlob,
+        enemy: EnemyBlob,
+        arena_size: float,
+    ) -> float:
+        """Estimate capture reach from the actual clamped closing speed."""
+        delta_x = enemy.x - own.x
+        delta_y = enemy.y - own.y
+        distance = math.hypot(delta_x, delta_y)
+        gap = max(0.0, distance - own.radius)
+        if gap <= EPSILON:
+            return 1.0
+        direction = (delta_x / distance, delta_y / distance)
+
+        moved_own = self._move_own(own, direction, arena_size)
+        enemy_direction = normalise(enemy.direction)
+        flee_direction = normalise(
+            (
+                direction[0] * 0.62 + enemy_direction[0] * 0.38,
+                direction[1] * 0.62 + enemy_direction[1] * 0.38,
+            )
+        )
+        enemy_speed = _speed(enemy.radius)
+        enemy_x = _clamp(
+            enemy.x + flee_direction[0] * enemy_speed,
+            enemy.radius,
+            arena_size - enemy.radius,
+        )
+        enemy_y = _clamp(
+            enemy.y + flee_direction[1] * enemy_speed,
+            enemy.radius,
+            arena_size - enemy.radius,
+        )
+        next_gap = max(
+            0.0,
+            math.hypot(enemy_x - moved_own.x, enemy_y - moved_own.y)
+            - own.radius,
+        )
+        closing = gap - next_gap
+        temperature = self._CAPTURE_CLOSING_TEMPERATURE
+        scaled = _clamp(closing / temperature, -40.0, 40.0)
+        effective_closing = temperature * math.log1p(math.exp(scaled))
+        return math.exp(
+            -gap
+            / max(self._CAPTURE_HORIZON * effective_closing, EPSILON)
+        )
 
     def _movement_efficiency(
         self,
@@ -2558,8 +2888,8 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 blob.y,
                 blob.radius,
                 blob.merge_cooldown,
-                blob.eject_vx,
-                blob.eject_vy,
+                getattr(blob, "eject_vx", 0.0),
+                getattr(blob, "eject_vy", 0.0),
             ]
             for blob in blobs
         }
@@ -2692,18 +3022,19 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         separate()
         merge_touching()
         separate()
-        return [
-            replace(
-                work[blob_id][0],
-                x=work[blob_id][1],
-                y=work[blob_id][2],
-                radius=work[blob_id][3],
-                merge_cooldown=work[blob_id][4],
-                eject_vx=work[blob_id][5],
-                eject_vy=work[blob_id][6],
-            )
-            for blob_id in sorted(work)
-        ]
+        result = []
+        for blob_id in sorted(work):
+            item = work[blob_id]
+            updates = {
+                "x": item[1],
+                "y": item[2],
+                "radius": item[3],
+                "merge_cooldown": item[4],
+            }
+            if isinstance(item[0], OwnBlob):
+                updates.update(eject_vx=item[5], eject_vy=item[6])
+            result.append(replace(item[0], **updates))
+        return result
 
     def _virus_retained_mass_fraction(
         self,
@@ -2712,13 +3043,17 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         virus,
         arena_size: float,
     ) -> float:
+        cache_key = (id(node), origin.blob_id, virus.virus_id)
+        cached = self._virus_retention_cache.get(cache_key)
+        if cached is not None and cached[0] is node:
+            return cached[1]
         matching = next(
             (blob for blob in node.own_blobs if blob.blob_id == origin.blob_id),
             None,
         )
         if matching is None:
             return 0.0
-        return self._post_virus_retained_mass_fraction(
+        retained = self._post_virus_retained_mass_fraction(
             # Search nodes are authoritative root states or the result of the
             # exact final stabilisation in ``_step``.  Re-stabilising here for
             # every virus candidate was redundant and consumed enough of the
@@ -2729,6 +3064,21 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             virus=virus,
             arena_size=arena_size,
         )
+        self._virus_retention_cache[cache_key] = (node, retained)
+        return retained
+
+    def _risk_enemies(
+        self,
+        enemies: tuple[EnemyBlob, ...],
+    ) -> tuple[EnemyBlob, ...]:
+        """Return current and future envelopes once per rollout state."""
+
+        cached = self._risk_envelope_cache.get(id(enemies))
+        if cached is not None and cached[0] is enemies:
+            return cached[1]
+        risk_enemies = (*enemies, *self._future_enemy_envelopes(enemies))
+        self._risk_envelope_cache[id(enemies)] = (enemies, risk_enemies)
+        return risk_enemies
 
     def _post_virus_retained_mass_fraction(
         self,
@@ -2750,6 +3100,20 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         piece_count = max(1, MAX_BLOB_COUNT - len(own_blobs) + 1)
         total_mass = origin.mass + virus.radius * virus.radius
         piece_radius = math.sqrt(total_mass / piece_count)
+        post_radii = [piece_radius]
+        post_radii.extend(
+            blob.radius
+            for blob in own_blobs
+            if blob.blob_id != origin.blob_id
+        )
+        enemy_tuple = enemies if isinstance(enemies, tuple) else tuple(enemies)
+        risk_enemies = self._risk_enemies(enemy_tuple)
+        if not any(
+            can_eat_player_blob(enemy.radius, radius)
+            for enemy in risk_enemies
+            for radius in post_radii
+        ):
+            return 1.0
         fragments = self._virus_replacement_fragments(
             origin=origin,
             piece_radius=piece_radius,
@@ -2764,10 +3128,6 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             return 0.0
 
         retained_mass = 0.0
-        risk_enemies = (
-            *enemies,
-            *self._future_enemy_envelopes(tuple(enemies)),
-        )
         for blob in post_blobs:
             retention = 1.0
             for enemy in risk_enemies:
