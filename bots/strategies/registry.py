@@ -66,7 +66,6 @@ def _spec(
 
 _COMMON_SUBMISSION_MODULES = (
     "bots/strategies/base.py",
-    "bots/strategies/features.py",
     "bots/simulation/rules.py",
 )
 
@@ -78,7 +77,11 @@ def _submission(
 ) -> SubmissionBundleSpec:
     return SubmissionBundleSpec(
         strategy_class=strategy_class,
-        source_modules=(*_COMMON_SUBMISSION_MODULES, *source_modules),
+        source_modules=(
+            *_COMMON_SUBMISSION_MODULES,
+            *source_modules,
+            "bots/strategies/features.py",
+        ),
         local_only_classes=local_only_classes,
     )
 
