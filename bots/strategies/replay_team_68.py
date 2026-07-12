@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Behavioral reconstruction of official competition team 68.
 
-Across both available matches, movement follows the nearest visible prey,
+Across the available matches, movement follows the nearest visible prey,
 escapes a nearest predator more than 1.4 times the largest own radius, and
 otherwise follows the nearest food.  That explicit rule passes the combined
 direction shadow gate.  Split timing is less stable, so it uses the fitted
@@ -25,7 +25,7 @@ from strategies.replay_imitation import (
 from strategies.replay_profiles import PROFILES
 
 
-SOURCE_MATCHES = (11654, 11697)
+SOURCE_MATCHES = PROFILES[68].source_matches
 PREDATOR_ESCAPE_RADIUS_RATIO = 1.4
 
 

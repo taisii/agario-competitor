@@ -51,7 +51,7 @@ def test_team_3_uses_both_official_matches_and_preserves_failed_gate() -> None:
     strategy = ReplayTeam3Strategy()
 
     assert strategy.profile.team_id == 3
-    assert strategy.profile.source_matches == (11710, 11745)
+    assert strategy.profile.source_matches == (11710, 11745, 13934, 13937, 13938)
     assert strategy.profile.validation_passed is False
 
 
@@ -93,11 +93,27 @@ def test_team_3_cannot_split_below_engine_mass_threshold() -> None:
     assert decision.split is False
 
 
-def test_team_3_profile_can_emit_late_high_mass_split() -> None:
+def test_team_3_does_not_treat_an_edible_virus_as_split_prey() -> None:
     virus = VirusModel(virus_id=1, pos=(32.0, 30.0), radius=1.5)
     decision = _choose(
         ReplayTeam3Strategy(),
         _game(own_radius=5.0, viruses=(virus,)),
+    )
+
+    assert decision.split is False
+
+
+def test_team_3_profile_can_emit_close_prey_split() -> None:
+    prey = VisibleBlobModel(
+        player_id=1,
+        team_id=9,
+        blob_id=0,
+        pos=(32.0, 30.0),
+        radius=1.0,
+    )
+    decision = _choose(
+        ReplayTeam3Strategy(),
+        _game(own_radius=5.0, enemies=(prey,)),
     )
 
     assert decision.split is True

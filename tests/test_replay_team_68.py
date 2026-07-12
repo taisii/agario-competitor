@@ -63,7 +63,7 @@ def _choose(strategy: ReplayTeam68Strategy, game: SimpleNamespace):
 def test_team68_uses_both_source_matches_and_preserves_split_failure() -> None:
     strategy = ReplayTeam68Strategy()
 
-    assert SOURCE_MATCHES == (11654, 11697)
+    assert SOURCE_MATCHES == (11654, 11697, 13931, 13932, 13938, 13939, 13940)
     assert strategy.profile.source_matches == SOURCE_MATCHES
     assert not strategy.profile.validation_passed
 

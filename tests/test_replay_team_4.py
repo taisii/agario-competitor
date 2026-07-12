@@ -39,7 +39,7 @@ def _observation(
 
 
 def test_team4_profile_covers_all_observed_matches() -> None:
-    assert PROFILE.source_matches == (11673, 11698, 11752)
+    assert PROFILE.source_matches == (11673, 11698, 11752, 13937)
 
 
 def test_team4_direction_is_unit_length() -> None:

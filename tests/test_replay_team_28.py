@@ -51,7 +51,7 @@ def test_team_28_uses_validated_official_profile() -> None:
     strategy = ReplayTeam28Strategy()
 
     assert strategy.profile.team_id == 28
-    assert strategy.profile.source_matches == (11716, 11753)
+    assert strategy.profile.source_matches == (11716, 11753, 13936)
     assert strategy.profile.validation_passed is True
 
 

@@ -38,7 +38,7 @@ def _observation(
 def test_team1_uses_both_observed_matches_for_direction_profile() -> None:
     strategy = ReplayTeam1Strategy()
 
-    assert strategy.profile.source_matches == (11710, 11753)
+    assert strategy.profile.source_matches == (11710, 11753, 13932, 13940)
 
 
 def test_team1_splits_for_reachable_prey_inside_heading_corridor() -> None:

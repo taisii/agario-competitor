@@ -50,7 +50,7 @@ def _choose(strategy: ReplayTeam59Strategy, game: SimpleNamespace):
 def test_team59_profile_covers_all_observed_matches() -> None:
     strategy = ReplayTeam59Strategy()
 
-    assert strategy.profile.source_matches == (11681, 11710, 11725)
+    assert strategy.profile.source_matches == (11681, 11710, 11725, 13931, 13938)
 
 
 def test_team59_preserves_failed_cross_match_validation_flag() -> None:

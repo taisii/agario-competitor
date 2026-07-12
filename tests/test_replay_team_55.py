@@ -55,11 +55,13 @@ def _heading_bin(direction: tuple[float, float]) -> float:
 def test_team55_profile_covers_all_observed_matches() -> None:
     strategy = ReplayTeam55Strategy()
 
-    assert strategy.profile.source_matches == (11679, 11725)
+    assert strategy.profile.source_matches == (11679, 11725, 13931, 13935, 13941)
 
 
 def test_team55_preserves_failed_direction_validation_flag() -> None:
-    assert not ReplayTeam55Strategy().profile.validation_passed
+    profile = ReplayTeam55Strategy().profile
+    assert not profile.validation_passed
+    assert profile.angle_bins == 24
 
 
 def test_team55_direction_is_unit_length_and_on_observed_grid() -> None:
@@ -92,7 +94,7 @@ def test_team55_every_regime_stays_on_twenty_four_heading_grid() -> None:
     )
 
 
-def test_team55_never_splits_even_with_edible_prey() -> None:
+def test_team55_can_split_directly_toward_edible_prey() -> None:
     prey = VisibleBlobModel(
         player_id=1,
         team_id=1,
@@ -105,4 +107,4 @@ def test_team55_never_splits_even_with_edible_prey() -> None:
         _game(own_radius=4.0, enemies=(prey,)),
     )
 
-    assert not decision.split
+    assert decision.split

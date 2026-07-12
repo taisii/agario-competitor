@@ -49,7 +49,7 @@ def test_team_5_uses_both_matches_and_preserves_failed_gate() -> None:
     strategy = ReplayTeam5Strategy()
 
     assert strategy.profile.team_id == 5
-    assert strategy.profile.source_matches == (11667, 11673)
+    assert strategy.profile.source_matches == (11667, 11673, 13932)
     assert strategy.profile.validation_passed is False
 
 
@@ -62,7 +62,7 @@ def test_team_5_initial_safe_direction_is_attracted_to_food() -> None:
     assert decision.direction[0] > 0.8
 
 
-def test_team_5_preserves_inertia_against_reversed_food_target() -> None:
+def test_team_5_retains_inertial_offset_when_food_reverses() -> None:
     strategy = ReplayTeam5Strategy()
     first = _choose(
         strategy,
@@ -74,7 +74,8 @@ def test_team_5_preserves_inertia_against_reversed_food_target() -> None:
     )
 
     assert first.direction[0] > 0.8
-    assert second.direction[0] > 0.0
+    assert second.direction[0] > -0.99
+    assert abs(second.direction[1]) > 0.1
 
 
 def test_team_5_cannot_split_below_engine_mass_threshold() -> None:

@@ -119,7 +119,7 @@ or split frequency, but not the exact hidden random sequence or split timing.
 | 12 | FAIL | FAIL | Food/escape/inertia; close-prey split with 15-round re-arm |
 | 13 | PASS | FAIL | Food/inertia movement; uniquely identified prey split |
 | 14 | FAIL | FAIL | Prey/escape mixture; close-prey split with 15-round re-arm |
-| 15 | FAIL | FAIL | Strong inertia with unstable targets and split timing |
+| 15 | FAIL | FAIL | Strong inertia; close-prey split with 10-round re-arm |
 | 16 | FAIL | FAIL | Fitted direction; sparse child-safe prey split |
 | 17 | PASS | PASS | Nearest food or predator field; no split |
 | 21 | FAIL | FAIL | Direction PASS: food/predator regimes; split timing FAIL |
@@ -142,11 +142,11 @@ or split frequency, but not the exact hidden random sequence or split timing.
 | 49 | FAIL | FAIL | Food/prey/predator regimes; close-prey split with 18-round re-arm |
 | 51 | FAIL | FAIL | 16-direction safe movement, continuous escape, prey split gate |
 | 53 | FAIL | FAIL | Direction PASS: food/prey/predator regimes; split timing FAIL |
-| 55 | Style only | FAIL | Hidden-RNG 24-direction movement; no split |
+| 55 | Style only | FAIL | 24-direction movement; sparse direct-prey split |
 | 56 | Style only | FAIL | Hidden-RNG 24-direction movement; burst splitting |
-| 58 | FAIL | FAIL | Stateful fitted field policy |
+| 58 | FAIL | FAIL | Stateful field policy; close-prey split with 20-round re-arm |
 | 59 | FAIL | FAIL | Stateful direction; current close-prey split with 17-round re-arm |
-| 63 | FAIL | FAIL | Inertial field movement; unstable split timing |
+| 63 | FAIL | FAIL | Inertial field movement; close-prey split with 5-round re-arm |
 | 68 | FAIL | FAIL | Direction PASS: prey, predator, then food priority; split FAIL |
 | 75 | PASS | PASS | Raw vector from nearest fragment to nearest food; no split |
 | 77 | FAIL | FAIL | Food-led regime policy; no split |
@@ -245,3 +245,14 @@ radius ratio at least 1.5) with a 15-round re-arm interval. All three folds
 reach split F1 0.40 or better; mean held-out F1 rises from 0.04 to 0.54 and
 full-trace F1 reaches 0.65. Direction remains inconsistent across matches, so
 the overall verdict stays FAIL.
+
+The same fixed-rule audit improves the remaining top targets without hiding
+bad folds: team 15 split F1 rises from 0.19 to 0.45, team 58 from 0.08 to
+0.31, and team 63 from 0.14 to 0.39. Their direction models remain well below
+the strict gate, so all three correctly remain FAIL.
+
+Team 55's apparent loss of its 24-heading grid was a fitter bug: 6,401 of
+6,412 non-split commands are exactly grid-aligned, while 11 direct-prey split
+commands are continuous angles. Grid phase detection now refits from circular
+inliers, preserving the ordinary movement grid without pretending the newer
+split events do not exist.

@@ -49,7 +49,7 @@ def test_team_21_uses_all_sources_and_preserves_split_failure() -> None:
     strategy = ReplayTeam21Strategy()
 
     assert strategy.profile.team_id == 21
-    assert strategy.profile.source_matches == (11646, 11654, 11698, 11719)
+    assert strategy.profile.source_matches == (11646, 11654, 11698, 11719, 13931)
     assert strategy.profile.validation_passed is False
 
 

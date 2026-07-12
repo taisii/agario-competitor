@@ -50,7 +50,7 @@ def test_team_63_uses_every_source_and_preserves_failed_gate() -> None:
     strategy = ReplayTeam63Strategy()
 
     assert strategy.profile.team_id == 63
-    assert strategy.profile.source_matches == (11654, 11679, 11698)
+    assert strategy.profile.source_matches == (11654, 11679, 11698, 13934, 13937, 13941)
     assert strategy.profile.validation_passed is False
 
 

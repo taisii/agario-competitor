@@ -50,7 +50,7 @@ def _choose(strategy: ReplayTeam10Strategy, game: SimpleNamespace):
 def test_team10_profile_covers_all_observed_matches() -> None:
     strategy = ReplayTeam10Strategy()
 
-    assert strategy.profile.source_matches == (11697, 11745, 11756)
+    assert strategy.profile.source_matches == (11697, 11745, 11756, 13933)
 
 
 def test_team10_preserves_measured_failed_generalization_flag() -> None:

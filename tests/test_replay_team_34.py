@@ -50,7 +50,7 @@ def test_team_34_marks_single_trace_validation_failure() -> None:
     strategy = ReplayTeam34Strategy()
 
     assert strategy.profile.team_id == 34
-    assert strategy.profile.source_matches == (11681,)
+    assert strategy.profile.source_matches == (11681, 13938)
     assert strategy.profile.validation_passed is False
 
 

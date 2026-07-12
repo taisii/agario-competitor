@@ -404,10 +404,26 @@ def detect_angle_grid(samples: Sequence[ReplaySample]) -> tuple[int, float]:
         return 0, 0.0
     for bins in (8, 12, 16, 24, 32):
         phases = [angle * bins for angle in angles]
-        phase = math.atan2(
+        scaled_phase = math.atan2(
             sum(math.sin(value) for value in phases),
             sum(math.cos(value) for value in phases),
-        ) / bins
+        )
+        # A bot can aim an occasional split directly at prey while quantizing
+        # every ordinary move. Refit the phase from circular inliers so those
+        # sparse tactical angles do not destroy detection of the movement grid.
+        for tolerance in (0.1, 0.01):
+            inliers = [
+                value
+                for value in phases
+                if abs((value - scaled_phase + math.pi) % math.tau - math.pi)
+                <= tolerance
+            ]
+            if inliers:
+                scaled_phase = math.atan2(
+                    sum(math.sin(value) for value in inliers),
+                    sum(math.cos(value) for value in inliers),
+                )
+        phase = scaled_phase / bins
         step = math.tau / bins
         errors = [abs((angle - phase + step / 2.0) % step - step / 2.0) for angle in angles]
         if sorted(errors)[int(0.95 * (len(errors) - 1))] <= 1e-5:
@@ -433,9 +449,12 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
         9: ((0.65, 2.5, 0.14, 0.0625, 0.0, 0.0), 90),
         12: ((0.60, 1.5, 0.14, 0.0625, 0.0, 0.0), 15),
         14: ((0.65, 2.0, 0.25, 0.125, 0.0, 0.0), 15),
+        15: ((1.00, 2.0, 0.20, 0.25, 0.0, 0.0), 10),
         35: ((2.00, 0.0, 0.20, 0.0625, 1.0, 0.0), 0),
         49: ((0.65, 1.5, 0.15, 0.125, 0.0, 0.0), 18),
+        58: ((0.45, 1.5, 0.14, 0.0625, 0.0, 0.0), 20),
         59: ((0.80, 2.0, 0.15, 0.125, 0.0, 0.0), 17),
+        63: ((0.45, 2.0, 0.20, 0.25, 0.0, 0.0), 5),
     }
     split_rule, split_cooldown_rounds = split_rules.get(team_id, ((), 0))
     direction_override_weights: tuple[tuple[float, ...], ...] = ()

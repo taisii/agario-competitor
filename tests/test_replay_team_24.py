@@ -50,7 +50,7 @@ def _choose(strategy: ReplayTeam24Strategy, game: SimpleNamespace):
 def test_team24_profile_covers_all_observed_matches() -> None:
     strategy = ReplayTeam24Strategy()
 
-    assert strategy.profile.source_matches == (11719, 11739, 11753)
+    assert strategy.profile.source_matches == (11719, 11739, 11753, 13932, 13936, 13940, 13941)
 
 
 def test_team24_preserves_failed_replay_validation_flag() -> None:

@@ -60,7 +60,7 @@ def _observation(
 def test_team31_profile_uses_all_observed_source_matches() -> None:
     strategy = ReplayTeam31Strategy()
 
-    assert strategy.profile.source_matches == (11667, 11710, 11724)
+    assert strategy.profile.source_matches == (11667, 11710, 11724, 13934)
 
 
 def test_team31_direction_is_snapped_to_observed_sixteen_way_grid() -> None:

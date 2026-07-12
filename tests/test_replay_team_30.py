@@ -54,7 +54,7 @@ def _choose(strategy: ReplayTeam30Strategy, game: SimpleNamespace):
 
 def test_team30_profile_covers_both_validated_matches() -> None:
     assert PROFILE.validation_passed
-    assert PROFILE.source_matches == (11724, 11756)
+    assert PROFILE.source_matches == (11724, 11756, 13931, 13935, 13937)
 
 
 def test_team30_reproduces_raw_nearest_food_vector() -> None:
