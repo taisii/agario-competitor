@@ -217,3 +217,9 @@ Team 3 now uses an 18-round re-arm interval around its larger-prey gate. Mean
 held-out split F1 rises from 0.44 to 0.63. The current-cohort folds with no
 split produce no false events, while match 13938 reaches F1 0.60. Its movement
 model remains below the direction gate, so the overall verdict stays FAIL.
+
+Team 35's runtime and evaluator now share its previously hand-verified split
+invariant. Mean held-out split F1 rises from 0.19 to 0.99. Team-specific ridge
+tuning also increases direction-passing folds from three to four out of five;
+only match 11739 remains outside the direction gate. The overall verdict stays
+FAIL because LOMO requires every fold to pass.

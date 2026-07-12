@@ -416,7 +416,7 @@ def detect_angle_grid(samples: Sequence[ReplaySample]) -> tuple[int, float]:
 
 
 def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
-    direction_ridge = 0.005 if team_id == 49 else 0.25
+    direction_ridge = 0.005 if team_id in {35, 49} else 0.25
     direction_weights = fit_direction(samples, direction_ridge)
     regime_direction_weights = fit_regime_directions(
         samples,
@@ -430,6 +430,7 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
     # waits roughly one engine split interval before it can fire again.
     split_rules = {
         3: ((1.00, 2.0, 0.25, 0.125, 0.0, 0.0), 18),
+        35: ((2.00, 0.0, 0.20, 0.0625, 1.0, 0.0), 0),
         49: ((0.65, 1.5, 0.15, 0.125, 0.0, 0.0), 18),
         59: ((0.80, 2.0, 0.15, 0.125, 0.0, 0.0), 17),
     }
