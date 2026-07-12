@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTRIES = ROOT / "bots" / "entries"
 DEFAULT_OUTPUT = ROOT / ".agario" / "benchmarks" / "all-strategy-matrix"
 IGNORED_ENTRIES = {
+    "_runner",
     "random_opponent",
     "random_replay_opponent",
 }
@@ -159,7 +160,15 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=2)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--opponents", nargs="*")
-    parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help=(
+            "Concurrent matches. The safe default is 1 because one match already "
+            "runs eight bot processes; raise only for lightweight opponents."
+        ),
+    )
     parser.add_argument(
         "--official",
         action="store_true",

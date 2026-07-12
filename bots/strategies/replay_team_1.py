@@ -11,13 +11,8 @@ split commands on this sparse trace.
 
 import math
 
-from lib.config.player import (
-    BASE_PLAYER_SPEED,
-    MIN_PLAYER_SPEED,
-    PLAYER_SPEED_RADIUS_FACTOR,
-)
-from simulation.rules import movement_speed
 from strategies.base import StrategyContext, StrategyDecision
+from strategies.features import player_speed as _speed
 from strategies.replay_imitation import (
     EAT_SIZE_RATIO,
     ImitationBlob,
@@ -34,15 +29,6 @@ from strategies.replay_profiles import PROFILES
 MAX_BLOB_COUNT = 16
 SPLIT_MIN_MASS = 2.0
 SPLIT_EJECT_SPEED = 1.6
-def _speed(radius: float) -> float:
-    return movement_speed(
-        radius,
-        base_speed=BASE_PLAYER_SPEED,
-        radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
-        minimum_speed=MIN_PLAYER_SPEED,
-    )
-
-
 class ReplayTeam1Strategy(ReplayImitationStrategy):
     """Team-1 fitted direction with a replay-derived split corridor gate."""
 
@@ -50,7 +36,6 @@ class ReplayTeam1Strategy(ReplayImitationStrategy):
 
     def __init__(self) -> None:
         super().__init__(PROFILES[1])
-        self.name = type(self).name
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         observation = observation_from_context(context)

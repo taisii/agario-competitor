@@ -8,6 +8,11 @@ import json
 from pathlib import Path
 import re
 
+if __package__:
+    from .benchmark_simulations import parse_outcome
+else:
+    from benchmark_simulations import parse_outcome
+
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY_PATTERN = re.compile(r"replay_team_(\d+)\.py$")
@@ -37,14 +42,21 @@ async def run_batch(
     entries: dict[int, Path],
     workspace_root: Path,
     semaphore: asyncio.Semaphore,
+    fast: bool,
 ) -> dict[str, object]:
     workspace = workspace_root / f"batch-{index:02d}"
     log_path = workspace_root / f"batch-{index:02d}.log"
-    command = ["uv", "run", "simulation"]
+    command = (
+        ["uv", "run", "python", "scripts/run_fast_simulation.py"]
+        if fast
+        else ["uv", "run", "simulation"]
+    )
     command.extend(
         f"1:{entries[team_id].relative_to(ROOT)}" for team_id in team_ids
     )
-    command.extend(["--headless", "--workspace", str(workspace)])
+    if not fast:
+        command.append("--headless")
+    command.extend(["--workspace", str(workspace)])
     async with semaphore:
         process = await asyncio.create_subprocess_exec(
             *command,
@@ -56,8 +68,16 @@ async def run_batch(
     workspace_root.mkdir(parents=True, exist_ok=True)
     log_path.write_bytes(output)
     result_path = workspace / "output/results.json"
-    result = json.loads(result_path.read_text()) if result_path.exists() else None
-    success = process.returncode == 0 and result is not None and result.get("result_type") == "SUCCESS"
+    result = (
+        parse_outcome(log_path)
+        if fast
+        else (json.loads(result_path.read_text()) if result_path.exists() else None)
+    )
+    success = (
+        process.returncode == 0
+        and result is not None
+        and result.get("result_type") == "SUCCESS"
+    )
     return {
         "batch": index,
         "team_ids": team_ids,
@@ -91,6 +111,7 @@ async def async_main(args: argparse.Namespace) -> int:
                 entries=entries,
                 workspace_root=args.workspace,
                 semaphore=semaphore,
+                fast=not args.official,
             )
             for index, team_ids in enumerate(batches(selected))
         )
@@ -114,7 +135,12 @@ async def async_main(args: argparse.Namespace) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--teams", help="comma-separated team IDs; default is every entry")
-    parser.add_argument("--jobs", type=int, default=3)
+    parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument(
+        "--official",
+        action="store_true",
+        help="Use the recording-capable official runner instead of the fast smoke runner",
+    )
     parser.add_argument(
         "--workspace",
         type=Path,

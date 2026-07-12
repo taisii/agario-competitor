@@ -39,12 +39,15 @@ uv run simulation \
   1:bots/entries/replay_team_44.py
 ```
 
-Smoke-test every available clone in mixed 8-player matches, with three matches
-running in parallel:
+Smoke-test every available clone in mixed 8-player matches:
 
 ```bash
-uv run python scripts/simulate_replay_opponents.py --jobs 3
+uv run python scripts/simulate_replay_opponents.py
 ```
+
+The smoke test uses the no-recording fast runner. Add `--official` for final
+process-layout verification. One match already runs eight bot processes, so
+increase `--jobs` only after confirming the selected opponents are lightweight.
 
 The batch report and full simulator workspaces are written below
 `.agario/replay-imitation/simulations/`.

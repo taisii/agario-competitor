@@ -73,8 +73,8 @@ def _spec(
 
 _COMMON_SUBMISSION_MODULES = (
     "bots/strategies/base.py",
-    "bots/strategies/features.py",
     "bots/simulation/rules.py",
+    "bots/strategies/features.py",
 )
 
 
@@ -145,8 +145,9 @@ REPLAY_TEAM_IDS = (
 )
 
 CUSTOM_REPLAY_TEAM_IDS = frozenset(
-    {1, 2, 4, 6, 13, 16, 22, 25, 27, 29, 30, 31, 35, 38, 39, 44, 51, 53, 56, 68, 75}
+    {1, 4, 13, 16, 22, 25, 29, 31, 35, 39, 44, 51, 53, 56, 68}
 )
+PROFILED_OPPONENT_TEAM_IDS = frozenset({2, 6, 27, 30, 38, 75})
 
 _REPLAY_SPECS = tuple(
     _spec(
@@ -154,7 +155,11 @@ _REPLAY_SPECS = tuple(
         (
             f"strategies.replay_team_{team_id}:ReplayTeam{team_id}Strategy"
             if team_id in CUSTOM_REPLAY_TEAM_IDS
-            else "strategies.replay_imitation:create_profiled_replay_strategy"
+            else (
+                "strategies.replay_opponent_policies:create_profiled_opponent_strategy"
+                if team_id in PROFILED_OPPONENT_TEAM_IDS
+                else "strategies.replay_imitation:create_profiled_replay_strategy"
+            )
         ),
         "replay_opponent",
         factory_argument=None if team_id in CUSTOM_REPLAY_TEAM_IDS else team_id,

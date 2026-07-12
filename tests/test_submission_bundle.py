@@ -5,7 +5,7 @@ import math
 import sys
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +14,12 @@ sys.path.insert(0, str(ROOT / "bots"))
 
 from scripts.build_submission import build_submission  # noqa: E402
 from strategies.base import StrategyContext  # noqa: E402
-from strategies.receding_horizon import ThreatAwareRecedingHorizonStrategy, EnemyTrack, OwnBlob, _speed  # noqa: E402
+from strategies.features import player_speed  # noqa: E402
+from strategies.receding_horizon import (  # noqa: E402
+    EnemyTrack,
+    OwnBlob,
+    ThreatAwareRecedingHorizonStrategy,
+)
 
 
 def test_submission_bundle_is_single_file_without_local_imports() -> None:
@@ -75,6 +80,18 @@ def test_replay_dominance_submission_is_self_contained_and_uses_new_strategy() -
                 "telemetry",
             }
 
+    module = ModuleType("submission_test")
+    sys.modules[module.__name__] = module
+    try:
+        exec(compile(source, output, "exec"), module.__dict__)
+    finally:
+        sys.modules.pop(module.__name__, None)
+    strategy = module.ReplayDominanceStrategy()
+    assert strategy._can_still_consume_virus_at_contact(
+        SimpleNamespace(radius=2.0, mass=4.0, pos=(10.0, 10.0)),
+        SimpleNamespace(radius=1.5, pos=(10.0, 10.0)),
+    )
+
 
 def test_censored_predator_track_advances_toward_vulnerable_blob() -> None:
     strategy = ThreatAwareRecedingHorizonStrategy(depth=1, width=1, angular_samples=4)
@@ -102,6 +119,6 @@ def test_censored_predator_track_advances_toward_vulnerable_blob() -> None:
     enemies = strategy._update_enemy_memory(context, (own,), arena_size=60.0)
 
     assert len(enemies) == 1
-    assert math.isclose(enemies[0].x, 10.0 + _speed(2.0))
+    assert math.isclose(enemies[0].x, 10.0 + player_speed(2.0))
     assert enemies[0].direction == (1.0, 0.0)
     assert enemies[0].stale_rounds == 1

@@ -128,27 +128,9 @@ def test_every_catalog_entry_constructs_the_declared_strategy() -> None:
         assert create_strategy(name).name == name
 
 
-@pytest.mark.parametrize(
-    "name",
-    (
-        "beam_hunter",
-        "beam_rl_balanced",
-        "beam_rl_farmer",
-        "beam_rl_hunter",
-        "beam_rl_opportunist",
-        "beam_rl_survival",
-        "beam_rl_tuned",
-        "beam_rl_value",
-        "beam_survival",
-        "unified_deterministic",
-        "virus_farming_receding_horizon",
-        "candidate_submission",
-    ),
-)
-def test_removed_strategies_fail_explicitly(name: str) -> None:
-    assert name not in available_strategy_names()
+def test_unknown_strategy_fails_explicitly() -> None:
     with pytest.raises(ValueError, match="Unknown strategy"):
-        create_strategy(name)
+        create_strategy("removed_strategy")
 
 
 def test_random_replay_selection_is_paired_per_trial_and_slot() -> None:

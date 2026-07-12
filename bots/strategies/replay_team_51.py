@@ -56,7 +56,6 @@ class ReplayTeam51Strategy(ReplayImitationStrategy):
 
     def __init__(self) -> None:
         super().__init__(PROFILES[51])
-        self.name = type(self).name
         self._last_round: int | None = None
 
     def choose(self, context: StrategyContext) -> StrategyDecision:

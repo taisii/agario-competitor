@@ -29,6 +29,7 @@ from strategies.replay_imitation import (
     predict_direction,
 )
 from strategies.replay_profiles import PROFILES
+from strategies.randomness import MASK_64, unit_interval
 
 
 TEAM_ID = 31
@@ -38,9 +39,6 @@ MAX_SPLIT_PREY_DISTANCE = 12.0
 SINGLE_BLOB_SPLIT_RATE = 14.0 / 266.0
 TWO_BLOB_SPLIT_RATE = 5.0 / 17.0
 FOUR_BLOB_SPLIT_RATE = 1.0
-
-_MASK_64 = (1 << 64) - 1
-
 
 class ReplayTeam31Strategy:
     """Quantized fitted movement with replay-observed chained prey attacks."""
@@ -186,13 +184,5 @@ class ReplayTeam31Strategy:
             ^ (round(own_radius * 1_000_000) * 0x8EBC6AF09C88C6E3)
             ^ (round(prey_radius * 1_000_000) * 0xA0761D6478BD642F)
             ^ (round(prey_distance * 1_000_000) * 0x589965CC75374CC3)
-        ) & _MASK_64
-        return cls._mix64(value) / float(1 << 64)
-
-    @staticmethod
-    def _mix64(value: int) -> int:
-        value ^= value >> 30
-        value = (value * 0xBF58476D1CE4E5B9) & _MASK_64
-        value ^= value >> 27
-        value = (value * 0x94D049BB133111EB) & _MASK_64
-        return (value ^ (value >> 31)) & _MASK_64
+        ) & MASK_64
+        return unit_interval(value)
