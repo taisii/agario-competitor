@@ -139,7 +139,7 @@ or split frequency, but not the exact hidden random sequence or split timing.
 | 39 | Style only | FAIL | Persistent random heading, wall reflection, predator avoidance |
 | 44 | FAIL | FAIL | 32-direction inertia; tactical prey/virus/farming split |
 | 48 | FAIL | FAIL | Food/prey/predator field mixture; frequent split |
-| 49 | FAIL | FAIL | Food, prey, and predator regimes; unstable split timing |
+| 49 | FAIL | FAIL | Food/prey/predator regimes; close-prey split with 18-round re-arm |
 | 51 | FAIL | FAIL | 16-direction safe movement, continuous escape, prey split gate |
 | 53 | FAIL | FAIL | Direction PASS: food/prey/predator regimes; split timing FAIL |
 | 55 | Style only | FAIL | Hidden-RNG 24-direction movement; no split |
@@ -197,3 +197,12 @@ LOMO result regressed. Team 59 uses the combined cohort: its median direction
 error rises modestly from 14.7° to 16.4°, while split F1 gains from 0.00 to
 0.40. These selections are recorded in the generated report's
 `team_replay_dirs` field rather than being hidden in hand-edited profiles.
+
+Team 49's added trace exposed a missing state variable: a qualifying close
+prey remains visible for several frames, but the source bot does not request a
+split every frame. A team-specific 18-round re-arm interval now sits on top of
+the geometric rule (prey visible within 13 arena units, radius ratio at least
+1.5, no predator). Mean held-out split F1 rises from 0.22 to 0.74. Its overall
+LOMO verdict remains FAIL because direction is just below the aggregate gate
+(69.4% rather than 70% within 30°) and not every split fold reaches 70%
+precision and recall.

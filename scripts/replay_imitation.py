@@ -418,12 +418,19 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
     regime_direction_weights = fit_regime_directions(samples, direction_weights)
     split_weights, split_threshold = fit_split(samples)
     angle_bins, angle_offset = detect_angle_grid(samples)
+    # Team 49's split policy is edge-triggered. Static classification fires on
+    # every frame while the same prey remains visible; the observed policy
+    # waits roughly one engine split interval before it can fire again.
+    split_rule = (0.65, 1.5, 0.15, 0.125, 0.0, 0.0) if team_id == 49 else ()
+    split_cooldown_rounds = 18 if team_id == 49 else 0
     return ReplayProfile(
         team_id=team_id,
         direction_weights=direction_weights,
         regime_direction_weights=regime_direction_weights,
         split_weights=split_weights,
         split_threshold=split_threshold,
+        split_rule=split_rule,
+        split_cooldown_rounds=split_cooldown_rounds,
         angle_bins=angle_bins,
         angle_offset=angle_offset,
         source_matches=tuple(sorted({sample.match_id for sample in samples})),
@@ -447,6 +454,7 @@ def evaluate_profile(profile: ReplayProfile, samples: Sequence[ReplaySample]) ->
     labels: list[bool] = []
     predictions: list[bool] = []
     previous_by_trace: dict[tuple[int, int], tuple[float, float]] = defaultdict(lambda: (0.0, 0.0))
+    last_split_by_trace: dict[tuple[int, int], int] = defaultdict(lambda: -10_000)
     for sample in sorted(samples, key=lambda item: (item.match_id, item.round_number)):
         key = (sample.match_id, sample.player_id)
         previous = previous_by_trace[key]
@@ -489,7 +497,31 @@ def evaluate_profile(profile: ReplayProfile, samples: Sequence[ReplaySample]) ->
         )
         score = sum(weight * value for weight, value in zip(profile.split_weights, split_values))
         labels.append(sample.target_split)
-        predictions.append(score >= profile.split_threshold)
+        if profile.split_rule:
+            (
+                prey_distance_max,
+                prey_radius_ratio_min,
+                largest_radius_min,
+                blob_count_max,
+                merge_ready_fraction_min,
+                predator_visible_max,
+            ) = profile.split_rule
+            predicted_split = (
+                split_values[6] > 0.5
+                and split_values[7] <= prey_distance_max
+                and split_values[8] >= prey_radius_ratio_min
+                and split_values[4] >= largest_radius_min
+                and split_values[3] <= blob_count_max
+                and split_values[5] >= merge_ready_fraction_min
+                and split_values[9] <= predator_visible_max
+                and sample.round_number - last_split_by_trace[key]
+                >= profile.split_cooldown_rounds
+            )
+        else:
+            predicted_split = score >= profile.split_threshold
+        predictions.append(predicted_split)
+        if predicted_split:
+            last_split_by_trace[key] = sample.round_number
         previous_by_trace[key] = predicted_direction
     precision, recall, split_f1 = _f1(labels, predictions)
     tolerant_precision, tolerant_recall, tolerant_split_f1 = _tolerant_split_f1(
@@ -579,6 +611,8 @@ def _profile_with_validation(
         regime_direction_weights=profile.regime_direction_weights,
         split_weights=profile.split_weights,
         split_threshold=profile.split_threshold,
+        split_rule=profile.split_rule,
+        split_cooldown_rounds=profile.split_cooldown_rounds,
         angle_bins=profile.angle_bins,
         angle_offset=profile.angle_offset,
         source_matches=profile.source_matches,
@@ -611,6 +645,8 @@ def write_profiles(path: Path, profiles: Sequence[ReplayProfile]) -> None:
                 f"        regime_direction_weights={profile.regime_direction_weights!r},",
                 f"        split_weights={profile.split_weights!r},",
                 f"        split_threshold={split_threshold},",
+                f"        split_rule={profile.split_rule!r},",
+                f"        split_cooldown_rounds={profile.split_cooldown_rounds!r},",
                 f"        angle_bins={profile.angle_bins!r},",
                 f"        angle_offset={profile.angle_offset!r},",
                 f"        source_matches={profile.source_matches!r},",

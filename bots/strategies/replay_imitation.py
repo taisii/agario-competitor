@@ -94,7 +94,13 @@ class ReplayProfile:
     direction_weights: tuple[float, ...]
     split_weights: tuple[float, ...]
     split_threshold: float
+    split_rule: tuple[float, ...] = ()
+    split_cooldown_rounds: int = 0
     regime_direction_weights: tuple[tuple[float, ...], ...] = ()
+    # Backward-compatible name used by an earlier profile generator.  Keeping
+    # the schema tolerant prevents a freshly generated profile module from
+    # failing during import while the fitter and runtime are updated together.
+    context_direction_weights: tuple[tuple[float, ...], ...] = ()
     angle_bins: int = 0
     angle_offset: float = 0.0
     source_matches: tuple[int, ...] = ()
@@ -108,11 +114,26 @@ class ReplayProfile:
             raise ValueError("direction_weights do not match FEATURE_NAMES")
         if len(self.split_weights) != len(SPLIT_FEATURE_NAMES):
             raise ValueError("split_weights do not match SPLIT_FEATURE_NAMES")
-        if self.regime_direction_weights and (
-            len(self.regime_direction_weights) != 8
-            or any(len(weights) != len(FEATURE_NAMES) for weights in self.regime_direction_weights)
+        if self.split_rule and len(self.split_rule) != 6:
+            raise ValueError("split_rule must contain six thresholds")
+        for field_name, conditional_weights in (
+            ("regime_direction_weights", self.regime_direction_weights),
+            ("context_direction_weights", self.context_direction_weights),
         ):
-            raise ValueError("regime_direction_weights must contain eight feature vectors")
+            if conditional_weights and (
+                len(conditional_weights) != 8
+                or any(
+                    len(weights) != len(FEATURE_NAMES)
+                    for weights in conditional_weights
+                )
+            ):
+                raise ValueError(
+                    f"{field_name} must contain eight feature vectors"
+                )
+
+    @property
+    def conditional_direction_weights(self) -> tuple[tuple[float, ...], ...]:
+        return self.regime_direction_weights or self.context_direction_weights
 
 
 def observation_regime(observation: ImitationObservation) -> int:
@@ -332,9 +353,10 @@ def predict_direction(
     previous_direction: tuple[float, float] = (0.0, 0.0),
 ) -> tuple[float, float]:
     feature_vectors = direction_feature_vectors(observation, previous_direction)
+    conditional_weights = profile.conditional_direction_weights
     weights = (
-        profile.regime_direction_weights[observation_regime(observation)]
-        if profile.regime_direction_weights
+        conditional_weights[observation_regime(observation)]
+        if conditional_weights
         else profile.direction_weights
     )
     x = sum(weight * vector[0] for weight, vector in zip(weights, feature_vectors))
@@ -356,10 +378,31 @@ def predict_split(
     observation: ImitationObservation,
     previous_direction: tuple[float, float],
     proposed_direction: tuple[float, float],
+    last_split_round: int = -10_000,
 ) -> tuple[bool, float]:
     values = split_feature_values(observation, previous_direction, proposed_direction)
     score = sum(weight * value for weight, value in zip(profile.split_weights, values))
     can_split = any(blob.radius * blob.radius >= 2.0 for blob in observation.own_blobs)
+    if profile.split_rule:
+        (
+            prey_distance_max,
+            prey_radius_ratio_min,
+            largest_radius_min,
+            blob_count_max,
+            merge_ready_fraction_min,
+            predator_visible_max,
+        ) = profile.split_rule
+        rule_matches = (
+            values[6] > 0.5
+            and values[7] <= prey_distance_max
+            and values[8] >= prey_radius_ratio_min
+            and values[4] >= largest_radius_min
+            and values[3] <= blob_count_max
+            and values[5] >= merge_ready_fraction_min
+            and values[9] <= predator_visible_max
+            and observation.round_number - last_split_round >= profile.split_cooldown_rounds
+        )
+        return can_split and rule_matches, score
     return can_split and score >= profile.split_threshold, score
 
 
@@ -415,6 +458,7 @@ class ReplayImitationStrategy:
         self.profile = profile
         self.name = f"replay_team_{profile.team_id}"
         self._previous_direction = (0.0, 0.0)
+        self._last_split_round = -10_000
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         observation = observation_from_context(context)
@@ -424,7 +468,10 @@ class ReplayImitationStrategy:
             observation,
             self._previous_direction,
             direction,
+            self._last_split_round,
         )
+        if split:
+            self._last_split_round = observation.round_number
         self._previous_direction = direction
         return StrategyDecision(
             direction=direction,

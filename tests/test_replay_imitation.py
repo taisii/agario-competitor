@@ -66,6 +66,37 @@ def test_profile_predicts_direction_and_respects_no_split() -> None:
     assert score == 0.0
 
 
+def test_stateful_split_rule_respects_rearm_interval() -> None:
+    base = _nearest_food_profile()
+    profile = ReplayProfile(
+        team_id=49,
+        direction_weights=base.direction_weights,
+        split_weights=base.split_weights,
+        split_threshold=math.inf,
+        split_rule=(0.65, 1.5, 0.15, 0.125, 0.0, 0.0),
+        split_cooldown_rounds=18,
+    )
+    observation = ImitationObservation(
+        round_number=100,
+        max_rounds=1400,
+        arena_size=60.0,
+        own_blobs=(ImitationBlob(10.0, 10.0, 2.0, player_id=0),),
+        visible_blobs=(ImitationBlob(16.0, 10.0, 1.0, player_id=1),),
+        visible_food=(),
+        visible_viruses=(),
+    )
+    split, _ = predict_split(profile, observation, (1.0, 0.0), (1.0, 0.0))
+    blocked, _ = predict_split(
+        profile,
+        observation,
+        (1.0, 0.0),
+        (1.0, 0.0),
+        last_split_round=90,
+    )
+    assert split is True
+    assert blocked is False
+
+
 def test_generated_profiles_cover_all_replay_opponents() -> None:
     expected = {
         1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 14, 15, 16, 17, 21, 22, 24,

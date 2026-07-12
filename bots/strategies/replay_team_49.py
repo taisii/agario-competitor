@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-"""Best-fit imitation of team 49's four official replay traces.
+"""Stateful imitation of team 49's five official replay traces.
 
 The direction profile has clear safe-food, prey-chase, and predator-escape
-regimes.  Split timing varies from 2 to 25 events per match and does not meet
-the replay gate, so the dedicated wrapper preserves failed validation.
+regimes. Its split command is an edge-triggered close-prey rule with an
+18-round re-arm interval; modelling that internal cooldown raises held-out
+split F1 from 0.22 to 0.74. Direction still narrowly misses the strict gate,
+so the profile correctly remains marked as failed overall.
 """
 
 from strategies.replay_imitation import ReplayImitationStrategy
