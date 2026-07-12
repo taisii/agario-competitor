@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-"""Best-fit imitation of team 3's two heterogeneous replay traces.
+"""Stateful imitation of team 3's five heterogeneous replay traces.
 
-The two official matches differ materially in both movement and split rate, so
-this strategy intentionally exposes the fitted aggregate profile rather than
-claiming one exact hand-written rule.  Shadow validation remains marked failed
-on the profile and is reported as such by the surrounding evaluation tooling.
+Movement still differs materially between matches. Newer traces reveal a
+large-close-prey split gate with an 18-round re-arm interval, which improves
+held-out split reproduction without claiming an overall exact copy. Shadow
+validation remains marked failed on the profile and is reported as such.
 """
 
 from strategies.replay_imitation import ReplayImitationStrategy

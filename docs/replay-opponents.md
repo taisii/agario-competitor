@@ -110,7 +110,7 @@ or split frequency, but not the exact hidden random sequence or split timing.
 |---:|:---:|:---:|---|
 | 1 | FAIL | FAIL | Regime-fitted direction; geometric prey split gate |
 | 2 | PASS | PASS | Nearest food from the nearest real fragment; no split |
-| 3 | FAIL | FAIL | Stateful field mixture; growth-dependent split |
+| 3 | FAIL | FAIL | Stateful field mixture; close-prey split with 18-round re-arm |
 | 4 | FAIL | FAIL | Field movement; sparse high-mass farming split |
 | 5 | FAIL | FAIL | Inertial field mixture; sparse split |
 | 6 | Style only | FAIL | Hidden-RNG 16-direction random walk; rare split |
@@ -212,3 +212,8 @@ a 17-round re-arm interval. Its mean held-out split F1 rises from 0.40 to 0.61;
 the two fresh Submission #4 folds score 0.77 and 0.70. Older matches remain
 inconsistent, so this is treated as reproduction of the current behavior and
 does not change the strict overall FAIL verdict.
+
+Team 3 now uses an 18-round re-arm interval around its larger-prey gate. Mean
+held-out split F1 rises from 0.44 to 0.63. The current-cohort folds with no
+split produce no false events, while match 13938 reaches F1 0.60. Its movement
+model remains below the direction gate, so the overall verdict stays FAIL.

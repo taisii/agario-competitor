@@ -429,6 +429,7 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
     # every frame while the same prey remains visible; the observed policy
     # waits roughly one engine split interval before it can fire again.
     split_rules = {
+        3: ((1.00, 2.0, 0.25, 0.125, 0.0, 0.0), 18),
         49: ((0.65, 1.5, 0.15, 0.125, 0.0, 0.0), 18),
         59: ((0.80, 2.0, 0.15, 0.125, 0.0, 0.0), 17),
     }
