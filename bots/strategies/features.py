@@ -14,6 +14,10 @@ from lib.config.player import (
 from lib.models.blob_model import BlobModel, VisibleBlobModel
 from lib.models.food_model import FoodModel
 from lib.models.virus_model import VirusModel
+from simulation.rules import (
+    can_consume_virus as _feature_can_consume_virus,
+    movement_speed as _feature_movement_speed,
+)
 @dataclass(frozen=True)
 class BlobRelation:
     blob: VisibleBlobModel
@@ -83,16 +87,22 @@ def can_eat_player_blob(
 
 
 def player_speed(radius: float) -> float:
-    return max(
-        MIN_PLAYER_SPEED,
-        BASE_PLAYER_SPEED / (1.0 + radius * PLAYER_SPEED_RADIUS_FACTOR),
+    return _feature_movement_speed(
+        radius,
+        base_speed=BASE_PLAYER_SPEED,
+        radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
+        minimum_speed=MIN_PLAYER_SPEED,
     )
 
 
 def can_consume_virus(blob_radius: float, virus_radius: float) -> bool:
     """Return the engine's strict mass-ratio rule for consuming a virus."""
 
-    return blob_radius * blob_radius > virus_radius * virus_radius * EAT_SIZE_RATIO
+    return _feature_can_consume_virus(
+        blob_radius,
+        virus_radius,
+        eat_size_ratio=EAT_SIZE_RATIO,
+    )
 
 
 def virus_center_clearance(

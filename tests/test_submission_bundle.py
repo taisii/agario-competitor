@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import math
 import sys
 import tempfile
@@ -90,6 +91,34 @@ def test_replay_dominance_submission_is_self_contained_and_uses_new_strategy() -
     assert strategy._can_still_consume_virus_at_contact(
         SimpleNamespace(radius=2.0, mass=4.0, pos=(10.0, 10.0)),
         SimpleNamespace(radius=1.5, pos=(10.0, 10.0)),
+    )
+
+
+def test_replay_dominance_submission_preserves_local_import_aliases() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "replay_dominance.py",
+            strategy_name="replay_dominance",
+        )
+        module_name = "submission_runtime_test"
+        spec = importlib.util.spec_from_file_location(module_name, output)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(module_name, None)
+        namespace = vars(module)
+
+    assert namespace["_feature_can_consume_virus"] is namespace["_replay_can_consume_virus"]
+    assert namespace["_replay_can_consume_virus"] is not namespace["can_consume_virus"]
+    assert namespace["_replay_decayed_radius"] is namespace["decayed_radius"]
+    assert namespace["_feature_movement_speed"] is namespace["movement_speed"]
+    assert namespace["_replay_can_consume_virus"](
+        2.0,
+        1.5,
+        eat_size_ratio=1.1,
     )
 
 

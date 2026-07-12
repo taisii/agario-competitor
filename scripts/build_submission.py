@@ -65,6 +65,7 @@ def _without_local_imports(
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
     omitted_lines: set[int] = set()
+    replacement_lines: dict[int, str] = {}
 
     for node in tree.body:
         omit = (
@@ -75,12 +76,20 @@ def _without_local_imports(
         )
         if not omit:
             continue
+        if isinstance(node, ast.ImportFrom) and node.module in LOCAL_IMPORTS:
+            aliases = [
+                f"{alias.asname} = {alias.name}\n"
+                for alias in node.names
+                if alias.asname is not None and alias.asname != alias.name
+            ]
+            if aliases:
+                replacement_lines[node.lineno] = "".join(aliases)
         omitted_lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
 
     return "".join(
-        line
+        replacement_lines.get(line_number, "")
+        + ("" if line_number in omitted_lines else line)
         for line_number, line in enumerate(source.splitlines(keepends=True), start=1)
-        if line_number not in omitted_lines
     ).strip()
 
 

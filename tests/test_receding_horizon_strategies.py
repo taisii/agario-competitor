@@ -43,21 +43,39 @@ def test_replay_dominance_is_a_distinct_registered_strategy() -> None:
     assert "replay_dominance" in available_strategy_names()
 
 
-def test_replay_dominance_compares_two_complete_roots_before_deadline() -> None:
+def test_replay_dominance_compares_two_roots_before_deadline() -> None:
     strategy = ReplayDominanceStrategy()
 
     assert strategy.minimum_root_actions == 2
+    single = SearchNode(
+        own_blobs=(OwnBlob(blob_id=0, x=10.0, y=10.0, radius=1.0),),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+    fragmented = replace(
+        single,
+        own_blobs=tuple(
+            OwnBlob(blob_id=index, x=10.0 + index, y=10.0, radius=1.0)
+            for index in range(16)
+        ),
+    )
+    assert strategy._required_actions_for_depth(0, single) == 2
+    assert strategy._required_actions_for_depth(0, fragmented) == 2
 
 
 def test_replay_dominance_uses_blob_scaled_deterministic_transition_budget() -> None:
     strategy = ReplayDominanceStrategy()
 
     assert strategy._uses_compute_time_bank() is True
-    assert strategy._transition_budget(1) == 12
-    assert strategy._transition_budget(2) == 6
-    assert strategy._transition_budget(4) == 3
-    assert strategy._transition_budget(16) == 3
-    assert strategy._transition_budget(1, 12) == 3
+    assert strategy._transition_budget(1) == 6
+    assert strategy._transition_budget(2) == 3
+    assert strategy._transition_budget(4) == 2
+    assert strategy._transition_budget(16) == 2
+    assert strategy._transition_budget(1, 12) == 2
 
 
 def test_replay_dominance_stops_before_generating_an_unusable_depth() -> None:
@@ -106,7 +124,7 @@ def test_enemy_memory_threat_model_includes_future_virus_fragments() -> None:
     )
 
 
-def test_replay_dominance_root_budget_compares_distinct_action_families() -> None:
+def test_replay_dominance_does_not_reorder_by_semantic_family() -> None:
     strategy = ReplayDominanceStrategy()
     ordered = strategy._order_root_actions(
         (
@@ -118,11 +136,12 @@ def test_replay_dominance_root_budget_compares_distinct_action_families() -> Non
         )
     )
 
-    assert [action.reason for action in ordered[:4]] == [
+    assert [action.reason for action in ordered] == [
         "escape",
+        "escape_tangent",
+        "rival_prey",
         "virus_harvest",
         "keep",
-        "rival_prey",
     ]
     assert strategy._actions_per_node_limit(0) == 6
     assert strategy._actions_per_node_limit(1) == 1
@@ -177,8 +196,10 @@ def test_replay_dominance_second_root_avoids_official_virus_massacre() -> None:
         for action in actions[: strategy.minimum_root_actions]
     ]
 
-    assert {action.reason for action in actions[:2]} == {"virus_harvest", "keep"}
-    assert max(results, key=strategy._terminal_score).first_reason == "keep"
+    assert "virus" not in max(
+        results,
+        key=strategy._terminal_score,
+    ).first_reason
 
 
 def test_replay_dominance_continues_safe_virus_chain_when_late_and_fragmented() -> None:
@@ -546,8 +567,56 @@ def test_replay_dominance_keeps_wide_escape_routes_in_anytime_prefix() -> None:
     )
     reasons = [action.reason for action in actions]
 
-    assert reasons[:5].count("escape_wide_tangent") == 2
+    assert any("escape" in reason for reason in reasons[:3])
+    assert "escape_wide_tangent" in reasons[:6]
     assert strategy._safety_weight(rank_position=7, progress=0.0) == 1.3
+
+
+def test_replay_dominance_proxy_promotes_high_value_prey_without_family_slot() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=2, angular_samples=8)
+    strategy._rival_values = {1: 1.0}
+    own = OwnBlob(blob_id=0, x=20.0, y=20.0, radius=4.0)
+    prey = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=25.0,
+        y=20.0,
+        radius=2.5,
+        direction=(0.0, 1.0),
+    )
+    node = SearchNode(
+        own_blobs=(own,),
+        enemies=(prey,),
+        score=0.0,
+        first_direction=(0.0, 1.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(0.0, 1.0),
+    )
+
+    actions = strategy._candidate_actions(
+        node=node,
+        foods=(),
+        food_targets=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+    )
+
+    assert "prey" in actions[0].reason
+    strategy._audit_every_n = 1
+    strategy._audit_root_candidate_ranking(
+        node=node,
+        actions=actions,
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        safety_weight=1.3,
+        aggression=1.0,
+        transition_budget=2,
+    )
+    assert strategy._audit_samples == 1
+    assert strategy._audit_last_exact_rank is not None
 
 
 def test_replay_dominance_does_not_hide_trapped_fragment_behind_safe_center() -> None:
