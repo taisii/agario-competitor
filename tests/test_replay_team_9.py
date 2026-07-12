@@ -12,11 +12,11 @@ from strategies.replay_imitation import (  # noqa: E402
     ImitationBlob,
     ImitationObservation,
     ImitationPoint,
+    predict_direction,
+    predict_split,
 )
 from strategies.replay_team_9 import (  # noqa: E402
     PROFILE,
-    ReplayTeam9Strategy,
-    SPLIT_RATE,
 )
 
 
@@ -41,44 +41,47 @@ def test_team9_profile_covers_all_five_matches() -> None:
 
 
 def test_team9_direction_is_unit_length() -> None:
-    decision = ReplayTeam9Strategy().choose_observation(_observation())
+    direction = predict_direction(PROFILE, _observation())
 
-    assert math.isclose(math.hypot(*decision.direction), 1.0)
+    assert math.isclose(math.hypot(*direction), 1.0)
 
 
-def test_team9_split_candidate_requires_one_capable_blob_and_prey() -> None:
+def test_team9_profile_has_replay_fitted_split_state_machine() -> None:
+    assert PROFILE.split_rule == (0.65, 2.5, 0.14, 0.0625, 0.0, 0.0)
+    assert PROFILE.split_cooldown_rounds == 90
+
+
+def test_team9_close_prey_triggers_after_rearm() -> None:
     prey = ImitationBlob(26.0, 20.0, 1.0, player_id=2, blob_id=4)
-
-    candidate = ReplayTeam9Strategy._split_candidate(
-        _observation(enemies=(prey,))
+    observation = _observation(enemies=(prey,))
+    direction = predict_direction(PROFILE, observation)
+    split, _ = predict_split(
+        PROFILE,
+        observation,
+        (1.0, 0.0),
+        direction,
+        last_split_round=500,
     )
-
-    assert candidate is not None
-    assert candidate[1] == prey
+    assert split is True
 
 
-def test_team9_predator_suppresses_split_candidate() -> None:
+def test_team9_predator_and_rearm_suppress_split() -> None:
     prey = ImitationBlob(26.0, 20.0, 1.0, player_id=2, blob_id=4)
     predator = ImitationBlob(18.0, 20.0, 4.0, player_id=3, blob_id=0)
 
-    candidate = ReplayTeam9Strategy._split_candidate(
-        _observation(enemies=(prey, predator))
+    observation = _observation(enemies=(prey, predator))
+    direction = predict_direction(PROFILE, observation)
+    predator_blocked, _ = predict_split(
+        PROFILE, observation, (1.0, 0.0), direction, last_split_round=500
     )
-
-    assert candidate is None
-
-
-def test_team9_sparse_split_roll_is_deterministic() -> None:
-    kwargs = {
-        "round_number": 700,
-        "player_id": 0,
-        "own_radius": 3.0,
-        "prey_radius": 1.0,
-        "prey_distance": 6.0,
-    }
-    first = ReplayTeam9Strategy._split_roll(**kwargs)
-    second = ReplayTeam9Strategy._split_roll(**kwargs)
-
-    assert first == second
-    assert 0.0 <= first < 1.0
-    assert 0.0 < SPLIT_RATE < 1.0
+    safe_observation = _observation(enemies=(prey,))
+    safe_direction = predict_direction(PROFILE, safe_observation)
+    cooldown_blocked, _ = predict_split(
+        PROFILE,
+        safe_observation,
+        (1.0, 0.0),
+        safe_direction,
+        last_split_round=650,
+    )
+    assert predator_blocked is False
+    assert cooldown_blocked is False

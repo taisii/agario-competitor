@@ -114,7 +114,7 @@ or split frequency, but not the exact hidden random sequence or split timing.
 | 4 | FAIL | FAIL | Field movement; sparse high-mass farming split |
 | 5 | FAIL | FAIL | Inertial field mixture; sparse split |
 | 6 | Style only | FAIL | Hidden-RNG 16-direction random walk; rare split |
-| 9 | FAIL | FAIL | Inertial field movement; sparse safe-prey split |
+| 9 | FAIL | FAIL | Inertial field movement; safe-prey split with 90-round re-arm |
 | 10 | FAIL | FAIL | Regime-fitted direction; unstable split timing |
 | 12 | FAIL | FAIL | Food/escape/inertia mixture; sparse split |
 | 13 | PASS | FAIL | Food/inertia movement; uniquely identified prey split |
@@ -225,3 +225,11 @@ shared predator-visible direction mixture then lowers the median direction
 error from 10.4° to 8.6° and raises the within-30° rate from 79.4% to 81.6%.
 Only match 11739 remains outside the direction gate (p75 32.3°, 11.8% over
 90°). The overall verdict stays FAIL because LOMO requires every fold to pass.
+
+Team 9 previously used a synthetic hash to match only the aggregate split
+frequency. Replaying that runtime rule against the source observations gives
+F1 0.065, below even the generic classifier. It has been replaced with a
+deterministic safe-prey gate and 90-round re-arm interval shared by runtime and
+evaluation. Mean held-out split F1 rises from 0.17 to 0.42 (full-trace F1
+0.49). Match 11756 contains one unmatched split, so the overall verdict stays
+FAIL rather than treating frequency matching as behavioral reproduction.
