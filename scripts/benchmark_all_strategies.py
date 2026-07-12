@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """Benchmark one strategy against seven copies of every saved strategy.
 
 Each opponent is tested with the candidate in the first and last player slot.
 This is deliberately stricter than a mixed-field screen: a win means the
 candidate finished ahead of seven instances of the named opponent.
 """
+
+from __future__ import annotations
 
 import argparse
 import asyncio
@@ -21,9 +21,6 @@ DEFAULT_OUTPUT = ROOT / ".agario" / "benchmarks" / "all-strategy-matrix"
 IGNORED_ENTRIES = {
     "random_opponent",
     "random_replay_opponent",
-    # Parameterised harness rather than one concrete strategy.  Its concrete
-    # replay policies have dedicated replay_team_* entries and are included.
-    "replay_profile",
 }
 
 
@@ -34,6 +31,32 @@ def saved_strategy_names(candidate: str) -> tuple[str, ...]:
         if path.stem not in IGNORED_ENTRIES and path.stem != candidate
     }
     return tuple(sorted(names))
+
+
+def summarize_opponent_rows(
+    opponent: str,
+    rows: list[dict[str, object]],
+) -> dict[str, object]:
+    """Summarize a matrix cell without treating failed matches as abstentions."""
+
+    successful = [
+        row
+        for row in rows
+        if row.get("return_code") == 0 and row.get("result_type") == "SUCCESS"
+    ]
+    ranked = [row for row in successful if row.get("tracked_ranks")]
+    ranks = [int(row["tracked_ranks"][0]) for row in ranked]  # type: ignore[index]
+    wins = sum(rank == 1 for rank in ranks)
+    all_matches_valid = bool(rows) and len(ranked) == len(rows)
+    return {
+        "opponent": opponent,
+        "matches": len(rows),
+        "successful_matches": len(successful),
+        "wins": wins,
+        "average_rank": sum(ranks) / len(ranks) if ranks else None,
+        "ranks": ranks,
+        "passed": all_matches_valid and wins > len(rows) / 2,
+    }
 
 
 async def run_cell(
@@ -115,24 +138,10 @@ async def run_matrix(args: argparse.Namespace) -> list[dict[str, object]]:
     completed = await asyncio.gather(*(run_opponent(name) for name in opponents))
     summary: list[dict[str, object]] = []
     for opponent, rows in sorted(completed):
-        successful = [row for row in rows if row.get("result_type") == "SUCCESS"]
-        ranks = [
-            int(row["tracked_ranks"][0])
-            for row in successful
-            if row.get("tracked_ranks")
-        ]
-        item = {
-            "opponent": opponent,
-            "matches": len(rows),
-            "successful_matches": len(successful),
-            "wins": sum(rank == 1 for rank in ranks),
-            "average_rank": sum(ranks) / len(ranks) if ranks else None,
-            "ranks": ranks,
-            "passed": bool(ranks) and sum(rank == 1 for rank in ranks) > len(ranks) / 2,
-        }
+        item = summarize_opponent_rows(opponent, rows)
         summary.append(item)
         print(
-            f"{opponent:<36} wins={item['wins']}/{len(ranks)} "
+            f"{opponent:<36} wins={item['wins']}/{len(rows)} "
             f"avg_rank={item['average_rank']} passed={item['passed']}",
             flush=True,
         )

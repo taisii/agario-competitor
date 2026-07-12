@@ -8,13 +8,10 @@ the three matches, so this wrapper intentionally retains the profile's failed
 validation status rather than presenting it as an exact clone.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam32Strategy(ReplayImitationStrategy):
+class ReplayTeam32Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_32"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[32])
-        self.name = "replay_team_32"
+    replay_profile = PROFILES[32]

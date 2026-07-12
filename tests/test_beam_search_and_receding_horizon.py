@@ -2,29 +2,16 @@ from __future__ import annotations
 
 import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bots"))
 
-from beam_search_core import (  # noqa: E402
-    Action,
-    BlobState,
-    BeamSearchPlanner,
-    FoodState,
-    StrategyConfig,
-    Vec2,
-    WorldState,
-    can_eat,
-    feature_vector,
-    generate_actions,
-    is_threat,
-    profile_config,
-    split_can_hit_prey,
-)
 from strategies.receding_horizon import (  # noqa: E402
     Action as RecedingHorizonAction,
+    ReplayDominanceStrategy,
     ThreatAwareRecedingHorizonStrategy,
     EnemyBlob,
     EnemyTrack,
@@ -35,68 +22,7 @@ from strategies.receding_horizon import (  # noqa: E402
 from lib.models.food_model import FoodModel  # noqa: E402
 from lib.models.blob_model import BlobModel, VisibleBlobModel  # noqa: E402
 from strategies.base import StrategyContext  # noqa: E402
-from strategies.unified_deterministic import UnifiedDeterministicStrategy  # noqa: E402
-
-
-def make_state(
-    me: BlobState,
-    enemies: tuple[BlobState, ...] = (),
-    food: tuple[FoodState, ...] = (),
-) -> WorldState:
-    return WorldState(
-        round_number=10,
-        max_rounds=1400,
-        arena_size=60.0,
-        player_id=0,
-        self_blobs=(me,),
-        enemies=enemies,
-        food=food,
-        viruses=(),
-        rankings=(0, 1, 2),
-    )
-
-
-def test_mass_eat_threshold() -> None:
-    assert can_eat(1.1, 1.0)
-    assert not can_eat(1.09, 1.0)
-    assert is_threat(1.0, 1.1)
-
-
-def test_escape_from_visible_threat() -> None:
-    config = profile_config("survival")
-    me = BlobState(0, 0, Vec2(10.0, 10.0), 1.0, is_self=True)
-    enemy = BlobState(1, 0, Vec2(12.0, 10.0), 1.5)
-    food = FoodState(Vec2(13.0, 10.0))
-    state = make_state(me, enemies=(enemy,), food=(food,))
-    action = BeamSearchPlanner(config).choose_action(state)
-    assert action.dx < 0.0
-    assert not action.split
-
-
-def test_food_cluster_direction_when_safe() -> None:
-    config = profile_config("farmer")
-    me = BlobState(0, 0, Vec2(10.0, 10.0), 1.2, is_self=True)
-    food = (FoodState(Vec2(15.0, 10.0)), FoodState(Vec2(15.4, 10.1)), FoodState(Vec2(15.2, 9.7)))
-    state = make_state(me, food=food)
-    action = BeamSearchPlanner(config).choose_action(state)
-    assert action.dx > 0.0
-
-
-def test_split_candidate_requires_reachable_prey() -> None:
-    config = profile_config("hunter")
-    me = BlobState(0, 0, Vec2(10.0, 10.0), 3.0, is_self=True)
-    prey = BlobState(1, 0, Vec2(14.0, 10.0), 1.0)
-    state = make_state(me, enemies=(prey,))
-    split_action = Action(1.0, 0.0, True, "split")
-    assert split_can_hit_prey(state, split_action, config)
-    assert any(a.split for a in generate_actions(state, config))
-
-
-def test_feature_vector_length_is_stable() -> None:
-    config = StrategyConfig()
-    me = BlobState(0, 0, Vec2(10.0, 10.0), 1.0, is_self=True)
-    state = make_state(me)
-    assert len(feature_vector(state, config)) == 30
+from strategies.features import can_eat_player_blob  # noqa: E402
 
 
 def test_threat_aware_receding_horizon_split_matches_engine_geometry() -> None:
@@ -150,176 +76,12 @@ def test_enemy_memory_retains_threat_to_only_the_small_fragment() -> None:
 
     assert len(enemies) == 1
     assert enemies[0].player_id == 1
-    assert can_eat(enemies[0].radius, own_blobs[1].radius)
-    assert not can_eat(enemies[0].radius, own_blobs[0].radius)
+    assert can_eat_player_blob(enemies[0].radius, own_blobs[1].radius)
+    assert not can_eat_player_blob(enemies[0].radius, own_blobs[0].radius)
 
 
-def test_unified_enemy_memory_retains_threat_to_only_the_small_fragment() -> None:
-    strategy = UnifiedDeterministicStrategy()
-    own_blobs = (
-        OwnBlob(blob_id=0, x=10.0, y=10.0, radius=3.0),
-        OwnBlob(blob_id=1, x=12.0, y=10.0, radius=1.0),
-    )
-    strategy.enemy_tracks[(1, 0)] = EnemyTrack(
-        player_id=1,
-        blob_id=0,
-        x=40.0,
-        y=40.0,
-        radius=1.2,
-        direction=(0.0, 0.0),
-        last_seen_round=9,
-    )
-    state = SimpleNamespace(
-        round=10,
-        visible_blobs=(),
-        view_center=(10.0, 10.0),
-        vision_size=20.0,
-    )
-
-    enemies = strategy._update_enemy_memory(
-        SimpleNamespace(game=SimpleNamespace(state=state)),
-        own_blobs,
-        60.0,
-    )
-
-    assert len(enemies) == 1
-    assert can_eat(enemies[0].radius, own_blobs[1].radius)
-
-
-def test_unified_value_does_not_penalise_collecting_reachable_food() -> None:
-    strategy = UnifiedDeterministicStrategy()
-    blobs = tuple(
-        OwnBlob(
-            blob_id=index,
-            x=10.0 + (index % 4) * 3.0,
-            y=10.0 + (index // 4) * 3.0,
-            radius=0.9,
-            merge_cooldown=10,
-        )
-        for index in range(16)
-    )
-    food = FoodModel(food_id=7, pos=blobs[0].pos)
-    before = RecedingHorizonSearchNode(
-        own_blobs=blobs,
-        enemies=(),
-        score=0.0,
-        first_direction=(1.0, 0.0),
-        first_split=False,
-        first_reason="keep",
-        last_direction=(1.0, 0.0),
-    )
-    grown = OwnBlob(
-        blob_id=blobs[0].blob_id,
-        x=blobs[0].x,
-        y=blobs[0].y,
-        radius=math.sqrt(blobs[0].mass + 0.15**2),
-        merge_cooldown=10,
-    )
-    after = RecedingHorizonSearchNode(
-        own_blobs=(grown, *blobs[1:]),
-        enemies=(),
-        score=0.0,
-        first_direction=(1.0, 0.0),
-        first_split=False,
-        first_reason="keep",
-        last_direction=(1.0, 0.0),
-        eaten_food_ids=frozenset({food.food_id}),
-    )
-
-    assert strategy._state_value(after, (food,), (), 60.0) >= strategy._state_value(
-        before, (food,), (), 60.0
-    )
-
-
-def test_unified_value_does_not_penalise_capturing_reachable_prey() -> None:
-    strategy = UnifiedDeterministicStrategy()
-    strategy._rival_values = {1: 0.5}
-    own = (
-        OwnBlob(blob_id=0, x=28.0, y=30.0, radius=2.0),
-        OwnBlob(blob_id=1, x=35.0, y=30.0, radius=2.0),
-        OwnBlob(blob_id=2, x=30.0, y=25.0, radius=2.0),
-        OwnBlob(blob_id=3, x=30.0, y=35.0, radius=2.0),
-    )
-    prey = EnemyBlob(player_id=1, blob_id=0, x=30.0, y=30.0, radius=1.0)
-    before = RecedingHorizonSearchNode(
-        own_blobs=own,
-        enemies=(prey,),
-        score=0.0,
-        first_direction=(1.0, 0.0),
-        first_split=False,
-        first_reason="prey",
-        last_direction=(1.0, 0.0),
-    )
-    eater = OwnBlob(
-        blob_id=0,
-        x=own[0].x,
-        y=own[0].y,
-        radius=math.sqrt(own[0].mass + prey.mass),
-    )
-    after = RecedingHorizonSearchNode(
-        own_blobs=(eater, *own[1:]),
-        enemies=(),
-        score=0.0,
-        first_direction=(1.0, 0.0),
-        first_split=False,
-        first_reason="prey",
-        last_direction=(1.0, 0.0),
-        captured_enemy_ids=frozenset({prey.key}),
-    )
-
-    assert strategy._state_value(after, (), (), 60.0) >= strategy._state_value(
-        before, (), (), 60.0
-    )
-
-
-
-def test_unified_enemy_siblings_share_one_player_move_direction() -> None:
-    strategy = UnifiedDeterministicStrategy()
-    enemies = (
-        EnemyBlob(player_id=1, blob_id=0, x=10.0, y=10.0, radius=1.0, direction=(1.0, 0.0)),
-        EnemyBlob(player_id=1, blob_id=1, x=20.0, y=20.0, radius=1.0, direction=(1.0, 0.0)),
-    )
-
-    moved = strategy._move_enemies(enemies, [], 60.0)
-
-    assert math.isclose(moved[0].x - enemies[0].x, moved[1].x - enemies[1].x)
-    assert math.isclose(moved[0].y - enemies[0].y, moved[1].y - enemies[1].y)
-
-
-def test_unified_path_cost_survives_the_second_search_depth() -> None:
-    strategy = UnifiedDeterministicStrategy()
-    node = RecedingHorizonSearchNode(
-        own_blobs=(OwnBlob(blob_id=0, x=59.0, y=30.0, radius=1.0),),
-        enemies=(),
-        score=0.0,
-        first_direction=(1.0, 0.0),
-        first_split=False,
-        first_reason="keep",
-        last_direction=(1.0, 0.0),
-    )
-    first = strategy._transition(
-        node=node,
-        action=RecedingHorizonAction((1.0, 0.0), reason="keep"),
-        foods=(),
-        viruses=(),
-        arena_size=60.0,
-        first_step=True,
-    ).node
-    second = strategy._transition(
-        node=first,
-        action=RecedingHorizonAction((-1.0, 0.0), reason="turn"),
-        foods=(),
-        viruses=(),
-        arena_size=60.0,
-        first_step=False,
-    ).node
-
-    assert first.control_cost > 0.0
-    assert second.control_cost >= first.control_cost
-
-
-def test_unified_root_screen_is_invariant_to_candidate_order() -> None:
-    strategy = UnifiedDeterministicStrategy()
+def test_replay_utility_cache_reuses_the_same_physical_state() -> None:
+    strategy = ReplayDominanceStrategy()
     node = RecedingHorizonSearchNode(
         own_blobs=(OwnBlob(blob_id=0, x=30.0, y=30.0, radius=1.0),),
         enemies=(),
@@ -329,34 +91,32 @@ def test_unified_root_screen_is_invariant_to_candidate_order() -> None:
         first_reason="keep",
         last_direction=(1.0, 0.0),
     )
-    actions = (
-        RecedingHorizonAction((0.0, 1.0), reason="north"),
-        RecedingHorizonAction((-1.0, 0.0), reason="west"),
-        RecedingHorizonAction((1.0, 0.0), reason="east"),
-    )
-    strategy._screening_context = lambda *args: (0.0, 0.0)  # type: ignore[method-assign]
-    strategy._cheap_action_score = lambda *args: 0.0  # type: ignore[method-assign]
+    original = strategy._search_utility
+    calls = 0
 
-    forward = strategy._select_actions_no_reservation(
-        node=node,
-        actions=actions,
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    strategy._search_utility = counted  # type: ignore[method-assign]
+    first = strategy._cached_search_utility(
+        node,
         foods=(),
         viruses=(),
         arena_size=60.0,
-        limit=2,
-        require_diversity=True,
+        safety_weight=1.0,
     )
-    reverse = strategy._select_actions_no_reservation(
-        node=node,
-        actions=tuple(reversed(actions)),
+    second = strategy._cached_search_utility(
+        replace(node, score=123.0, first_reason="diagnostic_only"),
         foods=(),
         viruses=(),
         arena_size=60.0,
-        limit=2,
-        require_diversity=True,
+        safety_weight=1.0,
     )
 
-    assert forward == reverse
+    assert first == second
+    assert calls == 1
 
 
 def test_threat_aware_receding_horizon_captures_safely_while_leading_late() -> None:

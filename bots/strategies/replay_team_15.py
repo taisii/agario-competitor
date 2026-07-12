@@ -8,15 +8,13 @@ generalize between matches.  This wrapper keeps the measured autonomous
 profile and its failed validation status instead of inventing a false rule.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam15Strategy(ReplayImitationStrategy):
+class ReplayTeam15Strategy(ProfiledReplayImitationStrategy):
     """Team-15 fitted policy with autonomous previous-direction feedback."""
 
     name = "replay_team_15"
 
-    def __init__(self) -> None:
-        super().__init__(PROFILES[15])
-        self.name = type(self).name
+    replay_profile = PROFILES[15]

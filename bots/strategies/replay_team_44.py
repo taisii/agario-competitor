@@ -11,6 +11,12 @@ of relying solely on the generic fitted split classifier.
 
 import math
 
+from lib.config.player import (
+    BASE_PLAYER_SPEED,
+    MIN_PLAYER_SPEED,
+    PLAYER_SPEED_RADIUS_FACTOR,
+)
+from simulation.rules import can_consume_virus, movement_speed
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.replay_imitation import (
     EAT_SIZE_RATIO,
@@ -40,15 +46,12 @@ SAFE_FARM_MIN_FOOD = 5
 SPLIT_SAFETY_DISTANCE = 14.0
 
 SPLIT_EJECT_SPEED = 1.6
-BASE_PLAYER_SPEED = 1.1
-MIN_PLAYER_SPEED = 0.25
-PLAYER_SPEED_RADIUS_FACTOR = 0.08
-
-
 def _speed(radius: float) -> float:
-    return max(
-        MIN_PLAYER_SPEED,
-        BASE_PLAYER_SPEED / (1.0 + radius * PLAYER_SPEED_RADIUS_FACTOR),
+    return movement_speed(
+        radius,
+        base_speed=BASE_PLAYER_SPEED,
+        radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
+        minimum_speed=MIN_PLAYER_SPEED,
     )
 
 
@@ -187,7 +190,11 @@ class ReplayTeam44Strategy(ReplayImitationStrategy):
                 continue
             reach = 3.0 * child_radius + SPLIT_EJECT_SPEED + _speed(child_radius)
             for virus in observation.visible_viruses:
-                if child_radius * child_radius <= virus.radius * virus.radius * EAT_SIZE_RATIO:
+                if not can_consume_virus(
+                    child_radius,
+                    virus.radius,
+                    eat_size_ratio=EAT_SIZE_RATIO,
+                ):
                     continue
                 if self._lies_in_split_corridor(own, virus, child_radius, reach, direction):
                     return True

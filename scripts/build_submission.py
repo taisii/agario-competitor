@@ -4,49 +4,22 @@ import argparse
 import ast
 import hashlib
 from pathlib import Path
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "bots"))
+
+from strategies.registry import (  # noqa: E402
+    submission_strategy_names,
+    submission_strategy_spec,
+)
+
+
 DEFAULT_OUTPUT = ROOT / "dist" / "my_bot.py"
 DEFAULT_STRATEGY = "replay_dominance"
-BASE_MODULE = ROOT / "bots" / "strategies" / "base.py"
-FEATURES_MODULE = ROOT / "bots" / "strategies" / "features.py"
-RECEDING_HORIZON_MODULE = ROOT / "bots" / "strategies" / "receding_horizon.py"
-VIRUS_FARMING_SNAPSHOT = (
-    ROOT / "bots" / "snapshots" / "virus_farming_receding_horizon_snapshot.py"
-)
-SUBMISSION_SPECS = {
-    "replay_dominance": {
-        "strategy_class": "ReplayDominanceStrategy",
-        "source_modules": (BASE_MODULE, FEATURES_MODULE, RECEDING_HORIZON_MODULE),
-        "local_only_classes": {"VirusFarmingRecedingHorizonStrategy"},
-    },
-    "threat_aware_receding_horizon": {
-        "strategy_class": "ThreatAwareRecedingHorizonStrategy",
-        "source_modules": (BASE_MODULE, FEATURES_MODULE, RECEDING_HORIZON_MODULE),
-        "local_only_classes": {
-            "ReplayDominanceStrategy",
-            "VirusFarmingRecedingHorizonStrategy",
-        },
-    },
-    "virus_hunter": {
-        "strategy_class": "VirusHunterStrategy",
-        "source_modules": (
-            BASE_MODULE,
-            FEATURES_MODULE,
-            ROOT / "bots" / "strategies" / "greedy.py",
-            RECEDING_HORIZON_MODULE,
-            ROOT / "bots" / "strategies" / "virus_farming.py",
-        ),
-        "local_only_classes": {
-            "PotentialFieldVirusFarmerStrategy",
-            "ReplayDominanceStrategy",
-            "VirusFarmingRecedingHorizonStrategy",
-        },
-    },
-}
 LOCAL_IMPORTS = {
-    "snapshots.virus_farming_receding_horizon_snapshot",
+    "simulation.rules",
     "strategies.base",
     "strategies.features",
     "strategies.greedy",
@@ -87,9 +60,7 @@ if __name__ == "__main__":
 
 def _without_local_imports(
     path: Path,
-    local_only_classes: set[str],
-    *,
-    omit_entrypoint: bool = False,
+    local_only_classes: frozenset[str],
 ) -> str:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
@@ -101,17 +72,6 @@ def _without_local_imports(
             and (node.module == "__future__" or node.module in LOCAL_IMPORTS)
         ) or (
             isinstance(node, ast.ClassDef) and node.name in local_only_classes
-        ) or (
-            omit_entrypoint
-            and isinstance(node, ast.FunctionDef)
-            and node.name == "main"
-        ) or (
-            omit_entrypoint
-            and isinstance(node, ast.If)
-            and any(
-                isinstance(child, ast.Name) and child.id == "__name__"
-                for child in ast.walk(node.test)
-            )
         )
         if not omit:
             continue
@@ -124,25 +84,6 @@ def _without_local_imports(
     ).strip()
 
 
-def _standalone_class_source(path: Path, class_name: str) -> str:
-    source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(path))
-    node = next(
-        (
-            item
-            for item in tree.body
-            if isinstance(item, ast.ClassDef) and item.name == class_name
-        ),
-        None,
-    )
-    if node is None:
-        raise ValueError(f"Class {class_name!r} not found in {path}")
-    class_source = ast.get_source_segment(source, node)
-    if class_source is None:
-        raise ValueError(f"Could not extract class {class_name!r} from {path}")
-    return class_source
-
-
 def _validate_submission(source: str, output: Path) -> None:
     tree = ast.parse(source, filename=str(output))
     forbidden: list[str] = []
@@ -150,8 +91,6 @@ def _validate_submission(source: str, output: Path) -> None:
         if isinstance(node, ast.ImportFrom) and node.module:
             if node.module.split(".", 1)[0] in {
                 "strategies",
-                "snapshots",
-                "beam_search_core",
                 "telemetry",
             }:
                 forbidden.append(node.module)
@@ -160,7 +99,7 @@ def _validate_submission(source: str, output: Path) -> None:
                 alias.name
                 for alias in node.names
                 if alias.name.split(".", 1)[0]
-                in {"strategies", "snapshots", "beam_search_core", "telemetry"}
+                in {"strategies", "telemetry"}
             )
     if forbidden:
         raise ValueError(f"Submission contains local imports: {sorted(set(forbidden))}")
@@ -170,28 +109,13 @@ def build_submission(
     output: Path = DEFAULT_OUTPUT,
     strategy_name: str = DEFAULT_STRATEGY,
 ) -> tuple[Path, str]:
-    try:
-        spec = SUBMISSION_SPECS[strategy_name]
-    except KeyError as exc:
-        available = ", ".join(sorted(SUBMISSION_SPECS))
-        raise ValueError(
-            f"Unsupported submission strategy '{strategy_name}'. Available: {available}"
-        ) from exc
+    strategy_spec = submission_strategy_spec(strategy_name)
+    bundle = strategy_spec.submission
+    assert bundle is not None
 
-    source_modules = spec["source_modules"]
-    local_only_classes = spec["local_only_classes"]
-    strategy_class = spec["strategy_class"]
-    omit_entrypoint = bool(spec.get("omit_entrypoint", False))
-    extra_source = str(spec.get("extra_source", "")).strip()
-    extra_class = spec.get("extra_class")
-    if extra_class:
-        extra_path, extra_class_name = extra_class
-        assert isinstance(extra_path, Path)
-        assert isinstance(extra_class_name, str)
-        extra_source = _standalone_class_source(extra_path, extra_class_name)
-    assert isinstance(source_modules, tuple)
-    assert isinstance(local_only_classes, set)
-    assert isinstance(strategy_class, str)
+    source_modules = tuple(ROOT / path for path in bundle.source_modules)
+    local_only_classes = bundle.local_only_classes
+    strategy_class = bundle.strategy_class
 
     source_fingerprint = hashlib.sha256()
     sections: list[str] = [HEADER.rstrip()]
@@ -202,14 +126,8 @@ def build_submission(
             _without_local_imports(
                 path,
                 local_only_classes,
-                omit_entrypoint=omit_entrypoint,
             )
         )
-
-    if extra_source:
-        source_fingerprint.update(extra_source.encode("utf-8"))
-        source_fingerprint.update(b"\0")
-        sections.append(extra_source)
 
     fingerprint = source_fingerprint.hexdigest()
     sections.insert(1, f'# Source fingerprint: {fingerprint}')
@@ -230,7 +148,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
         "--strategy",
-        choices=sorted(SUBMISSION_SPECS),
+        choices=submission_strategy_names(),
         default=DEFAULT_STRATEGY,
     )
     args = parser.parse_args()

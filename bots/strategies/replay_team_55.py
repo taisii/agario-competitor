@@ -9,15 +9,13 @@ mixture is retained with its failed validation status rather than presented as
 an exact reconstruction.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam55Strategy(ReplayImitationStrategy):
+class ReplayTeam55Strategy(ProfiledReplayImitationStrategy):
     """Team-55 fitted policy, quantized to its observed 15-degree headings."""
 
     name = "replay_team_55"
 
-    def __init__(self) -> None:
-        super().__init__(PROFILES[55])
-        self.name = type(self).name
+    replay_profile = PROFILES[55]

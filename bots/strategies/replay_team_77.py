@@ -9,13 +9,10 @@ fitted profile intentionally disables splitting.  Direction generalization
 still fails two of the three leave-one-match-out folds.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam77Strategy(ReplayImitationStrategy):
+class ReplayTeam77Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_77"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[77])
-        self.name = "replay_team_77"
+    replay_profile = PROFILES[77]

@@ -8,13 +8,10 @@ predator is visible; the fitted regime profile preserves the small wall,
 inertia, and neutral-player corrections around those two dominant rules.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam17Strategy(ReplayImitationStrategy):
+class ReplayTeam17Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_17"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[17])
-        self.name = "replay_team_17"
+    replay_profile = PROFILES[17]

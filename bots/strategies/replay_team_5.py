@@ -8,13 +8,10 @@ between the two matches, so this wrapper keeps the fitted aggregate profile
 and deliberately preserves its failed validation status.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam5Strategy(ReplayImitationStrategy):
+class ReplayTeam5Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_5"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[5])
-        self.name = "replay_team_5"
+    replay_profile = PROFILES[5]

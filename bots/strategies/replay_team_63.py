@@ -8,13 +8,10 @@ cross-match direction and split validation remain below the acceptance gates,
 which is preserved on the shared profile rather than hidden by this wrapper.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam63Strategy(ReplayImitationStrategy):
+class ReplayTeam63Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_63"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[63])
-        self.name = "replay_team_63"
+    replay_profile = PROFILES[63]

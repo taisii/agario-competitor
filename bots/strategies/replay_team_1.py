@@ -11,6 +11,12 @@ split commands on this sparse trace.
 
 import math
 
+from lib.config.player import (
+    BASE_PLAYER_SPEED,
+    MIN_PLAYER_SPEED,
+    PLAYER_SPEED_RADIUS_FACTOR,
+)
+from simulation.rules import movement_speed
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.replay_imitation import (
     EAT_SIZE_RATIO,
@@ -28,15 +34,12 @@ from strategies.replay_profiles import PROFILES
 MAX_BLOB_COUNT = 16
 SPLIT_MIN_MASS = 2.0
 SPLIT_EJECT_SPEED = 1.6
-BASE_PLAYER_SPEED = 1.1
-MIN_PLAYER_SPEED = 0.25
-PLAYER_SPEED_RADIUS_FACTOR = 0.08
-
-
 def _speed(radius: float) -> float:
-    return max(
-        MIN_PLAYER_SPEED,
-        BASE_PLAYER_SPEED / (1.0 + radius * PLAYER_SPEED_RADIUS_FACTOR),
+    return movement_speed(
+        radius,
+        base_speed=BASE_PLAYER_SPEED,
+        radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
+        minimum_speed=MIN_PLAYER_SPEED,
     )
 
 

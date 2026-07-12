@@ -9,6 +9,7 @@ from lib.config.player import EAT_SIZE_RATIO
 from lib.models.blob_model import BlobModel, VisibleBlobModel
 from lib.models.food_model import FoodModel
 from lib.models.virus_model import VirusModel
+from simulation.rules import can_consume_virus as engine_can_consume_virus
 
 
 @dataclass(frozen=True)
@@ -82,7 +83,11 @@ def can_eat_player_blob(
 def can_consume_virus(blob_radius: float, virus_radius: float) -> bool:
     """Return the engine's strict mass-ratio rule for consuming a virus."""
 
-    return blob_radius * blob_radius > virus_radius * virus_radius * EAT_SIZE_RATIO
+    return engine_can_consume_virus(
+        blob_radius,
+        virus_radius,
+        eat_size_ratio=EAT_SIZE_RATIO,
+    )
 
 
 def virus_center_clearance(

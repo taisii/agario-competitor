@@ -11,13 +11,10 @@ even after team-specific ridge tuning improves its median from 13.89° to
 remains marked as failed overall.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam49Strategy(ReplayImitationStrategy):
+class ReplayTeam49Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_49"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[49])
-        self.name = "replay_team_49"
+    replay_profile = PROFILES[49]

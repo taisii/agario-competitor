@@ -9,17 +9,15 @@ The fitted profile now uses the replay-supported close-prey condition and a
 runtime and validation behavior identical.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 PROFILE = PROFILES[9]
 
 
-class ReplayTeam9Strategy(ReplayImitationStrategy):
+class ReplayTeam9Strategy(ProfiledReplayImitationStrategy):
     """Team-9 field movement with a deterministic sparse-prey split gate."""
 
     name = "replay_team_9"
 
-    def __init__(self) -> None:
-        super().__init__(PROFILE)
-        self.name = type(self).name
+    replay_profile = PROFILE

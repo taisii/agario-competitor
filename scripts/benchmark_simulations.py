@@ -15,17 +15,7 @@ from statistics import mean
 from typing import Any
 
 
-BUILT_IN_VARIANTS = {
-    "baseline": {
-        "BOT_BEAM_TURN_PENALTY_WEIGHT": "0",
-        "BOT_BEAM_KEEP_DIRECTION_CANDIDATE": "0",
-    },
-    "smooth": {
-        "BOT_BEAM_TURN_PENALTY_WEIGHT": "1.4",
-        "BOT_BEAM_KEEP_DIRECTION_CANDIDATE": "1",
-    },
-    "current": {},
-}
+BUILT_IN_VARIANTS = {"current": {}}
 DEFAULT_RANDOM_SEED = 20260712
 
 OUTCOME_RE = re.compile(
@@ -88,16 +78,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--variants",
         nargs="+",
-        default=["baseline", "smooth"],
+        default=["current"],
         help=(
-            "Variant names. Built-ins: baseline, smooth, current. "
+            "Variant names. Built-in: current. "
             "Custom form: name:KEY=VALUE,OTHER=VALUE"
         ),
     )
     parser.add_argument(
         "--submission",
         nargs="+",
-        default=["4:bots/entries/food_greedy.py", "4:bots/entries/beam_survival.py"],
+        default=["4:bots/entries/food_greedy.py", "4:bots/entries/survival_greedy.py"],
         help="Simulation submission specs. Counts must sum to 8.",
     )
     parser.add_argument(

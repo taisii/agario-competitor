@@ -8,13 +8,10 @@ time holdout fails.  This wrapper therefore preserves the failed validation
 and must not be interpreted as evidence of cross-match generalisation.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam34Strategy(ReplayImitationStrategy):
+class ReplayTeam34Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_34"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[34])
-        self.name = "replay_team_34"
+    replay_profile = PROFILES[34]

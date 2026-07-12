@@ -8,13 +8,10 @@ held-out split reproduction without claiming an overall exact copy. Shadow
 validation remains marked failed on the profile and is reported as such.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam3Strategy(ReplayImitationStrategy):
+class ReplayTeam3Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_3"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[3])
-        self.name = "replay_team_3"
+    replay_profile = PROFILES[3]

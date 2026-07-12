@@ -1,9 +1,14 @@
-from __future__ import annotations
-
 """Greedy strategies that choose one immediate food, prey, or escape target."""
 
+from __future__ import annotations
+
 from strategies.base import StrategyContext, StrategyDecision
-from strategies.features import vector_from_to
+from strategies.features import (
+    BlobRelation,
+    extract_visible_features,
+    normalise,
+    vector_from_to,
+)
 
 
 class FoodGreedyStrategy:
@@ -31,17 +36,6 @@ class FoodGreedyStrategy:
 
         return StrategyDecision(direction=(1.0, 0.0), reason="fallback_east")
 
-
-
-from strategies.base import StrategyContext, StrategyDecision
-from strategies.features import (
-    BlobRelation,
-    extract_visible_features,
-    normalise,
-    vector_from_to,
-)
-
-
 class SurvivalGreedyStrategy:
     name = "survival_greedy"
 
@@ -49,7 +43,6 @@ class SurvivalGreedyStrategy:
         self.danger_margin = danger_margin
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
-        state = context.game.state
         features = extract_visible_features(context.game)
 
         escape = self._escape_vector(features.predators)

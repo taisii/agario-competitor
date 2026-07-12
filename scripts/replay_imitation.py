@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
 import statistics
 import sys
-from typing import Iterable, Sequence
+from typing import Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,8 +25,6 @@ from strategies.replay_imitation import (  # noqa: E402
     ImitationPoint,
     ReplayProfile,
     direction_feature_vectors,
-    predict_direction,
-    predict_split,
     split_feature_values,
     stable_unit_interval,
 )
@@ -499,7 +497,6 @@ def fit_split(samples: Sequence[ReplaySample], ridge: float = 0.5) -> tuple[tupl
         matrix[index][index] += ridge
     weights = _solve(matrix, target)
     scores = _split_scores(weights, samples)
-    labels = [sample.target_split for sample in samples]
     ordered = sorted(scores)
     candidates = {
         ordered[min(int(len(ordered) * q / 30), len(ordered) - 1)]

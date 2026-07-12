@@ -13,11 +13,12 @@ from dataclasses import dataclass
 import math
 from typing import Iterable, Sequence
 
+from lib.config.player import EAT_SIZE_RATIO
+from simulation.rules import can_consume_virus
 from strategies.base import StrategyContext, StrategyDecision
 
 
 EPS = 1e-9
-EAT_SIZE_RATIO = 1.2
 VISION_REFERENCE_SUM_OF_RADII = 12.0
 
 FEATURE_NAMES = (
@@ -147,7 +148,11 @@ class ReplayProfile:
 def observation_regime(observation: ImitationObservation) -> int:
     predators, prey, _ = _relations(observation)
     edible_virus = any(
-        own.radius * own.radius > virus.radius * virus.radius * EAT_SIZE_RATIO
+        can_consume_virus(
+            own.radius,
+            virus.radius,
+            eat_size_ratio=EAT_SIZE_RATIO,
+        )
         for own in observation.own_blobs
         for virus in observation.visible_viruses
     )
@@ -257,8 +262,11 @@ def direction_feature_vectors(
         virus
         for virus in observation.visible_viruses
         if any(
-            own.radius * own.radius
-            > virus.radius * virus.radius * EAT_SIZE_RATIO
+            can_consume_virus(
+                own.radius,
+                virus.radius,
+                eat_size_ratio=EAT_SIZE_RATIO,
+            )
             for own in observation.own_blobs
         )
     ]
@@ -317,8 +325,11 @@ def split_feature_values(
         virus
         for virus in observation.visible_viruses
         if any(
-            own.radius * own.radius
-            > virus.radius * virus.radius * EAT_SIZE_RATIO
+            can_consume_virus(
+                own.radius,
+                virus.radius,
+                eat_size_ratio=EAT_SIZE_RATIO,
+            )
             for own in observation.own_blobs
         )
     ]
@@ -536,3 +547,21 @@ class ReplayImitationStrategy:
                 "validation_passed": self.profile.validation_passed,
             },
         )
+
+
+class ProfiledReplayImitationStrategy(ReplayImitationStrategy):
+    """Thin adapter for opponents that differ only by their fitted profile.
+
+    Concrete replay modules keep their public class names, but no longer need
+    to duplicate the constructor that wires a team profile into the shared
+    imitation policy.
+    """
+
+    replay_profile: ReplayProfile
+
+    def __init__(self) -> None:
+        super().__init__(self.replay_profile)
+        # Preserve an explicitly declared public name if a compatibility class
+        # supplies one.  The fallback produced by ReplayImitationStrategy is
+        # already correct for generated profiles.
+        self.name = type(self).name

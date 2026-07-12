@@ -8,13 +8,10 @@ between source matches that validation fails; this wrapper preserves that
 status explicitly.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam48Strategy(ReplayImitationStrategy):
+class ReplayTeam48Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_48"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[48])
-        self.name = "replay_team_48"
+    replay_profile = PROFILES[48]
