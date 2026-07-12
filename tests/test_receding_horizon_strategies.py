@@ -619,6 +619,26 @@ def test_replay_dominance_proxy_promotes_high_value_prey_without_family_slot() -
     assert strategy._audit_last_exact_rank is not None
 
 
+def test_approximate_fallback_keeps_inertia_unless_escape_is_urgent() -> None:
+    smooth = ReplayDominanceStrategy._blend_approximate_direction(
+        previous=(1.0, 0.0),
+        proposed=(-1.0, 0.0),
+        improvement=0.0,
+        scale=1.0,
+        emergency=False,
+    )
+    emergency = ReplayDominanceStrategy._blend_approximate_direction(
+        previous=(1.0, 0.0),
+        proposed=(-1.0, 0.0),
+        improvement=10.0,
+        scale=1.0,
+        emergency=True,
+    )
+
+    assert smooth[0] > 0.0
+    assert emergency[0] < 0.0
+
+
 def test_replay_dominance_does_not_hide_trapped_fragment_behind_safe_center() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
     anchor = OwnBlob(blob_id=0, x=30.0, y=30.0, radius=3.0)

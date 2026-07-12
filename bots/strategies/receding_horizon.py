@@ -559,6 +559,207 @@ class ThreatAwareRecedingHorizonStrategy:
 
         return True
 
+    def _approximate_value_fallback(
+        self,
+        context: StrategyContext,
+    ) -> StrategyDecision:
+        """Extension hook for policies that provide the shared value proxy."""
+
+        started = perf_counter()
+        state = context.game.state
+        own_blobs = tuple(
+            OwnBlob(
+                blob_id=blob.blob_id,
+                x=blob.pos[0],
+                y=blob.pos[1],
+                radius=blob.radius,
+                merge_cooldown=blob.merge_cooldown,
+            )
+            for blob in state.me.blobs.values()
+        )
+        if not own_blobs:
+            return StrategyDecision(
+                direction=self.previous_direction,
+                reason="time_bank_dead",
+            )
+
+        self._utility_cache.clear()
+        self._virus_retention_cache.clear()
+        self._risk_envelope_cache.clear()
+        self._own_player_id = int(state.me.player_id)
+        self._current_round = int(state.round)
+        rankings = tuple(int(player_id) for player_id in state.rankings)
+        try:
+            rank_index = rankings.index(self._own_player_id)
+        except ValueError:
+            rank_index = len(rankings)
+        self._rival_values = {
+            player_id: 1.0 / (1.0 + abs(other_index - rank_index))
+            for other_index, player_id in enumerate(rankings)
+            if other_index != rank_index
+        }
+
+        self._read_public_moves(context)
+        arena_size = float(state.map.size or ARENA_SIZE)
+        viruses = tuple(state.visible_viruses)
+        enemies = self._update_enemy_memory(
+            context,
+            own_blobs,
+            arena_size,
+            viruses=viruses,
+        )
+        node = SearchNode(
+            own_blobs=own_blobs,
+            enemies=enemies,
+            score=0.0,
+            first_direction=self.previous_direction,
+            first_split=False,
+            first_reason="keep",
+            last_direction=self.previous_direction,
+        )
+        foods = tuple(state.visible_food)
+        gradient = self._approximate_value_gradient(
+            node=node,
+            foods=foods,
+            viruses=viruses,
+            arena_size=arena_size,
+        )
+
+        actions = [Action(self.previous_direction, reason="approx_keep")]
+        gradient_direction = normalise(gradient)
+        if gradient_direction != (0.0, 0.0):
+            actions.append(Action(gradient_direction, reason="approx_value"))
+        escape = self._escape_vector(node)
+        if escape != (0.0, 0.0):
+            actions.extend(
+                (
+                    Action(escape, reason="approx_escape"),
+                    Action(_rotate(escape, math.pi / 4), reason="approx_escape_tangent"),
+                    Action(_rotate(escape, -math.pi / 4), reason="approx_escape_tangent"),
+                )
+            )
+        prey = [
+            enemy
+            for enemy in enemies
+            if enemy.stale_rounds == 0
+            and any(
+                can_eat_player_blob(own.radius, enemy.radius)
+                for own in own_blobs
+            )
+        ]
+        prey.sort(key=lambda enemy: self._prey_candidate_priority(node, enemy, arena_size))
+        for enemy in prey[:2]:
+            actions.append(
+                Action(
+                    self._intercept_direction(node.primary, enemy),
+                    reason="approx_prey",
+                )
+            )
+        if foods:
+            nearest_food = min(
+                foods,
+                key=lambda food: squared_distance(node.center, food.pos),
+            )
+            actions.append(
+                Action(
+                    normalise(
+                        (
+                            nearest_food.pos[0] - node.center[0],
+                            nearest_food.pos[1] - node.center[1],
+                        )
+                    ),
+                    reason="approx_food",
+                )
+            )
+
+        actions = list(self._dedupe_actions(actions))
+        scored = [
+            (
+                self._approximate_action_value(
+                    node=node,
+                    action=action,
+                    foods=foods,
+                    arena_size=arena_size,
+                    value_gradient=gradient,
+                ),
+                action,
+            )
+            for action in actions
+        ]
+        scored.sort(key=lambda item: (-item[0], self._action_key(item[1])))
+        best_score, best = scored[0]
+        keep_score = next(
+            score for score, action in scored if action.reason == "approx_keep"
+        )
+        emergency = "escape" in best.reason
+        previous_direction = self.previous_direction
+        direction = self._blend_approximate_direction(
+            previous=previous_direction,
+            proposed=best.direction,
+            improvement=max(0.0, best_score - keep_score),
+            scale=abs(best_score) + abs(keep_score) + 1.0,
+            emergency=emergency,
+        )
+        self.previous_direction = direction
+        elapsed = perf_counter() - started
+        if self._profile_every_n > 0 and self._current_round % self._profile_every_n == 0:
+            print(
+                "REPLAY_FALLBACK"
+                f" round={self._current_round}"
+                f" elapsed_ms={elapsed * 1000.0:.3f}"
+                f" blobs={len(own_blobs)}"
+                f" enemies={len(enemies)}"
+                f" prey={len(prey)}"
+                f" candidates={len(actions)}"
+                f" reason={best.reason}"
+                f" improvement={best_score - keep_score:.6f}"
+                f" direction_dot={direction[0] * previous_direction[0] + direction[1] * previous_direction[1]:.6f}",
+                file=sys.stderr,
+                flush=True,
+            )
+        return StrategyDecision(
+            direction=direction,
+            target_kind=(
+                "escape"
+                if "escape" in best.reason
+                else "prey"
+                if "prey" in best.reason
+                else "food"
+                if "food" in best.reason
+                else "beam"
+            ),
+            reason=best.reason,
+            score=best_score,
+            diagnostics={
+                "approximate_fallback": True,
+                "fallback_candidates": len(actions),
+                "fallback_prey": len(prey),
+                "fallback_improvement": best_score - keep_score,
+                "compute_spent_ms": round(self.compute_spent_seconds * 1000.0, 3),
+                "compute_budget_ms": round(self.compute_budget_seconds * 1000.0, 3),
+            },
+        )
+
+    @staticmethod
+    def _blend_approximate_direction(
+        *,
+        previous: tuple[float, float],
+        proposed: tuple[float, float],
+        improvement: float,
+        scale: float,
+        emergency: bool,
+    ) -> tuple[float, float]:
+        previous = normalise(previous)
+        proposed = normalise(proposed)
+        confidence = _clamp(improvement / max(scale, EPSILON), 0.0, 1.0)
+        alpha = 0.9 if emergency else 0.2 + 0.45 * confidence
+        return normalise(
+            (
+                previous[0] * (1.0 - alpha) + proposed[0] * alpha,
+                previous[1] * (1.0 - alpha) + proposed[1] * alpha,
+            )
+        ) or previous
+
     def _transition_budget(
         self,
         own_blob_count: int,
@@ -2473,6 +2674,12 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         # This policy replaces the base score with a utility difference.
         return False
 
+    def _time_budget_fallback(
+        self,
+        context: StrategyContext,
+    ) -> StrategyDecision:
+        return self._approximate_value_fallback(context)
+
     def _transition_budget(
         self,
         own_blob_count: int,
@@ -2780,7 +2987,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             # Capturing a neighbouring rival removes both its mass and its
             # future scoreboard pressure, so it belongs in the same gradient
             # as food and virus growth rather than a separate attack mode.
-            weight = 100.0 * expected_mass / 8.0
+            weight = 100.0 * expected_mass / 6.0
             gradient_x += direction[0] * weight
             gradient_y += direction[1] * weight
 
