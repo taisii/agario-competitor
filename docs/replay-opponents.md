@@ -52,6 +52,24 @@ Refit the generated profiles and refresh the autonomous shadow-replay report:
 uv run python scripts/replay_imitation.py
 ```
 
+Multiple dated cohorts can be combined without copying or flattening them:
+
+```bash
+uv run python scripts/replay_imitation.py \
+  --replay-dir .agario/replays/official/latest-20 \
+  --replay-dir .agario/replays/official/submission-4
+```
+
+If cross-validation shows that a team's behavior changed between cohorts,
+replace only that team's training scope with one or more repeated overrides:
+
+```bash
+uv run python scripts/replay_imitation.py \
+  --replay-dir .agario/replays/official/latest-20 \
+  --replay-dir .agario/replays/official/submission-4 \
+  --team-replay-dir 15=.agario/replays/official/latest-20
+```
+
 This writes fitted profiles to `bots/strategies/replay_profiles.py` and the
 detailed ignored report to `.agario/replay-imitation/report.json`.
 
@@ -167,3 +185,15 @@ to newer matches is required to distinguish hidden state/randomness from
 submission changes. The runtime clones remain useful behavior models, but the
 strict `validation_passed` flag must stay false until the documented gate is
 actually met.
+
+Submission #4 subsequently produced 11 fresh official matches (`13931`–
+`13941`), stored separately under `.agario/replays/official/submission-4/`.
+They add observations for nine of the ten target IDs and reveal three new IDs
+(`78`, `79`, and `80`). Combining cohorts improves team 3's direction median
+from 23.3° to 19.3° and split F1 from 0.00 to 0.44; team 14 improves from
+27.5° to 24.7° and 0.12 to 0.22. Team 49 and 63 also improve direction.
+Teams 15, 58, 9, 12, and 35 retain their older cohort because the combined
+LOMO result regressed. Team 59 uses the combined cohort: its median direction
+error rises modestly from 14.7° to 16.4°, while split F1 gains from 0.00 to
+0.40. These selections are recorded in the generated report's
+`team_replay_dirs` field rather than being hidden in hand-edited profiles.

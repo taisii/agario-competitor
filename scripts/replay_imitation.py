@@ -630,12 +630,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--replay-dir",
         type=Path,
-        default=ROOT / ".agario/replays/official/latest-20",
+        action="append",
+        dest="replay_dirs",
+        help="Replay directory; repeat to combine isolated cohorts",
     )
     parser.add_argument(
         "--profiles-out",
         type=Path,
         default=ROOT / "bots/strategies/replay_profiles.py",
+    )
+    parser.add_argument(
+        "--team-replay-dir",
+        action="append",
+        default=[],
+        metavar="TEAM_ID=DIR",
+        help="Replace one team's training set with replays from DIR; repeat DIRs to combine",
+    )
+    parser.add_argument(
+        "--existing-strategies-only",
+        action="store_true",
+        help="Generate profiles only for replay_team_<id>.py strategies already in the repository",
     )
     parser.add_argument(
         "--report-out",
@@ -648,19 +662,70 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     samples_by_team: dict[int, list[ReplaySample]] = defaultdict(list)
-    replay_paths = sorted(args.replay_dir.glob("match-*-replay.json"))
+    samples_by_path: dict[Path, list[ReplaySample]] = {}
+    replay_dirs = args.replay_dirs or [ROOT / ".agario/replays/official/latest-20"]
+    replay_paths = sorted(
+        path
+        for replay_dir in replay_dirs
+        for path in replay_dir.glob("match-*-replay.json")
+    )
     if not replay_paths:
-        raise SystemExit(f"No replays found in {args.replay_dir}")
+        raise SystemExit(f"No replays found in {', '.join(map(str, replay_dirs))}")
     for path in replay_paths:
-        for sample in extract_samples(path):
+        path_samples = extract_samples(path)
+        samples_by_path[path.resolve()] = path_samples
+        for sample in path_samples:
             if sample.team_id != USER_TEAM_ID:
                 samples_by_team[sample.team_id].append(sample)
+
+    team_replay_dirs: dict[int, list[Path]] = defaultdict(list)
+    for specification in args.team_replay_dir:
+        try:
+            raw_team_id, raw_path = specification.split("=", 1)
+            team_id = int(raw_team_id)
+        except (ValueError, TypeError) as exc:
+            raise SystemExit(
+                f"Invalid --team-replay-dir {specification!r}; expected TEAM_ID=DIR"
+            ) from exc
+        team_replay_dirs[team_id].append(Path(raw_path))
+    for team_id, directories in team_replay_dirs.items():
+        selected = [
+            sample
+            for directory in directories
+            for path in sorted(directory.glob("match-*-replay.json"))
+            for sample in samples_by_path.get(path.resolve()) or extract_samples(path)
+            if sample.team_id == team_id
+        ]
+        if not selected:
+            raise SystemExit(f"No team {team_id} samples found in {directories}")
+        samples_by_team[team_id] = selected
+
+    if args.existing_strategies_only:
+        existing_team_ids = {
+            int(path.stem.removeprefix("replay_team_"))
+            for path in (ROOT / "bots/strategies").glob("replay_team_*.py")
+            if path.stem.removeprefix("replay_team_").isdigit()
+        }
+        samples_by_team = defaultdict(
+            list,
+            {
+                team_id: samples
+                for team_id, samples in samples_by_team.items()
+                if team_id in existing_team_ids
+            },
+        )
 
     profiles: list[ReplayProfile] = []
     report: dict[str, object] = {
         "replay_count": len(replay_paths),
         "opponent_count": len(samples_by_team),
         "user_team_id": USER_TEAM_ID,
+        "replay_dirs": [str(path) for path in replay_dirs],
+        "team_replay_dirs": {
+            str(team_id): [str(path) for path in paths]
+            for team_id, paths in sorted(team_replay_dirs.items())
+        },
+        "existing_strategies_only": args.existing_strategies_only,
         "gates": {
             "direction_median_error_degrees_max": 15.0,
             "direction_p75_error_degrees_max": 30.0,
