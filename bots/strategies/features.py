@@ -79,6 +79,28 @@ def can_eat_player_blob(
     )
 
 
+def can_consume_virus(blob_radius: float, virus_radius: float) -> bool:
+    """Return the engine's strict mass-ratio rule for consuming a virus."""
+
+    return blob_radius * blob_radius > virus_radius * virus_radius * EAT_SIZE_RATIO
+
+
+def virus_center_clearance(
+    blob_pos: tuple[float, float],
+    blob_radius: float,
+    virus_pos: tuple[float, float],
+) -> float:
+    """Return signed clearance from a virus center to the blob boundary.
+
+    Since agario-kit 2026.1.13, a virus is hit only when its center lies inside
+    the blob.  The virus's own radius affects the mass threshold, but no longer
+    expands the collision boundary.  A value at or below zero is therefore a
+    geometric hit; callers must check ``can_consume_virus`` separately.
+    """
+
+    return distance(blob_pos, virus_pos) - blob_radius
+
+
 def nearest_to_any_blob(
     own_blobs: tuple[BlobModel, ...],
     items: Iterable[FoodModel | VirusModel],

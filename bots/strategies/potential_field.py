@@ -31,8 +31,8 @@ class PreyPlan:
     cluster_size: int
 
 
-class PotentialHunterStrategy:
-    name = "potential_hunter"
+class PotentialFieldHunterStrategy:
+    name = "potential_field_hunter"
 
     def __init__(self) -> None:
         self._last_direction: tuple[float, float] = (1.0, 0.0)
@@ -225,7 +225,7 @@ class PotentialHunterStrategy:
             for virus in viruses:
                 if not _can_consume_virus(own.radius, virus.radius):
                     continue
-                keep_clear = own.radius + virus.radius + 1.5 + own.radius * 0.5
+                keep_clear = own.radius + 1.5 + own.radius * 0.5
                 distance = math.dist(own.pos, virus.pos)
                 if distance >= keep_clear:
                     continue

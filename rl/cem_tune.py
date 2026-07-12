@@ -46,7 +46,7 @@ BASE = {
 DEFAULT_OPPONENT_POOL = [
     "1:bots/entries/beam_rl_tuned.py",
     "2:bots/entries/beam_survival.py",
-    "2:bots/entries/potential_hunter.py",
+    "2:bots/entries/potential_field_hunter.py",
     "3:bots/entries/random_opponent.py",
 ]
 

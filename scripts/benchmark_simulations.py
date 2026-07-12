@@ -26,6 +26,7 @@ BUILT_IN_VARIANTS = {
     },
     "current": {},
 }
+DEFAULT_RANDOM_SEED = 20260712
 
 OUTCOME_RE = re.compile(
     r"outcome was \{result_type='(?P<result_type>[^']+)' "
@@ -65,6 +66,7 @@ def main() -> None:
             submissions=args.submission,
             tracked_slots=tracked_slots,
             metrics_every_n=args.metrics_every_n,
+            random_seed=args.random_seed,
             headless=not args.no_headless,
         )
     )
@@ -107,6 +109,15 @@ def parse_args() -> argparse.Namespace:
         "--metrics-every-n",
         default="10",
         help="BOT_METRICS_EVERY_N value for submissions.",
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=DEFAULT_RANDOM_SEED,
+        help=(
+            "Base seed for random opponents. The same trial and player slot "
+            "select the same opponent in every variant."
+        ),
     )
     parser.add_argument(
         "--workspace-root",
@@ -167,6 +178,7 @@ def write_run_config(
         "submission": args.submission,
         "tracked_slots": tracked_slots,
         "metrics_every_n": args.metrics_every_n,
+        "random_seed": args.random_seed,
         "headless": not args.no_headless,
     }
     (workspace_root / "run_config.json").write_text(
@@ -184,6 +196,7 @@ async def run_all(
     submissions: list[str],
     tracked_slots: tuple[int, ...],
     metrics_every_n: str,
+    random_seed: int,
     headless: bool,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(max(jobs, 1))
@@ -201,6 +214,7 @@ async def run_all(
                         submissions=submissions,
                         tracked_slots=tracked_slots,
                         metrics_every_n=metrics_every_n,
+                        random_seed=random_seed,
                         headless=headless,
                     )
                 )
@@ -228,6 +242,7 @@ async def run_match(
     submissions: list[str],
     tracked_slots: tuple[int, ...],
     metrics_every_n: str,
+    random_seed: int,
     headless: bool,
 ) -> dict[str, Any]:
     async with semaphore:
@@ -237,6 +252,8 @@ async def run_match(
         log_path = run_dir / "simulation.log"
         env = os.environ.copy()
         env.update(variant.env)
+        env["BOT_BENCHMARK_TRIAL"] = str(trial)
+        env["BOT_RANDOM_SEED"] = str(random_seed)
         env["BOT_METRICS_ENABLED"] = "1"
         env["BOT_METRICS_EVERY_N"] = metrics_every_n
         env["PYTHONUNBUFFERED"] = "1"
@@ -270,6 +287,7 @@ async def run_match(
             "elapsed_seconds": elapsed_seconds,
             "command": command,
             "env": variant.env,
+            "random_seed": random_seed,
             **outcome,
             **score_outcome(outcome, tracked_slots),
             **metrics,

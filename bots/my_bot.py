@@ -10,7 +10,7 @@ from telemetry import MetricsLogger
 
 def main() -> None:
     game = Game()
-    strategy = create_strategy(os.environ.get("BOT_STRATEGY", "champion"))
+    strategy = create_strategy(os.environ.get("BOT_STRATEGY", "replay_dominance"))
     metrics = MetricsLogger()
 
     try:

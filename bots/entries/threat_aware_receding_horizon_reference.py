@@ -9,10 +9,10 @@ sys.path.insert(0, str(BOTS_DIR))
 
 # Deliberately expensive reference profile for strength experiments before
 # distilling improvements into the submission-safe defaults.
-os.environ.setdefault("BOT_STRATEGY", "champion")
-os.environ.setdefault("BOT_CHAMPION_DEPTH", "11")
-os.environ.setdefault("BOT_CHAMPION_WIDTH", "32")
-os.environ.setdefault("BOT_CHAMPION_ANGLES", "48")
+os.environ.setdefault("BOT_STRATEGY", "threat_aware_receding_horizon")
+os.environ.setdefault("BOT_RECEDING_HORIZON_DEPTH", "11")
+os.environ.setdefault("BOT_RECEDING_HORIZON_WIDTH", "32")
+os.environ.setdefault("BOT_RECEDING_HORIZON_ANGLES", "48")
 os.environ.setdefault("BOT_METRICS_ENABLED", "0")
 
 from my_bot import main

@@ -6,7 +6,7 @@ from pathlib import Path
 
 BOTS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BOTS_DIR))
-os.environ.setdefault("BOT_STRATEGY", os.environ.get("BOT_CHAMPION_STRATEGY", "champion"))
+os.environ.setdefault("BOT_STRATEGY", "replay_dominance")
 
 from my_bot import main
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Shared simulation and scoring engine for configurable beam-search strategies."""
+
 """Shared beam-search bot logic for SYNCS/Susquehanna Agario Bot Battle.
 
 The public bot entrypoints in this directory import this module and only set a
@@ -19,7 +21,7 @@ import random
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-# Current public constants from agario-kit 2026.1.12. Keep local fallbacks so
+# Current public constants from agario-kit 2026.1.13. Keep local fallbacks so
 # the bot can still import if config module names change during the competition.
 try:  # pragma: no cover - depends on contest package
     from lib.config.arena import ARENA_SIZE, MAX_BLOB_COUNT, MAX_ROUNDS
@@ -589,7 +591,9 @@ def virus_escape_vector(state: WorldState) -> Vec2:
                 continue
             rel = virus.pos - blob.pos
             d = max(rel.norm(), EPS)
-            danger_radius = blob.radius + virus.radius + 1.5
+            # 2026.1.13 requires center containment; retain 1.5 as an explicit
+            # planning buffer rather than treating the virus radius as collision.
+            danger_radius = blob.radius + 1.5
             if d < danger_radius:
                 vec = vec + rel * (-(danger_radius - d) / (danger_radius * d))
     return vec
@@ -917,6 +921,7 @@ def _resolve_food(
     blobs: list[BlobState],
     enemies: list[BlobState],
     food: tuple[FoodState, ...],
+    arena_size: float = ARENA_SIZE,
 ) -> tuple[list[BlobState], list[BlobState], list[FoodState], float]:
     by_key = {
         (blob.player_id, blob.blob_id): blob
@@ -938,9 +943,14 @@ def _resolve_food(
             key=lambda blob: (-blob.radius, blob.player_id, blob.blob_id),
         )
         gain = FOOD_RADIUS * FOOD_RADIUS
+        grown_radius = sqrt(eater.mass + gain)
         by_key[(eater.player_id, eater.blob_id)] = replace(
             eater,
-            radius=sqrt(eater.mass + gain),
+            pos=Vec2(
+                clamp(eater.pos.x, grown_radius, arena_size - grown_radius),
+                clamp(eater.pos.y, grown_radius, arena_size - grown_radius),
+            ),
+            radius=grown_radius,
         )
         if eater.is_self:
             food_gain_mass += gain
@@ -956,6 +966,7 @@ def _resolve_food(
 def _resolve_player_eating(
     blobs: list[BlobState],
     enemies: list[BlobState],
+    arena_size: float = ARENA_SIZE,
 ) -> tuple[list[BlobState], list[BlobState], float, int]:
     by_key = {
         (blob.player_id, blob.blob_id): blob
@@ -987,9 +998,14 @@ def _resolve_player_eating(
                     continue
                 if squared_distance(eater.pos, target.pos) > eater.radius * eater.radius:
                     continue
+                grown_radius = sqrt(eater.mass + target.mass)
                 by_key[eater_key] = replace(
                     eater,
-                    radius=sqrt(eater.mass + target.mass),
+                    pos=Vec2(
+                        clamp(eater.pos.x, grown_radius, arena_size - grown_radius),
+                        clamp(eater.pos.y, grown_radius, arena_size - grown_radius),
+                    ),
+                    radius=grown_radius,
                 )
                 del by_key[target_key]
                 if eater.is_self and not target.is_self:
@@ -1024,10 +1040,12 @@ def simulate_step(state: WorldState, action: Action, config: StrategyConfig) -> 
         blobs,
         enemies,
         state.food,
+        state.arena_size,
     )
     blobs, enemies, prey_gain_mass, lost_blob_count = _resolve_player_eating(
         blobs,
         enemies,
+        state.arena_size,
     )
 
     decayed_blobs = _merge_self_blobs(blobs, state.arena_size)
@@ -1082,7 +1100,7 @@ def virus_risk(state: WorldState) -> float:
             if blob.mass <= virus.radius * virus.radius * EAT_SIZE_RATIO:
                 continue
             dist = (virus.pos - blob.pos).norm()
-            margin = blob.radius + virus.radius + 0.5
+            margin = blob.radius + 0.5
             if dist < margin:
                 risk += ((margin - dist) / max(margin, EPS)) ** 2 * max(1.0, blob.radius / max(virus.radius, EPS))
     return risk
