@@ -116,7 +116,7 @@ or split frequency, but not the exact hidden random sequence or split timing.
 | 6 | Style only | FAIL | Hidden-RNG 16-direction random walk; rare split |
 | 9 | FAIL | FAIL | Inertial field movement; safe-prey split with 90-round re-arm |
 | 10 | FAIL | FAIL | Regime-fitted direction; unstable split timing |
-| 12 | FAIL | FAIL | Food/escape/inertia mixture; sparse split |
+| 12 | FAIL | FAIL | Food/escape/inertia; close-prey split with 15-round re-arm |
 | 13 | PASS | FAIL | Food/inertia movement; uniquely identified prey split |
 | 14 | FAIL | FAIL | Prey/escape mixture; close-prey split with 15-round re-arm |
 | 15 | FAIL | FAIL | Strong inertia with unstable targets and split timing |
@@ -239,3 +239,9 @@ seven traces the fixed rule reaches precision 65.4%, recall 53.1%, and F1
 0.59, versus mean held-out F1 0.22 for the generic classifier. Two new events
 in match 13939 remain unmatched, and direction is still below its gate, so the
 overall verdict remains FAIL.
+
+Team 12 uses a single-blob close-prey gate (distance at most 12 arena units,
+radius ratio at least 1.5) with a 15-round re-arm interval. All three folds
+reach split F1 0.40 or better; mean held-out F1 rises from 0.04 to 0.54 and
+full-trace F1 reaches 0.65. Direction remains inconsistent across matches, so
+the overall verdict stays FAIL.
