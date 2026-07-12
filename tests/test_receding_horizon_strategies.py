@@ -43,10 +43,28 @@ def test_replay_dominance_is_a_distinct_registered_strategy() -> None:
     assert "replay_dominance" in available_strategy_names()
 
 
-def test_replay_dominance_compares_two_complete_roots_before_deadline() -> None:
+def test_replay_dominance_compares_two_roots_before_deadline() -> None:
     strategy = ReplayDominanceStrategy()
 
     assert strategy.minimum_root_actions == 2
+    single = SearchNode(
+        own_blobs=(OwnBlob(blob_id=0, x=10.0, y=10.0, radius=1.0),),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+    fragmented = replace(
+        single,
+        own_blobs=tuple(
+            OwnBlob(blob_id=index, x=10.0 + index, y=10.0, radius=1.0)
+            for index in range(16)
+        ),
+    )
+    assert strategy._required_actions_for_depth(0, single) == 2
+    assert strategy._required_actions_for_depth(0, fragmented) == 2
 
 
 def test_replay_dominance_uses_blob_scaled_deterministic_transition_budget() -> None:

@@ -18,6 +18,7 @@ Only standard-library code and public agario-kit models are used at runtime.
 
 import math
 import os
+import sys
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 
@@ -425,8 +426,9 @@ class ThreatAwareRecedingHorizonStrategy:
                     # Evaluate at least one action at each depth, then stop at
                     # the deadline. Deeper parents are expanded round-robin so
                     # the first beam node cannot consume the whole budget.
-                    required_actions = (
-                        self.minimum_root_actions if depth_index == 0 else 1
+                    required_actions = self._required_actions_for_depth(
+                        depth_index,
+                        node,
                     )
                     if (
                         uses_time_bank
@@ -922,6 +924,13 @@ class ThreatAwareRecedingHorizonStrategy:
 
     def _actions_per_node_limit(self, depth_index: int) -> int | None:
         return None
+
+    def _required_actions_for_depth(
+        self,
+        depth_index: int,
+        node: SearchNode,
+    ) -> int:
+        return self.minimum_root_actions if depth_index == 0 else 1
 
     def _audit_root_candidate_ranking(
         self,
@@ -2303,7 +2312,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         # overruns do not switch the final third of a match to the simplistic
         # fallback while remaining well below the engine's eight-second limit.
         self.compute_budget_seconds = float(
-            os.environ.get("BOT_REPLAY_TOTAL_BUDGET_SECONDS", "6.0")
+            os.environ.get("BOT_REPLAY_TOTAL_BUDGET_SECONDS", "3.0")
         )
         self.survival_midpoint_base = float(
             os.environ.get(
@@ -2351,6 +2360,46 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         self._audit_hits = 0
         self._audit_last_exact_rank: int | None = None
         self._current_round = 0
+        self._profile_every_n = int(
+            os.environ.get("BOT_REPLAY_PROFILE_EVERY_N", "100")
+        )
+        self._profile_seconds: dict[str, float] = {}
+        self._profile_calls: dict[str, int] = {}
+
+    def _record_profile(self, name: str, elapsed: float) -> None:
+        self._profile_seconds[name] = self._profile_seconds.get(name, 0.0) + elapsed
+        self._profile_calls[name] = self._profile_calls.get(name, 0) + 1
+
+    def _emit_profile(self, decision: StrategyDecision) -> None:
+        if self._profile_every_n <= 0 or self._current_round % self._profile_every_n:
+            return
+        diagnostics = decision.diagnostics
+        seconds = self._profile_seconds
+        calls = self._profile_calls
+        print(
+            "REPLAY_PROFILE"
+            f" round={self._current_round}"
+            f" blobs={diagnostics.get('projected_blob_count', 0)}"
+            f" enemies={diagnostics.get('visible_or_tracked_enemies', 0)}"
+            f" transitions={diagnostics.get('transitions_evaluated', 0)}"
+            f" depth={diagnostics.get('depth', 0)}"
+            f" reason={decision.reason}"
+            f" proxy_rank={diagnostics.get('selected_proxy_rank')}"
+            f" choose_ms={seconds.get('choose', 0.0) * 1000.0:.3f}"
+            f" candidate_ms={seconds.get('candidate', 0.0) * 1000.0:.3f}"
+            f" gradient_ms={seconds.get('gradient', 0.0) * 1000.0:.3f}"
+            f" step_ms={seconds.get('step', 0.0) * 1000.0:.3f}"
+            f" physics_ms={seconds.get('physics', 0.0) * 1000.0:.3f}"
+            f" utility_ms={seconds.get('utility', 0.0) * 1000.0:.3f}"
+            f" virus_ms={seconds.get('virus_retention', 0.0) * 1000.0:.3f}"
+            f" envelope_ms={seconds.get('risk_envelope', 0.0) * 1000.0:.3f}"
+            f" candidate_calls={calls.get('candidate', 0)}"
+            f" step_calls={calls.get('step', 0)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        self._profile_seconds.clear()
+        self._profile_calls.clear()
 
     def _uses_compute_time_bank(self) -> bool:
         # Fixed work keeps candidate ordering reproducible, while the measured
@@ -2368,12 +2417,23 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         # interactions.  An inverse allocation therefore keeps per-turn work
         # approximately constant without changing the state value function.
         work_units = own_blob_count + enemy_count / 3.0
-        return max(
+        budget = max(
             self.minimum_transition_budget,
             round(self.transition_budget_scale / max(1.0, work_units)),
         )
+        if own_blob_count <= 2:
+            budget = max(2, budget)
+        return budget
+
+    def _required_actions_for_depth(
+        self,
+        depth_index: int,
+        node: SearchNode,
+    ) -> int:
+        return self.minimum_root_actions if depth_index == 0 else 1
 
     def _choose(self, context, *, deadline: float, turn_budget: float):
+        profile_started = perf_counter()
         # Cache the complete value and its expensive virus/future-enemy
         # subproblems across candidate generation and rollout evaluation.
         self._utility_cache.clear()
@@ -2428,7 +2488,10 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             ),
             exact_best_proxy_rank=self._audit_last_exact_rank,
         )
-        return replace(decision, diagnostics=diagnostics)
+        profiled_decision = replace(decision, diagnostics=diagnostics)
+        self._record_profile("choose", perf_counter() - profile_started)
+        self._emit_profile(profiled_decision)
+        return profiled_decision
 
     def _candidate_actions(
         self,
@@ -2442,6 +2505,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         allow_split: bool = True,
         angle_offset: int = 0,
     ):
+        profile_started = perf_counter()
         inherited = list(
             super()._candidate_actions(
                 node=node,
@@ -2509,12 +2573,14 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 *inherited,
             ]
         )
+        gradient_started = perf_counter()
         value_gradient = self._approximate_value_gradient(
             node=node,
             foods=foods,
             viruses=viruses,
             arena_size=arena_size,
         )
+        self._record_profile("gradient", perf_counter() - gradient_started)
         scored = tuple(
             sorted(
                 (
@@ -2540,7 +2606,9 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 family_counts[family] = family_counts.get(family, 0) + 1
             self._root_proxy_scores = scored
             self._root_candidate_families = family_counts
-        return tuple(action for action, _ in scored)
+        result = tuple(action for action, _ in scored)
+        self._record_profile("candidate", perf_counter() - profile_started)
+        return result
 
     @staticmethod
     def _action_key(action: Action) -> tuple[int, bool]:
@@ -2767,6 +2835,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         safety_weight: float,
         aggression: float,
     ):
+        profile_started = perf_counter()
         before = self._cached_search_utility(
             node,
             foods=foods,
@@ -2779,6 +2848,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             action.direction,
             arena_size,
         )
+        physics_started = perf_counter()
         result = super()._step(
             node=node,
             action=action,
@@ -2789,9 +2859,12 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             safety_weight=safety_weight,
             aggression=aggression,
         )
+        self._record_profile("physics", perf_counter() - physics_started)
         if not result.node.own_blobs:
             dead_node = replace(result.node, score=node.score - 100_000.0)
-            return replace(result, node=dead_node)
+            shaped_result = replace(result, node=dead_node)
+            self._record_profile("step", perf_counter() - profile_started)
+            return shaped_result
         after = self._cached_search_utility(
             result.node,
             foods=foods,
@@ -2813,7 +2886,13 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         # Non-split danger is priced by retained mass rather than removed as a
         # fatal branch.  Only an immediately losing split keeps the parent's
         # physical admissibility rejection.
-        return replace(result, node=shaped_node, fatal=result.fatal and action.split)
+        shaped_result = replace(
+            result,
+            node=shaped_node,
+            fatal=result.fatal and action.split,
+        )
+        self._record_profile("step", perf_counter() - profile_started)
+        return shaped_result
 
     def _cached_search_utility(
         self,
@@ -2824,6 +2903,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         arena_size: float,
         safety_weight: float,
     ) -> float:
+        profile_started = perf_counter()
         key = (
             node.own_blobs,
             node.enemies,
@@ -2835,6 +2915,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         )
         cached = self._utility_cache.get(key)
         if cached is not None:
+            self._record_profile("utility", perf_counter() - profile_started)
             return cached
         value = self._search_utility(
             node,
@@ -2844,6 +2925,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             safety_weight=safety_weight,
         )
         self._utility_cache[key] = value
+        self._record_profile("utility", perf_counter() - profile_started)
         return value
 
     def _search_utility(
@@ -3363,15 +3445,24 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         virus,
         arena_size: float,
     ) -> float:
+        profile_started = perf_counter()
         cache_key = (id(node), origin.blob_id, virus.virus_id)
         cached = self._virus_retention_cache.get(cache_key)
         if cached is not None and cached[0] is node:
+            self._record_profile(
+                "virus_retention",
+                perf_counter() - profile_started,
+            )
             return cached[1]
         matching = next(
             (blob for blob in node.own_blobs if blob.blob_id == origin.blob_id),
             None,
         )
         if matching is None:
+            self._record_profile(
+                "virus_retention",
+                perf_counter() - profile_started,
+            )
             return 0.0
         retained = self._post_virus_retained_mass_fraction(
             # Search nodes are authoritative root states or the result of the
@@ -3385,6 +3476,10 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             arena_size=arena_size,
         )
         self._virus_retention_cache[cache_key] = (node, retained)
+        self._record_profile(
+            "virus_retention",
+            perf_counter() - profile_started,
+        )
         return retained
 
     def _risk_enemies(
@@ -3393,11 +3488,20 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
     ) -> tuple[EnemyBlob, ...]:
         """Return current and future envelopes once per rollout state."""
 
+        profile_started = perf_counter()
         cached = self._risk_envelope_cache.get(id(enemies))
         if cached is not None and cached[0] is enemies:
+            self._record_profile(
+                "risk_envelope",
+                perf_counter() - profile_started,
+            )
             return cached[1]
         risk_enemies = (*enemies, *self._future_enemy_envelopes(enemies))
         self._risk_envelope_cache[id(enemies)] = (enemies, risk_enemies)
+        self._record_profile(
+            "risk_envelope",
+            perf_counter() - profile_started,
+        )
         return risk_enemies
 
     def _post_virus_retained_mass_fraction(
