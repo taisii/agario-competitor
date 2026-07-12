@@ -2,11 +2,11 @@ from __future__ import annotations
 
 """Replay-derived opponent strategy for official team 59.
 
-Team 59 appears in three source matches with 3,900 observed actions.  Its
+Team 59 appears in five source matches. Its
 movement is primarily a mixture of the previous heading and nearby food, with
-prey and predator fields affecting contested views.  All 19 observed split
-commands occur in one match, so the fitted policy retains its failed
-cross-match validation status.
+prey and predator fields affecting contested views. Newer traces reveal a
+close-prey split gate with a 17-round re-arm interval, improving held-out split
+F1 while preserving a failed overall verdict for the inconsistent old traces.
 """
 
 from strategies.replay_imitation import ReplayImitationStrategy

@@ -145,7 +145,7 @@ or split frequency, but not the exact hidden random sequence or split timing.
 | 55 | Style only | FAIL | Hidden-RNG 24-direction movement; no split |
 | 56 | Style only | FAIL | Hidden-RNG 24-direction movement; burst splitting |
 | 58 | FAIL | FAIL | Stateful fitted field policy |
-| 59 | FAIL | FAIL | Stateful fitted direction; split concentrated in one match |
+| 59 | FAIL | FAIL | Stateful direction; current close-prey split with 17-round re-arm |
 | 63 | FAIL | FAIL | Inertial field movement; unstable split timing |
 | 68 | FAIL | FAIL | Direction PASS: prey, predator, then food priority; split FAIL |
 | 75 | PASS | PASS | Raw vector from nearest fragment to nearest food; no split |
@@ -206,3 +206,9 @@ the geometric rule (prey visible within 13 arena units, radius ratio at least
 LOMO verdict remains FAIL because direction is just below the aggregate gate
 (69.8% rather than 70% within 30°) and not every split fold reaches 70%
 precision and recall.
+
+Team 59 uses the same state-machine form with a slightly wider prey gate and
+a 17-round re-arm interval. Its mean held-out split F1 rises from 0.40 to 0.61;
+the two fresh Submission #4 folds score 0.77 and 0.70. Older matches remain
+inconsistent, so this is treated as reproduction of the current behavior and
+does not change the strict overall FAIL verdict.

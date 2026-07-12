@@ -428,8 +428,11 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
     # Team 49's split policy is edge-triggered. Static classification fires on
     # every frame while the same prey remains visible; the observed policy
     # waits roughly one engine split interval before it can fire again.
-    split_rule = (0.65, 1.5, 0.15, 0.125, 0.0, 0.0) if team_id == 49 else ()
-    split_cooldown_rounds = 18 if team_id == 49 else 0
+    split_rules = {
+        49: ((0.65, 1.5, 0.15, 0.125, 0.0, 0.0), 18),
+        59: ((0.80, 2.0, 0.15, 0.125, 0.0, 0.0), 17),
+    }
+    split_rule, split_cooldown_rounds = split_rules.get(team_id, ((), 0))
     return ReplayProfile(
         team_id=team_id,
         direction_weights=direction_weights,
