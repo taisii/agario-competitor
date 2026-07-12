@@ -132,3 +132,38 @@ or split frequency, but not the exact hidden random sequence or split timing.
 | 68 | FAIL | FAIL | Direction PASS: prey, predator, then food priority; split FAIL |
 | 75 | PASS | PASS | Raw vector from nearest fragment to nearest food; no split |
 | 77 | FAIL | FAIL | Food-led regime policy; no split |
+
+## Top-ten reproduction target
+
+The public leaderboard and replay payload expose different identifiers. The
+leaderboard currently starts with `team`, `Banana`, `Decay Rate`, `Bot
+Battle`, `Washed CS Students`, `OJ`, `imposters`, `SUNMO`, `Engorgio`, and
+`PorkyPig.py`, while replay JSON deliberately contains only numeric `team_id`
+values. The number shown in parentheses on the leaderboard is a match count,
+not a team ID. Stale Match Report pages also remove the participant metadata,
+so this repository does not claim an unverified name-to-ID mapping.
+
+For reproducible local work, the initial top-ten target is therefore defined
+by final placement across the saved 20 official matches. In order, those IDs
+are `15`, `3`, `58`, `49`, `9`, `63`, `12`, `14`, `35`, and `59`. This is an
+empirical replay cohort, not a claim that the IDs correspond positionally to
+the ten public names above.
+
+All ten currently fail the autonomous LOMO gate. A coarse nonlinear model
+that added map-region and game-phase branches was evaluated and rejected
+because it made eight of the ten direction results worse (for example, team
+15's median error changed from 34.9° to 37.5°, and team 35's from 10.4° to
+12.8°). Generated profiles were restored after that experiment.
+
+A sampled nearest-observation oracle was also evaluated across held-out
+matches. It was allowed to search recorded training observations using the
+full reconstructed feature vector, including the teacher's previous command,
+which makes it an optimistic upper bound rather than a deployable clone. Its
+median direction errors remained 21.9°–31.3° for the six latter targets and
+23.7°–28.3° for the four former targets; only 48.6%–62.3% of predictions were
+within 30°. Consequently, exact held-out command reproduction is not supported
+by the present 2–5 traces per team. More official traces or a verified mapping
+to newer matches is required to distinguish hidden state/randomness from
+submission changes. The runtime clones remain useful behavior models, but the
+strict `validation_passed` flag must stay false until the documented gate is
+actually met.
