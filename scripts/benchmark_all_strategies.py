@@ -11,8 +11,21 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
-import subprocess
-import sys
+
+if __package__:
+    from .benchmark_simulations import (
+        DEFAULT_RANDOM_SEED,
+        Variant,
+        run_all,
+        write_outputs,
+    )
+else:
+    from benchmark_simulations import (
+        DEFAULT_RANDOM_SEED,
+        Variant,
+        run_all,
+        write_outputs,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +80,7 @@ async def run_cell(
     trials: int,
     output_root: Path,
     semaphore: asyncio.Semaphore,
+    fast: bool,
 ) -> list[dict[str, object]]:
     if candidate_slot == 0:
         submissions = [
@@ -82,35 +96,22 @@ async def run_cell(
         raise ValueError("candidate_slot must be 0 or 7")
 
     workspace = output_root / opponent / f"slot_{candidate_slot}"
-    command = [
-        sys.executable,
-        str(ROOT / "scripts" / "benchmark_simulations.py"),
-        "--trials",
-        str(trials),
-        "--jobs",
-        "1",
-        "--variants",
-        "current",
-        "--submission",
-        *submissions,
-        "--tracked-slots",
-        str(candidate_slot),
-        "--metrics-every-n",
-        "20",
-        "--workspace-root",
-        str(workspace),
-    ]
-    async with semaphore:
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            cwd=ROOT,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        return_code = await process.wait()
-    if return_code:
-        raise subprocess.CalledProcessError(return_code, command)
-    return json.loads((workspace / "results.json").read_text())
+    rows = await run_all(
+        repo_root=ROOT,
+        workspace_root=workspace,
+        variants=[Variant(name="current", env={})],
+        trials=trials,
+        jobs=1,
+        submissions=submissions,
+        tracked_slots=(candidate_slot,),
+        metrics_every_n="20",
+        random_seed=DEFAULT_RANDOM_SEED,
+        headless=True,
+        fast=fast,
+        semaphore=semaphore,
+    )
+    write_outputs(workspace, rows)
+    return rows
 
 
 async def run_matrix(args: argparse.Namespace) -> list[dict[str, object]]:
@@ -129,6 +130,7 @@ async def run_matrix(args: argparse.Namespace) -> list[dict[str, object]]:
                     trials=args.trials,
                     output_root=args.output_root,
                     semaphore=semaphore,
+                    fast=not args.official,
                 )
                 for candidate_slot in layouts
             )
@@ -158,6 +160,14 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--opponents", nargs="*")
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument(
+        "--official",
+        action="store_true",
+        help=(
+            "Use the recording-capable official launcher. The default matrix "
+            "uses the engine-equivalent fast runner for high-throughput screening."
+        ),
+    )
     parser.add_argument(
         "--single-layout",
         action="store_true",

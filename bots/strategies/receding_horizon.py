@@ -1326,114 +1326,165 @@ class ThreatAwareRecedingHorizonStrategy:
         blobs: list[OwnBlob],
         arena_size: float,
     ) -> list[OwnBlob]:
-        """Apply the engine's attraction, merge, and separation sequence."""
+        """Apply the exact engine sequence with mutable rollout-local records."""
 
-        blobs = self._apply_attraction(blobs, arena_size)
-        blobs = self._merge_touching_own_blobs(blobs, arena_size)
-        blobs = self._separate_own_blobs(blobs, arena_size)
-        blobs = self._merge_touching_own_blobs(blobs, arena_size)
-        return self._separate_own_blobs(blobs, arena_size)
+        if len(blobs) <= 1:
+            return blobs
 
-    def _merge_touching_own_blobs(
-        self,
-        blobs: list[OwnBlob],
-        arena_size: float,
-    ) -> list[OwnBlob]:
-        by_id = {blob.blob_id: blob for blob in blobs}
-        while True:
-            merged = False
-            ordered = [by_id[key] for key in sorted(by_id)]
-            for index, first in enumerate(ordered):
-                for second in ordered[index + 1 :]:
-                    if first.merge_cooldown > 0 or second.merge_cooldown > 0:
-                        continue
-                    if math.dist(first.pos, second.pos) > (
-                        first.radius + second.radius + SAME_PLAYER_OVERLAP_EPSILON
-                    ):
-                        continue
-                    survivor, consumed = sorted(
-                        (first, second),
-                        key=lambda blob: (-blob.mass, blob.blob_id),
-                    )
-                    combined_mass = survivor.mass + consumed.mass
-                    combined = replace(
-                        survivor,
-                        x=_clamp(
-                            (survivor.x * survivor.mass + consumed.x * consumed.mass)
+        # [source, x, y, radius, cooldown, eject_vx, eject_vy]
+        work = {
+            blob.blob_id: [
+                blob,
+                blob.x,
+                blob.y,
+                blob.radius,
+                blob.merge_cooldown,
+                getattr(blob, "eject_vx", 0.0),
+                getattr(blob, "eject_vy", 0.0),
+            ]
+            for blob in blobs
+        }
+
+        total_mass = sum(item[3] * item[3] for item in work.values())
+        center_x = sum(item[1] * item[3] * item[3] for item in work.values()) / total_mass
+        center_y = sum(item[2] * item[3] * item[3] for item in work.values()) / total_mass
+        for item in work.values():
+            dx = center_x - item[1]
+            dy = center_y - item[2]
+            distance = math.hypot(dx, dy)
+            if distance == 0.0:
+                continue
+            step = min(MERGE_ATTRACTION_SPEED, distance)
+            item[1] = _clamp(
+                item[1] + dx / distance * step,
+                item[3],
+                arena_size - item[3],
+            )
+            item[2] = _clamp(
+                item[2] + dy / distance * step,
+                item[3],
+                arena_size - item[3],
+            )
+
+        def merge_touching() -> None:
+            while True:
+                merged = False
+                ids = sorted(work)
+                for first_index, first_id in enumerate(ids):
+                    first = work[first_id]
+                    for second_id in ids[first_index + 1 :]:
+                        second = work[second_id]
+                        if first[4] > 0 or second[4] > 0:
+                            continue
+                        if math.hypot(second[1] - first[1], second[2] - first[2]) > (
+                            first[3] + second[3] + SAME_PLAYER_OVERLAP_EPSILON
+                        ):
+                            continue
+                        first_mass = first[3] * first[3]
+                        second_mass = second[3] * second[3]
+                        if (-first_mass, first_id) <= (-second_mass, second_id):
+                            survivor_id, survivor = first_id, first
+                            consumed_id, consumed = second_id, second
+                        else:
+                            survivor_id, survivor = second_id, second
+                            consumed_id, consumed = first_id, first
+                        survivor_mass = survivor[3] * survivor[3]
+                        consumed_mass = consumed[3] * consumed[3]
+                        combined_mass = survivor_mass + consumed_mass
+                        combined_radius = math.sqrt(combined_mass)
+                        survivor[1] = _clamp(
+                            (survivor[1] * survivor_mass + consumed[1] * consumed_mass)
                             / combined_mass,
-                            math.sqrt(combined_mass),
-                            arena_size - math.sqrt(combined_mass),
-                        ),
-                        y=_clamp(
-                            (survivor.y * survivor.mass + consumed.y * consumed.mass)
+                            combined_radius,
+                            arena_size - combined_radius,
+                        )
+                        survivor[2] = _clamp(
+                            (survivor[2] * survivor_mass + consumed[2] * consumed_mass)
                             / combined_mass,
-                            math.sqrt(combined_mass),
-                            arena_size - math.sqrt(combined_mass),
-                        ),
-                        radius=math.sqrt(combined_mass),
-                        merge_cooldown=0,
-                        eject_vx=(
-                            survivor.eject_vx * survivor.mass
-                            + consumed.eject_vx * consumed.mass
+                            combined_radius,
+                            arena_size - combined_radius,
                         )
-                        / combined_mass,
-                        eject_vy=(
-                            survivor.eject_vy * survivor.mass
-                            + consumed.eject_vy * consumed.mass
-                        )
-                        / combined_mass,
-                    )
-                    by_id[survivor.blob_id] = combined
-                    del by_id[consumed.blob_id]
-                    merged = True
-                    break
-                if merged:
-                    break
-            if not merged:
-                return [by_id[key] for key in sorted(by_id)]
+                        survivor[5] = (
+                            survivor[5] * survivor_mass + consumed[5] * consumed_mass
+                        ) / combined_mass
+                        survivor[6] = (
+                            survivor[6] * survivor_mass + consumed[6] * consumed_mass
+                        ) / combined_mass
+                        survivor[3] = combined_radius
+                        survivor[4] = 0
+                        work[survivor_id] = survivor
+                        del work[consumed_id]
+                        merged = True
+                        break
+                    if merged:
+                        break
+                if not merged:
+                    return
 
-    def _separate_own_blobs(
-        self,
-        blobs: list[OwnBlob],
-        arena_size: float,
-        iterations: int = 4,
-    ) -> list[OwnBlob]:
-        by_id = {blob.blob_id: blob for blob in blobs}
-        for _ in range(iterations):
-            changed = False
-            blob_ids = sorted(by_id)
-            for index, first_id in enumerate(blob_ids):
-                for second_id in blob_ids[index + 1 :]:
-                    first = by_id[first_id]
-                    second = by_id[second_id]
-                    dx = second.x - first.x
-                    dy = second.y - first.y
-                    distance = math.hypot(dx, dy)
-                    minimum = first.radius + second.radius + SAME_PLAYER_OVERLAP_EPSILON
-                    if distance >= minimum:
-                        continue
-                    if distance <= EPSILON:
-                        nx, ny = (1.0, 0.0)
-                    else:
-                        nx, ny = (dx / distance, dy / distance)
-                    overlap = minimum - distance
-                    total_mass = first.mass + second.mass
-                    first_move = overlap * second.mass / total_mass
-                    second_move = overlap * first.mass / total_mass
-                    by_id[first_id] = replace(
-                        first,
-                        x=_clamp(first.x - nx * first_move, first.radius, arena_size - first.radius),
-                        y=_clamp(first.y - ny * first_move, first.radius, arena_size - first.radius),
-                    )
-                    by_id[second_id] = replace(
-                        second,
-                        x=_clamp(second.x + nx * second_move, second.radius, arena_size - second.radius),
-                        y=_clamp(second.y + ny * second_move, second.radius, arena_size - second.radius),
-                    )
-                    changed = True
-            if not changed:
-                break
-        return [by_id[key] for key in sorted(by_id)]
+        def separate(iterations: int = 4) -> None:
+            for _ in range(iterations):
+                changed = False
+                ids = sorted(work)
+                for first_index, first_id in enumerate(ids):
+                    first = work[first_id]
+                    for second_id in ids[first_index + 1 :]:
+                        second = work[second_id]
+                        dx = second[1] - first[1]
+                        dy = second[2] - first[2]
+                        minimum = first[3] + second[3] + SAME_PLAYER_OVERLAP_EPSILON
+                        distance = math.hypot(dx, dy)
+                        if distance >= minimum:
+                            continue
+                        if distance == 0.0:
+                            nx, ny = (1.0, 0.0)
+                        else:
+                            nx, ny = (dx / distance, dy / distance)
+                        overlap = minimum - distance
+                        first_mass = first[3] * first[3]
+                        second_mass = second[3] * second[3]
+                        pair_mass = first_mass + second_mass
+                        first_move = overlap * second_mass / pair_mass
+                        second_move = overlap * first_mass / pair_mass
+                        first[1] = _clamp(
+                            first[1] - nx * first_move,
+                            first[3],
+                            arena_size - first[3],
+                        )
+                        first[2] = _clamp(
+                            first[2] - ny * first_move,
+                            first[3],
+                            arena_size - first[3],
+                        )
+                        second[1] = _clamp(
+                            second[1] + nx * second_move,
+                            second[3],
+                            arena_size - second[3],
+                        )
+                        second[2] = _clamp(
+                            second[2] + ny * second_move,
+                            second[3],
+                            arena_size - second[3],
+                        )
+                        changed = True
+                if not changed:
+                    return
+
+        merge_touching()
+        separate()
+        merge_touching()
+        separate()
+        result = []
+        for _, item in sorted(work.items()):
+            updates = {
+                "x": item[1],
+                "y": item[2],
+                "radius": item[3],
+                "merge_cooldown": item[4],
+            }
+            if isinstance(item[0], OwnBlob):
+                updates.update(eject_vx=item[5], eject_vy=item[6])
+            result.append(replace(item[0], **updates))
+        return result
 
     def _move_enemies(
         self,
@@ -2901,175 +2952,6 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 100.0 + origin.mass * 8.0
             )
         return own_blobs, enemies, score, penalty
-
-    def _stabilise_own_blobs(self, blobs, arena_size: float):
-        """Run the engine's stabilisation exactly using mutable work records.
-
-        The engine mutates blob objects in place.  Reproducing that with a
-        frozen dataclass replacement for every colliding pair was roughly ten
-        times slower, which previously motivated an approximation during merge
-        cooldown.  These compact records preserve the engine's pair order,
-        clamping, four separation passes, and merge loops without changing the
-        transition being modelled.
-        """
-        if len(blobs) <= 1:
-            return blobs
-
-        # [source, x, y, radius, cooldown, eject_vx, eject_vy]
-        work = {
-            blob.blob_id: [
-                blob,
-                blob.x,
-                blob.y,
-                blob.radius,
-                blob.merge_cooldown,
-                getattr(blob, "eject_vx", 0.0),
-                getattr(blob, "eject_vy", 0.0),
-            ]
-            for blob in blobs
-        }
-
-        total_mass = sum(item[3] * item[3] for item in work.values())
-        center_x = sum(item[1] * item[3] * item[3] for item in work.values()) / total_mass
-        center_y = sum(item[2] * item[3] * item[3] for item in work.values()) / total_mass
-        for item in work.values():
-            dx = center_x - item[1]
-            dy = center_y - item[2]
-            distance = math.hypot(dx, dy)
-            if distance == 0.0:
-                continue
-            step = min(MERGE_ATTRACTION_SPEED, distance)
-            item[1] = _clamp(
-                item[1] + dx / distance * step,
-                item[3],
-                arena_size - item[3],
-            )
-            item[2] = _clamp(
-                item[2] + dy / distance * step,
-                item[3],
-                arena_size - item[3],
-            )
-
-        def merge_touching() -> None:
-            while True:
-                merged = False
-                ids = sorted(work)
-                for first_index, first_id in enumerate(ids):
-                    first = work[first_id]
-                    for second_id in ids[first_index + 1 :]:
-                        second = work[second_id]
-                        if first[4] > 0 or second[4] > 0:
-                            continue
-                        if math.hypot(second[1] - first[1], second[2] - first[2]) > (
-                            first[3] + second[3] + SAME_PLAYER_OVERLAP_EPSILON
-                        ):
-                            continue
-                        first_mass = first[3] * first[3]
-                        second_mass = second[3] * second[3]
-                        if (-first_mass, first_id) <= (-second_mass, second_id):
-                            survivor_id, survivor = first_id, first
-                            consumed_id, consumed = second_id, second
-                        else:
-                            survivor_id, survivor = second_id, second
-                            consumed_id, consumed = first_id, first
-                        survivor_mass = survivor[3] * survivor[3]
-                        consumed_mass = consumed[3] * consumed[3]
-                        combined_mass = survivor_mass + consumed_mass
-                        combined_radius = math.sqrt(combined_mass)
-                        survivor[1] = _clamp(
-                            (survivor[1] * survivor_mass + consumed[1] * consumed_mass)
-                            / combined_mass,
-                            combined_radius,
-                            arena_size - combined_radius,
-                        )
-                        survivor[2] = _clamp(
-                            (survivor[2] * survivor_mass + consumed[2] * consumed_mass)
-                            / combined_mass,
-                            combined_radius,
-                            arena_size - combined_radius,
-                        )
-                        survivor[5] = (
-                            survivor[5] * survivor_mass + consumed[5] * consumed_mass
-                        ) / combined_mass
-                        survivor[6] = (
-                            survivor[6] * survivor_mass + consumed[6] * consumed_mass
-                        ) / combined_mass
-                        survivor[3] = combined_radius
-                        survivor[4] = 0
-                        work[survivor_id] = survivor
-                        del work[consumed_id]
-                        merged = True
-                        break
-                    if merged:
-                        break
-                if not merged:
-                    return
-
-        def separate(iterations: int = 4) -> None:
-            for _ in range(iterations):
-                changed = False
-                ids = sorted(work)
-                for first_index, first_id in enumerate(ids):
-                    first = work[first_id]
-                    for second_id in ids[first_index + 1 :]:
-                        second = work[second_id]
-                        dx = second[1] - first[1]
-                        dy = second[2] - first[2]
-                        minimum = first[3] + second[3] + SAME_PLAYER_OVERLAP_EPSILON
-                        distance = math.hypot(dx, dy)
-                        if distance >= minimum:
-                            continue
-                        if distance == 0.0:
-                            nx, ny = (1.0, 0.0)
-                        else:
-                            nx, ny = (dx / distance, dy / distance)
-                        overlap = minimum - distance
-                        first_mass = first[3] * first[3]
-                        second_mass = second[3] * second[3]
-                        pair_mass = first_mass + second_mass
-                        first_move = overlap * second_mass / pair_mass
-                        second_move = overlap * first_mass / pair_mass
-                        first[1] = _clamp(
-                            first[1] - nx * first_move,
-                            first[3],
-                            arena_size - first[3],
-                        )
-                        first[2] = _clamp(
-                            first[2] - ny * first_move,
-                            first[3],
-                            arena_size - first[3],
-                        )
-                        second[1] = _clamp(
-                            second[1] + nx * second_move,
-                            second[3],
-                            arena_size - second[3],
-                        )
-                        second[2] = _clamp(
-                            second[2] + ny * second_move,
-                            second[3],
-                            arena_size - second[3],
-                        )
-                        changed = True
-                if not changed:
-                    return
-
-        merge_touching()
-        separate()
-        merge_touching()
-        separate()
-        result = []
-        for blob_id in sorted(work):
-            item = work[blob_id]
-            updates = {
-                "x": item[1],
-                "y": item[2],
-                "radius": item[3],
-                "merge_cooldown": item[4],
-            }
-            if isinstance(item[0], OwnBlob):
-                updates.update(eject_vx=item[5], eject_vy=item[6])
-            result.append(replace(item[0], **updates))
-        return result
 
     def _virus_retained_mass_fraction(
         self,

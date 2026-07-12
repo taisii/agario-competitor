@@ -69,6 +69,17 @@ randomly selected official-replay clone strategies, run:
 uv run simulation 1:bots/entries/replay_dominance.py 7:bots/entries/random_replay_opponent.py --headless
 ```
 
+To screen it against every saved strategy, with individual matches sharing one
+global parallel-job limit, run:
+
+```bash
+uv run python scripts/benchmark_all_strategies.py --trials 2 --jobs 4
+```
+
+The matrix uses the no-recording fast runner by default. Add `--official` for a
+final process-layout and recording check after narrowing the candidates; it is
+substantially slower and is not intended for the exhaustive screen.
+
 ## Building the official submission
 
 The 2026 submission portal accepts one `.py` file. Keep the modular strategy
