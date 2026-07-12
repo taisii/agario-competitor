@@ -269,3 +269,11 @@ The expanded evidence also replaces its narrow single-blob split rule with a
 30-round re-arm rule that permits the observed fragmented and predator-visible
 events. The other targets retain their prior cohorts because the additional
 traces worsened direction or split generalization.
+
+Across team 58's seven traces, 77–93% of commands lie on a 16-heading grid,
+depending on the visibility regime. Held-out transition distributions are
+stable in the common regimes (total-variation distance 0.078–0.105). The clone
+therefore applies replay-fitted, regime-specific deterministic quantization
+rates on top of its environment-driven direction. This lowers autonomous LOMO
+median error again from 26.2° to 22.5° and raises the within-30° rate from
+52.9% to 55.2%, while reproducing the observed grid rate without process RNG.

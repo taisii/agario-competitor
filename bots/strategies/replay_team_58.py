@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-"""Best-fit stateful imitation of team 58's two replay traces.
+"""Best-fit stateful imitation of team 58's seven replay traces.
 
 The fitted direction is dominated by previous-heading inertia with smaller
-food, prey, predator, wall, and virus corrections.  Cross-match validation is
-poor for both direction and sparse split timing, which remains explicit on
-the profile used by this dedicated wrapper.
+food, prey, predator, wall, and virus corrections. Its stable probabilistic
+16-heading quantization is reproduced from regime-specific replay rates.
+Cross-match validation remains below the strict exact-command gate.
 """
 
 from strategies.replay_imitation import ReplayImitationStrategy

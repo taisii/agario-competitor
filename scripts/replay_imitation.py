@@ -28,6 +28,7 @@ from strategies.replay_imitation import (  # noqa: E402
     predict_direction,
     predict_split,
     split_feature_values,
+    stable_unit_interval,
 )
 
 
@@ -501,6 +502,27 @@ def detect_angle_grid(samples: Sequence[ReplaySample]) -> tuple[int, float]:
     return 0, 0.0
 
 
+def fit_angle_grid_rates(
+    samples: Sequence[ReplaySample], bins: int
+) -> tuple[float, ...]:
+    step = math.tau / bins
+    def aligned(sample: ReplaySample) -> bool:
+        x, y = sample.target_direction
+        return abs((math.atan2(y, x) + step / 2.0) % step - step / 2.0) <= 1e-5
+
+    global_rate = sum(aligned(sample) for sample in samples) / max(len(samples), 1)
+    rates: list[float] = []
+    for regime in range(8):
+        subset = [sample for sample in samples if _sample_regime(sample) == regime]
+        if len(subset) < 40:
+            rates.append(global_rate)
+            continue
+        rates.append(
+            sum(aligned(sample) for sample in subset) / len(subset)
+        )
+    return tuple(rates)
+
+
 def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
     direction_ridge = 0.005 if team_id in {35, 49} else 0.25
     autonomous_teams = {3, 9, 14, 15, 35, 49, 58, 59, 63}
@@ -512,6 +534,12 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
     )
     split_weights, split_threshold = fit_split(samples)
     angle_bins, angle_offset = detect_angle_grid(samples)
+    probabilistic_angle_bins = 16 if team_id == 58 else 0
+    angle_grid_rates = (
+        fit_angle_grid_rates(samples, probabilistic_angle_bins)
+        if probabilistic_angle_bins
+        else ()
+    )
     # Team 49's split policy is edge-triggered. Static classification fires on
     # every frame while the same prey remains visible; the observed policy
     # waits roughly one engine split interval before it can fire again.
@@ -553,6 +581,8 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
         split_cooldown_rounds=split_cooldown_rounds,
         angle_bins=angle_bins,
         angle_offset=angle_offset,
+        probabilistic_angle_bins=probabilistic_angle_bins,
+        angle_grid_rates=angle_grid_rates,
         source_matches=tuple(sorted({sample.match_id for sample in samples})),
     )
 
@@ -616,6 +646,20 @@ def evaluate_profile(profile: ReplayProfile, samples: Sequence[ReplaySample]) ->
             step = math.tau / profile.angle_bins
             angle = math.atan2(predicted_direction[1], predicted_direction[0])
             angle = round((angle - profile.angle_offset) / step) * step + profile.angle_offset
+            predicted_direction = (math.cos(angle), math.sin(angle))
+        elif (
+            profile.probabilistic_angle_bins > 0
+            and profile.angle_grid_rates
+            and stable_unit_interval(
+                profile.team_id,
+                sample.player_id,
+                sample.round_number,
+            )
+            < profile.angle_grid_rates[regime]
+        ):
+            step = math.tau / profile.probabilistic_angle_bins
+            angle = math.atan2(predicted_direction[1], predicted_direction[0])
+            angle = round(angle / step) * step
             predicted_direction = (math.cos(angle), math.sin(angle))
         target = sample.target_direction
         if target != (0.0, 0.0) and predicted_direction != (0.0, 0.0):
@@ -751,6 +795,8 @@ def _profile_with_validation(
         split_cooldown_rounds=profile.split_cooldown_rounds,
         angle_bins=profile.angle_bins,
         angle_offset=profile.angle_offset,
+        probabilistic_angle_bins=profile.probabilistic_angle_bins,
+        angle_grid_rates=profile.angle_grid_rates,
         source_matches=profile.source_matches,
         direction_median_error=float(validation["direction_median_error_degrees"]),
         direction_within_30_rate=float(validation["direction_within_30_rate"]),
@@ -787,6 +833,8 @@ def write_profiles(path: Path, profiles: Sequence[ReplayProfile]) -> None:
                 f"        split_cooldown_rounds={profile.split_cooldown_rounds!r},",
                 f"        angle_bins={profile.angle_bins!r},",
                 f"        angle_offset={profile.angle_offset!r},",
+                f"        probabilistic_angle_bins={profile.probabilistic_angle_bins!r},",
+                f"        angle_grid_rates={profile.angle_grid_rates!r},",
                 f"        source_matches={profile.source_matches!r},",
                 f"        direction_median_error={profile.direction_median_error!r},",
                 f"        direction_within_30_rate={profile.direction_within_30_rate!r},",

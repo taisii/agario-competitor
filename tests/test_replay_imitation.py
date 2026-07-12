@@ -138,6 +138,33 @@ def test_fragmented_direction_weights_apply_only_after_split() -> None:
     assert predict_direction(profile, split) == (1.0, 0.0)
 
 
+def test_probabilistic_angle_grid_with_full_rate_is_deterministic() -> None:
+    base = _nearest_food_profile()
+    profile = ReplayProfile(
+        team_id=58,
+        direction_weights=base.direction_weights,
+        split_weights=base.split_weights,
+        split_threshold=math.inf,
+        probabilistic_angle_bins=4,
+        angle_grid_rates=(1.0,) * 8,
+    )
+    observation = ImitationObservation(
+        round_number=123,
+        max_rounds=1400,
+        arena_size=60.0,
+        own_blobs=(ImitationBlob(10.0, 10.0, 1.5, player_id=2),),
+        visible_blobs=(),
+        visible_food=(ImitationPoint(11.0, 12.0, entity_id=1),),
+        visible_viruses=(),
+    )
+
+    first = predict_direction(profile, observation)
+    second = predict_direction(profile, observation)
+    assert first == second
+    assert abs(first[0]) < 1e-12
+    assert abs(first[1] - 1.0) < 1e-12
+
+
 def test_generated_profiles_cover_all_replay_opponents() -> None:
     expected = {
         1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 14, 15, 16, 17, 21, 22, 24,

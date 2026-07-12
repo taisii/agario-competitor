@@ -105,6 +105,8 @@ class ReplayProfile:
     context_direction_weights: tuple[tuple[float, ...], ...] = ()
     angle_bins: int = 0
     angle_offset: float = 0.0
+    probabilistic_angle_bins: int = 0
+    angle_grid_rates: tuple[float, ...] = ()
     source_matches: tuple[int, ...] = ()
     direction_median_error: float | None = None
     direction_within_30_rate: float | None = None
@@ -134,6 +136,8 @@ class ReplayProfile:
                 raise ValueError(
                     f"{field_name} must contain eight feature vectors"
                 )
+        if self.angle_grid_rates and len(self.angle_grid_rates) != 8:
+            raise ValueError("angle_grid_rates must contain eight regime rates")
 
     @property
     def conditional_direction_weights(self) -> tuple[tuple[float, ...], ...]:
@@ -148,6 +152,22 @@ def observation_regime(observation: ImitationObservation) -> int:
         for virus in observation.visible_viruses
     )
     return (1 if predators else 0) | (2 if prey else 0) | (4 if edible_virus else 0)
+
+
+def stable_unit_interval(team_id: int, player_id: int, round_number: int) -> float:
+    """Return a reproducible pseudo-random value without hidden process state."""
+    mask = (1 << 64) - 1
+    value = (
+        team_id * 0x9E3779B97F4A7C15
+        + player_id * 0x94D049BB133111EB
+        + round_number * 0xBF58476D1CE4E5B9
+    ) & mask
+    value ^= value >> 30
+    value = (value * 0xBF58476D1CE4E5B9) & mask
+    value ^= value >> 27
+    value = (value * 0x94D049BB133111EB) & mask
+    value ^= value >> 31
+    return (value & ((1 << 53) - 1)) / float(1 << 53)
 
 
 def _unit(vector: tuple[float, float]) -> tuple[float, float]:
@@ -386,6 +406,20 @@ def predict_direction(
         step = math.tau / profile.angle_bins
         angle = math.atan2(direction[1], direction[0])
         angle = round((angle - profile.angle_offset) / step) * step + profile.angle_offset
+        direction = (math.cos(angle), math.sin(angle))
+    elif (
+        profile.probabilistic_angle_bins > 0
+        and profile.angle_grid_rates
+        and stable_unit_interval(
+            profile.team_id,
+            observation.own_blobs[0].player_id if observation.own_blobs else -1,
+            observation.round_number,
+        )
+        < profile.angle_grid_rates[regime]
+    ):
+        step = math.tau / profile.probabilistic_angle_bins
+        angle = math.atan2(direction[1], direction[0])
+        angle = round(angle / step) * step
         direction = (math.cos(angle), math.sin(angle))
     return direction
 
