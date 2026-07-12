@@ -47,6 +47,6 @@ Game query
 1. Reuse the shared state and simulation layers.
 2. Implement only the policy-specific candidate or evaluation behavior.
 3. Add a catalog entry with its category and submission capability.
-4. Add deterministic policy tests and, for predictive logic, an engine-contract
-   case covering every newly used transition.
+4. Test shared policy behavior once. Add strategy-specific tests only for new
+   behavior that is not covered by the catalog or engine contracts.
 5. Compare it against the current candidate using immutable benchmark runs.

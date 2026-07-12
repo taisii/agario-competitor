@@ -32,6 +32,7 @@ class StrategySpec:
     name: str
     factory_path: str
     category: str
+    factory_argument: int | None = None
     submission: SubmissionBundleSpec | None = None
 
     def create(self) -> Strategy:
@@ -39,8 +40,12 @@ class StrategySpec:
         if not separator:
             raise RuntimeError(f"Invalid strategy factory path: {self.factory_path!r}")
         module = importlib.import_module(module_name)
-        factory: Callable[[], Strategy] = getattr(module, attribute_name)
-        strategy = factory()
+        factory: Callable[..., Strategy] = getattr(module, attribute_name)
+        strategy = (
+            factory()
+            if self.factory_argument is None
+            else factory(self.factory_argument)
+        )
         if strategy.name != self.name:
             raise RuntimeError(
                 f"Strategy catalog name {self.name!r} does not match "
@@ -54,12 +59,14 @@ def _spec(
     factory_path: str,
     category: str,
     *,
+    factory_argument: int | None = None,
     submission: SubmissionBundleSpec | None = None,
 ) -> StrategySpec:
     return StrategySpec(
         name=name,
         factory_path=factory_path,
         category=category,
+        factory_argument=factory_argument,
         submission=submission,
     )
 
@@ -137,11 +144,20 @@ REPLAY_TEAM_IDS = (
     55, 56, 58, 59, 63, 68, 75, 77,
 )
 
+CUSTOM_REPLAY_TEAM_IDS = frozenset(
+    {1, 2, 4, 6, 13, 16, 22, 25, 27, 29, 30, 31, 35, 38, 39, 44, 51, 53, 56, 68, 75}
+)
+
 _REPLAY_SPECS = tuple(
     _spec(
         f"replay_team_{team_id}",
-        f"strategies.replay_team_{team_id}:ReplayTeam{team_id}Strategy",
+        (
+            f"strategies.replay_team_{team_id}:ReplayTeam{team_id}Strategy"
+            if team_id in CUSTOM_REPLAY_TEAM_IDS
+            else "strategies.replay_imitation:create_profiled_replay_strategy"
+        ),
         "replay_opponent",
+        factory_argument=None if team_id in CUSTOM_REPLAY_TEAM_IDS else team_id,
     )
     for team_id in REPLAY_TEAM_IDS
 )
@@ -212,11 +228,7 @@ def select_replay_team_id(
 
     if not team_ids:
         raise ValueError("Random replay opponent requires at least one team")
-    seed = (
-        base_seed
-        ^ ((trial + 1) * 0x9E3779B1)
-        ^ ((player_id + 1) * 0x85EBCA77)
-    )
+    seed = base_seed ^ ((trial + 1) * 0x9E3779B1) ^ ((player_id + 1) * 0x85EBCA77)
     return random.Random(seed).choice(team_ids)
 
 
@@ -263,7 +275,9 @@ def available_strategy_names(*, category: str | None = None) -> tuple[str, ...]:
 
 def submission_strategy_names() -> tuple[str, ...]:
     return tuple(
-        sorted(spec.name for spec in STRATEGY_SPECS.values() if spec.submission is not None)
+        sorted(
+            spec.name for spec in STRATEGY_SPECS.values() if spec.submission is not None
+        )
     )
 
 
@@ -311,7 +325,9 @@ def create_random_opponent_strategy() -> Strategy:
     invalid = [candidate for candidate in candidates if candidate not in STRATEGY_SPECS]
     if invalid:
         available = ", ".join(available_strategy_names())
-        raise ValueError(f"Invalid BOT_RANDOM_STRATEGIES entries {invalid}. Available: {available}")
+        raise ValueError(
+            f"Invalid BOT_RANDOM_STRATEGIES entries {invalid}. Available: {available}"
+        )
 
     seed = int(os.environ.get("BOT_RANDOM_SEED", os.getpid() ^ time.time_ns()))
     trial = int(os.environ.get("BOT_BENCHMARK_TRIAL", "0"))

@@ -10,6 +10,7 @@ normal local simulator.
 """
 
 from dataclasses import dataclass
+from functools import lru_cache
 import math
 from typing import Iterable, Sequence
 
@@ -100,10 +101,6 @@ class ReplayProfile:
     regime_direction_weights: tuple[tuple[float, ...], ...] = ()
     fragmented_direction_weights: tuple[tuple[float, ...], ...] = ()
     direction_override_weights: tuple[tuple[float, ...], ...] = ()
-    # Backward-compatible name used by an earlier profile generator.  Keeping
-    # the schema tolerant prevents a freshly generated profile module from
-    # failing during import while the fitter and runtime are updated together.
-    context_direction_weights: tuple[tuple[float, ...], ...] = ()
     angle_bins: int = 0
     angle_offset: float = 0.0
     probabilistic_angle_bins: int = 0
@@ -124,7 +121,6 @@ class ReplayProfile:
         for field_name, conditional_weights in (
             ("regime_direction_weights", self.regime_direction_weights),
             ("fragmented_direction_weights", self.fragmented_direction_weights),
-            ("context_direction_weights", self.context_direction_weights),
             ("direction_override_weights", self.direction_override_weights),
         ):
             if conditional_weights and (
@@ -134,15 +130,9 @@ class ReplayProfile:
                     for weights in conditional_weights
                 )
             ):
-                raise ValueError(
-                    f"{field_name} must contain eight feature vectors"
-                )
+                raise ValueError(f"{field_name} must contain eight feature vectors")
         if self.angle_grid_rates and len(self.angle_grid_rates) != 8:
             raise ValueError("angle_grid_rates must contain eight regime rates")
-
-    @property
-    def conditional_direction_weights(self) -> tuple[tuple[float, ...], ...]:
-        return self.regime_direction_weights or self.context_direction_weights
 
 
 def observation_regime(observation: ImitationObservation) -> int:
@@ -200,7 +190,9 @@ def _nearest_vector(
 ) -> tuple[float, float]:
     if not entities:
         return (0.0, 0.0)
-    entity = min(entities, key=lambda item: math.hypot(item.x - origin[0], item.y - origin[1]))
+    entity = min(
+        entities, key=lambda item: math.hypot(item.x - origin[0], item.y - origin[1])
+    )
     sign = -1.0 if away else 1.0
     return _unit((sign * (entity.x - origin[0]), sign * (entity.y - origin[1])))
 
@@ -226,30 +218,29 @@ def _field_vector(
     return _unit((x, y))
 
 
+@lru_cache(maxsize=8)
 def _relations(
     observation: ImitationObservation,
-) -> tuple[list[ImitationBlob], list[ImitationBlob], list[ImitationBlob]]:
+) -> tuple[
+    tuple[ImitationBlob, ...], tuple[ImitationBlob, ...], tuple[ImitationBlob, ...]
+]:
     predators: list[ImitationBlob] = []
     prey: list[ImitationBlob] = []
     neutral: list[ImitationBlob] = []
+    own_masses = tuple(blob.radius * blob.radius for blob in observation.own_blobs)
+    smallest_own_mass = min(own_masses, default=math.inf)
+    largest_own_mass = max(own_masses, default=0.0)
     for other in observation.visible_blobs:
-        can_eat_us = any(
-            other.radius * other.radius
-            >= own.radius * own.radius * EAT_SIZE_RATIO
-            for own in observation.own_blobs
-        )
-        can_be_eaten = any(
-            own.radius * own.radius
-            >= other.radius * other.radius * EAT_SIZE_RATIO
-            for own in observation.own_blobs
-        )
+        other_mass = other.radius * other.radius
+        can_eat_us = other_mass >= smallest_own_mass * EAT_SIZE_RATIO
+        can_be_eaten = largest_own_mass >= other_mass * EAT_SIZE_RATIO
         if can_eat_us:
             predators.append(other)
         elif can_be_eaten:
             prey.append(other)
         else:
             neutral.append(other)
-    return predators, prey, neutral
+    return tuple(predators), tuple(prey), tuple(neutral)
 
 
 def direction_feature_vectors(
@@ -286,7 +277,12 @@ def direction_feature_vectors(
         (0.0, 1.0),
         previous,
         (-previous[1], previous[0]),
-        _unit((observation.arena_size / 2.0 - center[0], observation.arena_size / 2.0 - center[1])),
+        _unit(
+            (
+                observation.arena_size / 2.0 - center[0],
+                observation.arena_size / 2.0 - center[1],
+            )
+        ),
         wall,
         _nearest_vector(center, observation.visible_food),
         _field_vector(center, observation.visible_food),
@@ -339,11 +335,16 @@ def split_feature_values(
         default=None,
     )
     wall_distance = min(
-        center[0], center[1], observation.arena_size - center[0], observation.arena_size - center[1]
+        center[0],
+        center[1],
+        observation.arena_size - center[0],
+        observation.arena_size - center[1],
     ) / max(observation.arena_size, EPS)
     previous = _unit(previous_direction)
     proposed = _unit(proposed_direction)
-    turn_amount = 1.0 - max(-1.0, min(1.0, previous[0] * proposed[0] + previous[1] * proposed[1]))
+    turn_amount = 1.0 - max(
+        -1.0, min(1.0, previous[0] * proposed[0] + previous[1] * proposed[1])
+    )
 
     values = (
         1.0,
@@ -361,14 +362,23 @@ def split_feature_values(
             if nearest_prey is not None
             else 2.0
         ),
-        (largest_radius / max(nearest_prey.radius, EPS) if nearest_prey is not None else 0.0),
+        (
+            largest_radius / max(nearest_prey.radius, EPS)
+            if nearest_prey is not None
+            else 0.0
+        ),
         1.0 if nearest_predator is not None else 0.0,
         (
-            math.hypot(nearest_predator.x - center[0], nearest_predator.y - center[1]) / 20.0
+            math.hypot(nearest_predator.x - center[0], nearest_predator.y - center[1])
+            / 20.0
             if nearest_predator is not None
             else 2.0
         ),
-        (nearest_predator.radius / max(largest_radius, EPS) if nearest_predator is not None else 0.0),
+        (
+            nearest_predator.radius / max(largest_radius, EPS)
+            if nearest_predator is not None
+            else 0.0
+        ),
         1.0 if nearest_virus is not None else 0.0,
         (
             math.hypot(nearest_virus.x - center[0], nearest_virus.y - center[1]) / 20.0
@@ -388,7 +398,7 @@ def predict_direction(
     previous_direction: tuple[float, float] = (0.0, 0.0),
 ) -> tuple[float, float]:
     feature_vectors = direction_feature_vectors(observation, previous_direction)
-    conditional_weights = profile.conditional_direction_weights
+    conditional_weights = profile.regime_direction_weights
     regime = observation_regime(observation)
     override_weights = (
         profile.direction_override_weights[regime]
@@ -400,11 +410,17 @@ def predict_direction(
         if len(observation.own_blobs) > 1 and profile.fragmented_direction_weights
         else ()
     )
-    weights = override_weights if override_weights and any(override_weights) else (
-        fragmented_weights if fragmented_weights else (
-            conditional_weights[regime]
-            if conditional_weights
-            else profile.direction_weights
+    weights = (
+        override_weights
+        if override_weights and any(override_weights)
+        else (
+            fragmented_weights
+            if fragmented_weights
+            else (
+                conditional_weights[regime]
+                if conditional_weights
+                else profile.direction_weights
+            )
         )
     )
     x = sum(weight * vector[0] for weight, vector in zip(weights, feature_vectors))
@@ -416,7 +432,9 @@ def predict_direction(
     if profile.angle_bins > 0:
         step = math.tau / profile.angle_bins
         angle = math.atan2(direction[1], direction[0])
-        angle = round((angle - profile.angle_offset) / step) * step + profile.angle_offset
+        angle = (
+            round((angle - profile.angle_offset) / step) * step + profile.angle_offset
+        )
         direction = (math.cos(angle), math.sin(angle))
     elif (
         profile.probabilistic_angle_bins > 0
@@ -462,7 +480,8 @@ def predict_split(
             and values[3] <= blob_count_max
             and values[5] >= merge_ready_fraction_min
             and values[9] <= predator_visible_max
-            and observation.round_number - last_split_round >= profile.split_cooldown_rounds
+            and observation.round_number - last_split_round
+            >= profile.split_cooldown_rounds
         )
         return can_split and rule_matches, score
     return can_split and score >= profile.split_threshold, score
@@ -524,7 +543,9 @@ class ReplayImitationStrategy:
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         observation = observation_from_context(context)
-        direction = predict_direction(self.profile, observation, self._previous_direction)
+        direction = predict_direction(
+            self.profile, observation, self._previous_direction
+        )
         split, split_score = predict_split(
             self.profile,
             observation,
@@ -549,19 +570,9 @@ class ReplayImitationStrategy:
         )
 
 
-class ProfiledReplayImitationStrategy(ReplayImitationStrategy):
-    """Thin adapter for opponents that differ only by their fitted profile.
+def create_profiled_replay_strategy(team_id: int) -> ReplayImitationStrategy:
+    """Construct a fitted replay strategy without a team-specific wrapper."""
 
-    Concrete replay modules keep their public class names, but no longer need
-    to duplicate the constructor that wires a team profile into the shared
-    imitation policy.
-    """
+    from strategies.replay_profiles import PROFILES
 
-    replay_profile: ReplayProfile
-
-    def __init__(self) -> None:
-        super().__init__(self.replay_profile)
-        # Preserve an explicitly declared public name if a compatibility class
-        # supplies one.  The fallback produced by ReplayImitationStrategy is
-        # already correct for generated profiles.
-        self.name = type(self).name
+    return ReplayImitationStrategy(PROFILES[team_id])

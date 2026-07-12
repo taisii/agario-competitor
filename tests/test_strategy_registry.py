@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bots"))
 
 from strategies.registry import (  # noqa: E402
-    REPLAY_TEAM_IDS,
+    CUSTOM_REPLAY_TEAM_IDS,
     STRATEGY_SPECS,
     RandomOpponentStrategy,
     RandomReplayOpponentStrategy,
@@ -58,13 +58,13 @@ assert implementation_modules.isdisjoint(sys.modules)
     )
 
 
-def test_strategy_catalog_matches_replay_modules_and_public_names() -> None:
+def test_strategy_catalog_matches_custom_replay_modules_and_public_names() -> None:
     modules = {
         int(path.stem.removeprefix("replay_team_"))
         for path in (ROOT / "bots" / "strategies").glob("replay_team_*.py")
     }
 
-    assert modules == set(REPLAY_TEAM_IDS)
+    assert modules == CUSTOM_REPLAY_TEAM_IDS
     assert tuple(sorted(STRATEGY_SPECS)) == available_strategy_names()
     assert submission_strategy_names() == (
         "replay_dominance",
