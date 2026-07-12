@@ -9,98 +9,33 @@ The official random seed is not recorded, so this strategy reproduces those
 statistics with a deterministic local stream rather than claiming exact turns.
 """
 
-import math
+from strategies.replay_opponent_policies import (
+    DiscreteRandomWalkProfile,
+    DiscreteRandomWalkStrategy,
+    HeadingTransition,
+)
 
-from strategies.base import StrategyContext, StrategyDecision
 
-
-_MASK_64 = (1 << 64) - 1
-_GOLDEN_RATIO_64 = 0x9E3779B97F4A7C15
-_HEADING_BINS = 16
 _SPLIT_RATE = 15.0 / 1726.0
 _OBSERVED_INITIAL_BINS = {3: 6, 6: 2, 7: 4}
 
 
-class ReplayTeam38Strategy:
+PROFILE = DiscreteRandomWalkProfile(
+    team_id=38,
+    seed_salt=0x3C6EF372FE94F82B,
+    split_salt=0xA54FF53A5F1D36F1,
+    split_rate=_SPLIT_RATE,
+    observed_initial_bins=tuple(_OBSERVED_INITIAL_BINS.items()),
+    transitions=(
+        HeadingTransition(0.553, None, "hold_heading"),
+        HeadingTransition(0.654, 1, "turn_left_one_bin"),
+        HeadingTransition(0.762, -1, "turn_right_one_bin"),
+        HeadingTransition(0.797, 2, "turn_left_two_bins"),
+        HeadingTransition(0.829, -2, "turn_right_two_bins"),
+    ),
+)
+
+
+class ReplayTeam38Strategy(DiscreteRandomWalkStrategy):
     name = "replay_team_38"
-
-    def __init__(self) -> None:
-        self._heading_bin: int | None = None
-        self._direction_rng = 0
-        self._split_rng = 0
-
-    def choose(self, context: StrategyContext) -> StrategyDecision:
-        state = context.game.state
-        player_id = int(getattr(state.me, "player_id", 0))
-        if self._heading_bin is None:
-            seed = self._mix64(0x3C6EF372FE94F82B ^ player_id)
-            self._direction_rng = seed
-            self._split_rng = seed ^ 0xA54FF53A5F1D36F1
-            self._heading_bin = _OBSERVED_INITIAL_BINS.get(
-                player_id,
-                seed % _HEADING_BINS,
-            )
-            reason = "initial_discrete_heading"
-        else:
-            reason = self._advance_heading()
-
-        can_split = any(
-            blob.radius * blob.radius >= 2.0
-            for blob in state.me.blobs.values()
-        )
-        split_roll = self._split_fraction() if can_split else None
-        split = bool(split_roll is not None and split_roll < _SPLIT_RATE)
-        angle = self._heading_bin * math.tau / _HEADING_BINS
-        direction = (math.cos(angle), math.sin(angle))
-        return StrategyDecision(
-            direction=direction,
-            split=split,
-            target_kind="discrete_random_walk",
-            target_id="38",
-            reason=reason,
-            diagnostics={
-                "source_team_id": 38,
-                "heading_bin": self._heading_bin,
-                "heading_bins": _HEADING_BINS,
-                "split_roll": split_roll,
-                "split_rate_when_eligible": _SPLIT_RATE,
-            },
-        )
-
-    def _advance_heading(self) -> str:
-        assert self._heading_bin is not None
-        roll = self._direction_fraction()
-        if roll < 0.553:
-            return "hold_heading"
-        if roll < 0.654:
-            self._heading_bin = (self._heading_bin + 1) % _HEADING_BINS
-            return "turn_left_one_bin"
-        if roll < 0.762:
-            self._heading_bin = (self._heading_bin - 1) % _HEADING_BINS
-            return "turn_right_one_bin"
-        if roll < 0.797:
-            self._heading_bin = (self._heading_bin + 2) % _HEADING_BINS
-            return "turn_left_two_bins"
-        if roll < 0.829:
-            self._heading_bin = (self._heading_bin - 2) % _HEADING_BINS
-            return "turn_right_two_bins"
-        self._heading_bin = int(self._direction_fraction() * _HEADING_BINS) % _HEADING_BINS
-        return "jump_heading"
-
-    def _direction_fraction(self) -> float:
-        self._direction_rng = (
-            self._direction_rng + _GOLDEN_RATIO_64
-        ) & _MASK_64
-        return self._mix64(self._direction_rng) / float(1 << 64)
-
-    def _split_fraction(self) -> float:
-        self._split_rng = (self._split_rng + _GOLDEN_RATIO_64) & _MASK_64
-        return self._mix64(self._split_rng) / float(1 << 64)
-
-    @staticmethod
-    def _mix64(value: int) -> int:
-        value ^= value >> 30
-        value = (value * 0xBF58476D1CE4E5B9) & _MASK_64
-        value ^= value >> 27
-        value = (value * 0x94D049BB133111EB) & _MASK_64
-        return (value ^ (value >> 31)) & _MASK_64
+    profile = PROFILE

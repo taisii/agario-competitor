@@ -8,15 +8,13 @@ source matches.  This wrapper deliberately preserves that measured profile
 and its failed validation flag instead of claiming an unsupported hand rule.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam10Strategy(ReplayImitationStrategy):
+class ReplayTeam10Strategy(ProfiledReplayImitationStrategy):
     """Team-10 profile with autonomous previous-direction feedback."""
 
     name = "replay_team_10"
 
-    def __init__(self) -> None:
-        super().__init__(PROFILES[10])
-        self.name = type(self).name
+    replay_profile = PROFILES[10]

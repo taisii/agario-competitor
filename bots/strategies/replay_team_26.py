@@ -8,13 +8,10 @@ is retained here because its autonomous leave-one-match-out error is below
 0.04 degrees at p75 while preserving the replay evaluator's observation rules.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam26Strategy(ReplayImitationStrategy):
+class ReplayTeam26Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_26"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[26])
-        self.name = "replay_team_26"
+    replay_profile = PROFILES[26]

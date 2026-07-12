@@ -15,6 +15,10 @@ from lib.config.player import (
 )
 from lib.models.blob_model import BlobModel, VisibleBlobModel
 from lib.models.virus_model import VirusModel
+from simulation.rules import (
+    can_consume_virus,
+    movement_speed,
+)
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.features import can_eat_player_blob, normalise, squared_distance
 
@@ -223,7 +227,11 @@ class PotentialFieldHunterStrategy:
         count = 0
         for own in own_blobs:
             for virus in viruses:
-                if not _can_consume_virus(own.radius, virus.radius):
+                if not can_consume_virus(
+                    own.radius,
+                    virus.radius,
+                    eat_size_ratio=EAT_SIZE_RATIO,
+                ):
                     continue
                 keep_clear = own.radius + 1.5 + own.radius * 0.5
                 distance = math.dist(own.pos, virus.pos)
@@ -245,7 +253,11 @@ class PotentialFieldHunterStrategy:
     ) -> tuple[float, float]:
         if not threatened or not viruses:
             return (0.0, 0.0)
-        if _can_consume_virus(primary.radius, viruses[0].radius):
+        if can_consume_virus(
+            primary.radius,
+            viruses[0].radius,
+            eat_size_ratio=EAT_SIZE_RATIO,
+        ):
             return (0.0, 0.0)
         nearest = min(viruses, key=lambda virus: squared_distance(primary.pos, virus.pos))
         return normalise((nearest.pos[0] - primary.pos[0], nearest.pos[1] - primary.pos[1]))
@@ -420,7 +432,12 @@ class PotentialFieldHunterStrategy:
 
 
 def _speed(radius: float) -> float:
-    return max(MIN_PLAYER_SPEED, BASE_PLAYER_SPEED / (1.0 + radius * PLAYER_SPEED_RADIUS_FACTOR))
+    return movement_speed(
+        radius,
+        base_speed=BASE_PLAYER_SPEED,
+        radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
+        minimum_speed=MIN_PLAYER_SPEED,
+    )
 
 
 def _mass(radius: float) -> float:
@@ -432,10 +449,6 @@ def _split_capture_reach(radius: float) -> float:
 
     child_radius = radius / SQRT2
     return 3.0 * child_radius + SPLIT_EJECT_SPEED + _speed(child_radius)
-
-
-def _can_consume_virus(blob_radius: float, virus_radius: float) -> bool:
-    return _mass(blob_radius) > _mass(virus_radius) * EAT_SIZE_RATIO
 
 
 def _lerp(start: float, end: float, t: float) -> float:

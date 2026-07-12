@@ -18,16 +18,22 @@ from lib.config.player import (
 )
 from lib.models.blob_model import BlobModel, VisibleBlobModel
 from lib.models.virus_model import VirusModel
+from simulation.rules import (
+    can_consume_virus,
+    decayed_mass_after_turns,
+    movement_speed,
+    virus_replacement_positions,
+)
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.receding_horizon import ThreatAwareRecedingHorizonStrategy
 from strategies.features import (
-    can_consume_virus,
     can_eat_player_blob,
     normalise,
     vector_from_to,
     virus_center_clearance,
 )
 from strategies.greedy import SurvivalGreedyStrategy
+from strategies.potential_field import PotentialFieldHunterStrategy
 
 
 SQRT2 = math.sqrt(2.0)
@@ -236,7 +242,11 @@ class VirusHunterStrategy:
         unsafe_virus_ids: set[int] = set()
         for blob in own_blobs:
             for virus in viruses:
-                if not can_consume_virus(blob.radius, virus.radius):
+                if not can_consume_virus(
+                    blob.radius,
+                    virus.radius,
+                    eat_size_ratio=EAT_SIZE_RATIO,
+                ):
                     continue
                 currently_consumable_pairs += 1
 
@@ -254,7 +264,11 @@ class VirusHunterStrategy:
                     blob.radius * blob.radius,
                     turns_to_contact,
                 )
-                if projected_mass <= virus.radius * virus.radius * EAT_SIZE_RATIO:
+                if not can_consume_virus(
+                    math.sqrt(projected_mass),
+                    virus.radius,
+                    eat_size_ratio=EAT_SIZE_RATIO,
+                ):
                     decay_rejected_pairs += 1
                     continue
 
@@ -511,7 +525,11 @@ class VirusHunterStrategy:
                 arena_size - projected_radius,
             )
             for virus in viruses:
-                if projected_mass <= virus.radius * virus.radius * EAT_SIZE_RATIO:
+                if not can_consume_virus(
+                    math.sqrt(projected_mass),
+                    virus.radius,
+                    eat_size_ratio=EAT_SIZE_RATIO,
+                ):
                     continue
                 minimum = min(
                     minimum,
@@ -650,13 +668,14 @@ class VirusHunterStrategy:
         )
 
     def _replacement_spread(self, piece_radius: float, piece_count: int) -> float:
-        columns = math.ceil(math.sqrt(piece_count))
-        rows = math.ceil(piece_count / columns)
-        spacing = piece_radius * 2.0 + SAME_PLAYER_OVERLAP_EPSILON
-        return math.hypot(
-            (columns - 1) * spacing / 2.0,
-            (rows - 1) * spacing / 2.0,
+        positions = virus_replacement_positions(
+            center_x=0.0,
+            center_y=0.0,
+            piece_radius=piece_radius,
+            piece_count=piece_count,
+            overlap_epsilon=SAME_PLAYER_OVERLAP_EPSILON,
         )
+        return max((math.hypot(x, y) for x, y in positions), default=0.0)
 
     def _split_attack_reach(self, radius: float) -> float:
         child_radius = radius / SQRT2
@@ -667,15 +686,19 @@ class VirusHunterStrategy:
         )
 
     def _mass_after_decay(self, mass: float, turns: int) -> float:
-        minimum_mass = STARTING_RADIUS * STARTING_RADIUS
-        if mass <= minimum_mass:
-            return mass
-        return max(minimum_mass, mass * (1.0 - MASS_DECAY_RATE) ** turns)
+        return decayed_mass_after_turns(
+            mass,
+            turns,
+            decay_rate=MASS_DECAY_RATE,
+            minimum_radius=STARTING_RADIUS,
+        )
 
     def _speed(self, radius: float) -> float:
-        return max(
-            MIN_PLAYER_SPEED,
-            BASE_PLAYER_SPEED / (1.0 + radius * PLAYER_SPEED_RADIUS_FACTOR),
+        return movement_speed(
+            radius,
+            base_speed=BASE_PLAYER_SPEED,
+            radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
+            minimum_speed=MIN_PLAYER_SPEED,
         )
 
     def _finite_or_none(self, value: float) -> float | None:
@@ -701,21 +724,13 @@ class VirusHunterStrategy:
             },
         )
 
-
-
-"""Aggressive potential growth with safety-gated virus farming.
-
-PotentialHunter supplies the prey/food growth pressure that made the observed
-P3 policy effective. VirusHunter owns every virus decision, including projected
-fragment size, nearby predator reach, imminent merges, collision avoidance, and
-the mass-preservation gate after reaching the target score.
-"""
-
-from strategies.base import StrategyContext, StrategyDecision
-from strategies.potential_field import PotentialFieldHunterStrategy
-
-
 class PotentialFieldVirusFarmerStrategy:
+    """Aggressive potential growth with safety-gated virus farming.
+
+    PotentialHunter supplies prey/food pressure, while VirusHunter owns virus
+    decisions, projected fragment safety, and mass preservation.
+    """
+
     name = "potential_field_virus_farmer"
 
     def __init__(self, danger_margin: float = 3.0) -> None:

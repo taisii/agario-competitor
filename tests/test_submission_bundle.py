@@ -31,7 +31,6 @@ def test_submission_bundle_is_single_file_without_local_imports() -> None:
         if isinstance(node, ast.ImportFrom) and node.module:
             assert node.module.split(".", 1)[0] not in {
                 "strategies",
-                "snapshots",
                 "telemetry",
             }
 
@@ -48,12 +47,10 @@ def test_virus_hunter_submission_contains_only_required_strategy_classes() -> No
     assert "class VirusHunterStrategy" in source
     assert "strategy = VirusHunterStrategy()" in source
     assert "class PotentialFieldVirusFarmerStrategy" not in source
-    assert "class VirusFarmingRecedingHorizonStrategy" not in source
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
             assert node.module.split(".", 1)[0] not in {
                 "strategies",
-                "snapshots",
                 "telemetry",
             }
 
@@ -75,7 +72,6 @@ def test_replay_dominance_submission_is_self_contained_and_uses_new_strategy() -
         if isinstance(node, ast.ImportFrom) and node.module:
             assert node.module.split(".", 1)[0] not in {
                 "strategies",
-                "snapshots",
                 "telemetry",
             }
 

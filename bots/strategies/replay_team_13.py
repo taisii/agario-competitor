@@ -11,9 +11,10 @@ of 3.5 isolate that event from every other recorded observation.
 
 import math
 
+from lib.config.player import EAT_SIZE_RATIO
+from simulation.rules import can_consume_virus
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.replay_imitation import (
-    EAT_SIZE_RATIO,
     ImitationBlob,
     ImitationObservation,
     _mass_center,
@@ -100,7 +101,11 @@ class ReplayTeam13Strategy:
         if predators or not prey:
             return None
         edible_virus = any(
-            own.radius * own.radius > virus.radius * virus.radius * EAT_SIZE_RATIO
+            can_consume_virus(
+                own.radius,
+                virus.radius,
+                eat_size_ratio=EAT_SIZE_RATIO,
+            )
             for virus in observation.visible_viruses
         )
         if edible_virus:

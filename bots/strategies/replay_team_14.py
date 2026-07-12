@@ -8,15 +8,13 @@ improves held-out event reproduction while the direction policy remains below
 the strict cross-match gate.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam14Strategy(ReplayImitationStrategy):
+class ReplayTeam14Strategy(ProfiledReplayImitationStrategy):
     """Team-14 fitted policy with autonomous previous-direction feedback."""
 
     name = "replay_team_14"
 
-    def __init__(self) -> None:
-        super().__init__(PROFILES[14])
-        self.name = type(self).name
+    replay_profile = PROFILES[14]

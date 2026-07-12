@@ -8,13 +8,10 @@ food, prey, predator, wall, and virus corrections. Its stable probabilistic
 Cross-match validation remains below the strict exact-command gate.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam58Strategy(ReplayImitationStrategy):
+class ReplayTeam58Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_58"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[58])
-        self.name = "replay_team_58"
+    replay_profile = PROFILES[58]

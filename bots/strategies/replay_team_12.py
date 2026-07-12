@@ -8,13 +8,10 @@ inertia with local target fields. Split events use a close-prey gate with a
 still differs between matches, so failed validation remains explicit.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam12Strategy(ReplayImitationStrategy):
+class ReplayTeam12Strategy(ProfiledReplayImitationStrategy):
     name = "replay_team_12"
-
-    def __init__(self) -> None:
-        super().__init__(PROFILES[12])
-        self.name = "replay_team_12"
+    replay_profile = PROFILES[12]

@@ -9,15 +9,13 @@ close-prey split gate with a 17-round re-arm interval, improving held-out split
 F1 while preserving a failed overall verdict for the inconsistent old traces.
 """
 
-from strategies.replay_imitation import ReplayImitationStrategy
+from strategies.replay_imitation import ProfiledReplayImitationStrategy
 from strategies.replay_profiles import PROFILES
 
 
-class ReplayTeam59Strategy(ReplayImitationStrategy):
+class ReplayTeam59Strategy(ProfiledReplayImitationStrategy):
     """Team-59 fitted policy with autonomous previous-direction feedback."""
 
     name = "replay_team_59"
 
-    def __init__(self) -> None:
-        super().__init__(PROFILES[59])
-        self.name = type(self).name
+    replay_profile = PROFILES[59]

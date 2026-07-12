@@ -11,9 +11,10 @@ not observable, so its observed 18% eligible-state rate is reproduced with a
 deterministic local roll.
 """
 
+from lib.config.player import EAT_SIZE_RATIO
+from simulation.rules import can_consume_virus
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.replay_imitation import (
-    EAT_SIZE_RATIO,
     ImitationObservation,
     _relations,
     observation_from_context,
@@ -105,8 +106,11 @@ class ReplayTeam4Strategy:
         if predators:
             return False
         edible_virus = any(
-            own.radius * own.radius
-            > virus.radius * virus.radius * EAT_SIZE_RATIO
+            can_consume_virus(
+                own.radius,
+                virus.radius,
+                eat_size_ratio=EAT_SIZE_RATIO,
+            )
             for virus in observation.visible_viruses
         )
         return not edible_virus

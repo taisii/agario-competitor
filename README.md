@@ -28,7 +28,7 @@ per-team strategies, fidelity gates, and parallel simulation commands.
 
 2. Run these from this folder
 ```bash
-uv sync --upgrade
+uv sync --frozen
 uv run interactive 7:bots/my_bot.py
 ```
 
@@ -42,7 +42,7 @@ food/player growth is clamped back into the arena in the same round.
 To play manually against example bots instead, run:
 
 ```bash
-uv run interactive 2:bots/my_bot.py 5:bots/other_bot.py
+uv run interactive 2:bots/my_bot.py 5:bots/entries/survival_greedy.py
 ```
 
 To watch a non-interactive simulation, run:
@@ -59,8 +59,8 @@ uv run python scripts/benchmark_simulations.py --trials 8 --jobs 2
 
 The benchmark runner writes one isolated simulation workspace per match under
 `.agario/benchmarks/`, plus `matches.csv`, `results.json`, and `run_config.json`
-at the benchmark root. The default benchmark compares `baseline` and `smooth`
-beam settings with four `food_greedy` bots and four `beam_survival` bots.
+at the benchmark root. The default smoke benchmark runs four `food_greedy`
+bots and four `survival_greedy` bots.
 
 To test the default replay-dominance receding-horizon strategy against seven
 randomly selected official-replay clone strategies, run:
@@ -97,8 +97,8 @@ the authoritative count; keep the hash and successful portal status for each
 meaningful iteration.
 
 `random_opponent` samples from `food_greedy`, `survival_greedy`,
-`beam_survival`, and `potential_field_hunter` by default; override it with
-`BOT_RANDOM_STRATEGIES=a,b,c`.
+`potential_field_hunter`, and `potential_field_virus_farmer` by default;
+override it with `BOT_RANDOM_STRATEGIES=a,b,c`.
 
 Example strategy screen:
 
@@ -109,7 +109,7 @@ uv run python scripts/benchmark_simulations.py \
   --variants \
     receding_horizon:BOT_STRATEGY=threat_aware_receding_horizon \
     potential_field:BOT_STRATEGY=potential_field_hunter \
-    beam_survival:BOT_STRATEGY=beam_survival \
+    virus_hunter:BOT_STRATEGY=virus_hunter \
   --submission 1:bots/my_bot.py 7:bots/entries/random_opponent.py \
   --tracked-slots 0
 ```
@@ -118,11 +118,9 @@ Strategy implementations are grouped by their fundamental algorithm:
 
 - `bots/strategies/greedy.py`: immediate food, prey, and escape target rules.
 - `bots/strategies/potential_field.py`: weighted potential-field movement.
-- `bots/strategies/beam_search.py`: all beam-search implementations and profiles.
 - `bots/strategies/receding_horizon.py`: predictive receding-horizon strategies.
 - `bots/strategies/virus_farming.py`: safe virus pursuit and potential-field farming.
 - `bots/strategies/replay_imitation.py`: replay-fitted imitation policy; it needs a validated profile before it can be registered or ranked.
-- `bots/snapshots/`: frozen comparison artifacts, not active strategy source files.
 
 Available local strategy entry points:
 
@@ -130,35 +128,55 @@ Available local strategy entry points:
 - `bots/entries/survival_greedy.py`: flee nearby predators, then chase prey/food.
 - `bots/entries/virus_hunter.py`: prioritise consumable viruses, growing on prey/food until one is safely reachable.
 - `bots/entries/potential_field_virus_farmer.py`: safe virus farming with potential-field prey/food growth.
-- `bots/entries/beam_survival.py`: shallow rollout focused on survival and food/prey.
 - `bots/entries/potential_field_hunter.py`: potential-field hunter.
-- `bots/entries/beam_hunter.py`: beam rollout with move/split candidates, predator, wall, virus, food, and prey scoring.
 - `bots/entries/threat_aware_receding_horizon.py`: robust adversarial prediction with engine-matched split physics.
 - `bots/entries/threat_aware_receding_horizon_reference.py`: deliberately expensive reference profile of the same strategy.
-- `bots/entries/virus_farming_receding_horizon.py`: frozen virus-farming receding-horizon comparison strategy.
 - `bots/entries/replay_dominance.py`: default unified search policy for survival, virus growth, wall mobility, and rival elimination.
-- `bots/entries/beam_rl_*.py`: imported beam/RL profile bots with submission-safe caps.
 - `bots/entries/random_opponent.py`: picks one stable strategy at process startup.
 
 Example mixed match:
 
 ```bash
-uv run simulation 2:bots/entries/food_greedy.py 2:bots/entries/survival_greedy.py 2:bots/entries/potential_field_hunter.py 2:bots/entries/beam_hunter.py
+uv run simulation 2:bots/entries/food_greedy.py 2:bots/entries/survival_greedy.py 2:bots/entries/potential_field_hunter.py 2:bots/entries/virus_hunter.py
 ```
+
+The legacy beam/RL family, `unified_deterministic`, and the frozen
+`virus_farming_receding_horizon` strategy were removed from the public catalog.
+Saved competition screens showed cumulative timeouts or consistent domination
+by `replay_dominance`, and their private simulators disagreed with the current
+engine. Historical strategy names now fail explicitly instead of silently
+selecting a different policy.
 
 ## Writing a bot
 
-- Put your bot logic in `bots/my_bot.py`.
-- Import `Game` from `helper.game`.
-- Read visible state from `game.state`.
-- Return moves using the `lib.interface.events.moves` models.
+- Add or change decision policy code under `bots/strategies/`.
+- Register public policies in `bots/strategies/registry.py`; the runtime loads
+  implementations lazily from that catalog.
+- Keep engine transition rules out of policies. Shared movement, collision,
+  visibility, food, and virus rules belong under `bots/simulation/`.
+- Keep process I/O and telemetry in `bots/runtime.py`. Entry files should only
+  select a strategy and invoke the shared runtime.
+
+Run the complete test suite and build the single-file submission before a
+benchmark or portal upload:
+
+```bash
+uv run pytest -q
+uv run python scripts/build_submission.py
+uv run python -m py_compile dist/my_bot.py
+```
 
 ## Updating during the competition
 
-We may make changes to the game engine during the event. When a new platform version is published, please run this command to bring your version of the game engine up to date:
+We may make changes to the game engine during the event. Normal development
+uses the committed lockfile. When a new platform version is announced, update
+the engine explicitly, run the engine-contract and regression tests, and commit
+the resulting lockfile:
 
 ```bash
-uv sync --upgrade
+uv lock --upgrade-package agario-kit
+uv sync --frozen
+uv run pytest -q
 ```
 
 We will send a message on [Discord](https://discord.gg/24We3YWM7e) if this happens.

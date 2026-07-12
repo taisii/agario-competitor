@@ -16,16 +16,12 @@ from lib.models.food_model import FoodModel  # noqa: E402
 from engine.state.blob_state import BlobState  # noqa: E402
 from engine.state.player_state import PlayerState  # noqa: E402
 from engine.state.state_mutator import StateMutator  # noqa: E402
-from snapshots.virus_farming_receding_horizon_snapshot import (  # noqa: E402
-    ChampionStrategy as FrozenVirusFarmingRecedingHorizonStrategy,
-)
 from strategies.receding_horizon import (  # noqa: E402
     Action,
     EnemyBlob,
     OwnBlob,
     ReplayDominanceStrategy,
     SearchNode,
-    VirusFarmingRecedingHorizonStrategy,
 )
 from strategies.registry import (  # noqa: E402
     available_strategy_names,
@@ -33,22 +29,9 @@ from strategies.registry import (  # noqa: E402
 )
 
 
-def test_frozen_virus_farming_receding_horizon_has_a_descriptive_public_name() -> None:
-    strategy = create_strategy("virus_farming_receding_horizon")
-
-    assert isinstance(strategy, VirusFarmingRecedingHorizonStrategy)
-    assert isinstance(strategy, FrozenVirusFarmingRecedingHorizonStrategy)
-    assert strategy.name == "virus_farming_receding_horizon"
-    assert "virus_farming_receding_horizon" in available_strategy_names()
-
-
 def test_legacy_receding_horizon_names_resolve_without_duplicate_list_entries() -> None:
     assert create_strategy("champion").name == "threat_aware_receding_horizon"
-    assert create_strategy("candidate_submission").name == (
-        "virus_farming_receding_horizon"
-    )
     assert "champion" not in available_strategy_names()
-    assert "candidate_submission" not in available_strategy_names()
 
 
 def test_replay_dominance_is_a_distinct_registered_strategy() -> None:
@@ -177,7 +160,7 @@ def test_replay_dominance_keeps_safe_split_candidates_in_late_lead() -> None:
         viruses=(),
         arena_size=60.0,
         first_step=True,
-        # The frozen parent passes False for a late top-two player.
+        # The base policy passes False for a late top-two player.
         allow_split=False,
     )
 
@@ -187,16 +170,6 @@ def test_replay_dominance_keeps_safe_split_candidates_in_late_lead() -> None:
 def test_replay_dominance_scores_wall_clamp_by_actual_movement() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
     own = OwnBlob(blob_id=0, x=2.0, y=10.0, radius=2.0)
-    node = SearchNode(
-        own_blobs=(own,),
-        enemies=(),
-        score=0.0,
-        first_direction=(-1.0, 0.0),
-        first_split=False,
-        first_reason="keep",
-        last_direction=(-1.0, 0.0),
-    )
-    food = FoodModel(food_id=7, pos=(0.0, 10.0))
 
     assert strategy._movement_efficiency((own,), (-1.0, 0.0), 60.0) == 0.0
     assert strategy._movement_efficiency((own,), (1.0, 0.0), 60.0) == 1.0
@@ -221,7 +194,7 @@ def test_replay_dominance_merges_before_virus_like_engine_failure_replay() -> No
     expected_mass = sum(blob.mass for blob in own_blobs) + virus.radius**2
     stabilised = strategy._stabilise_own_blobs(own_blobs, 60.0)
 
-    after, _, _ = strategy._resolve_own_viruses(
+    after, _, _, _ = strategy._resolve_own_viruses(
         own_blobs=stabilised,
         viruses=(virus,),
         consumed_virus_ids=consumed,
