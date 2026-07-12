@@ -60,6 +60,23 @@ def test_replay_dominance_uses_blob_scaled_deterministic_transition_budget() -> 
     assert strategy._transition_budget(1, 12) == 3
 
 
+def test_replay_dominance_stops_before_generating_an_unusable_depth() -> None:
+    assert ReplayDominanceStrategy._depth_start_stop_reason(
+        depth_index=1,
+        transitions_evaluated=6,
+        transition_budget=6,
+        uses_time_bank=True,
+        deadline=float("inf"),
+    ) == "transition_budget"
+    assert ReplayDominanceStrategy._depth_start_stop_reason(
+        depth_index=1,
+        transitions_evaluated=5,
+        transition_budget=6,
+        uses_time_bank=True,
+        deadline=0.0,
+    ) == "deadline"
+
+
 def test_enemy_memory_threat_model_includes_future_virus_fragments() -> None:
     strategy = ReplayDominanceStrategy()
     own = OwnBlob(blob_id=0, x=30.0, y=30.0, radius=math.sqrt(32.0))

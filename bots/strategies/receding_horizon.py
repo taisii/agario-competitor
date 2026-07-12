@@ -362,6 +362,18 @@ class ThreatAwareRecedingHorizonStrategy:
             len(enemies),
         )
         for depth_index in range(max(1, self.depth)):
+            depth_stop_reason = self._depth_start_stop_reason(
+                depth_index=depth_index,
+                transitions_evaluated=transitions_evaluated,
+                transition_budget=transition_budget,
+                uses_time_bank=uses_time_bank,
+                deadline=deadline,
+            )
+            if depth_stop_reason is not None:
+                search_stop_reason = depth_stop_reason
+                search_timed_out = depth_stop_reason == "deadline"
+                break
+
             candidates: list[SearchNode] = []
             depth_timed_out = False
             depth_budget_exhausted = False
@@ -504,6 +516,29 @@ class ThreatAwareRecedingHorizonStrategy:
                 "compute_spent_ms": round(self.compute_spent_seconds * 1000.0, 3),
             },
         )
+
+    @staticmethod
+    def _depth_start_stop_reason(
+        *,
+        depth_index: int,
+        transitions_evaluated: int,
+        transition_budget: int | None,
+        uses_time_bank: bool,
+        deadline: float,
+    ) -> str | None:
+        """Stop before generating a depth whose actions cannot be evaluated."""
+
+        if (
+            transition_budget is not None
+            and transitions_evaluated >= transition_budget
+        ):
+            return "transition_budget"
+        # Root candidates are needed to produce a decision even if setup used
+        # the nominal turn budget. Deeper candidates are optional and can be
+        # skipped before their comparatively expensive generation begins.
+        if depth_index > 0 and uses_time_bank and perf_counter() >= deadline:
+            return "deadline"
+        return None
 
     def _turn_budget_seconds(self, *, round_number: int, max_rounds: int) -> float:
         remaining_budget = max(0.0, self.compute_budget_seconds - self.compute_spent_seconds)

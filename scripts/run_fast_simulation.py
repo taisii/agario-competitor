@@ -72,7 +72,7 @@ def main() -> None:
             "w"
         ) as engine_err:
             engine = subprocess.Popen(
-                [sys.executable, str(seeded_engine)],
+                [sys.executable, str(seeded_engine), "--no-recording"],
                 cwd=workspace,
                 env=env,
                 stdout=subprocess.PIPE,
