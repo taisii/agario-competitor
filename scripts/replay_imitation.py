@@ -523,7 +523,11 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
         15: ((1.00, 2.0, 0.20, 0.25, 0.0, 0.0), 10),
         35: ((2.00, 0.0, 0.20, 0.0625, 1.0, 0.0), 0),
         49: ((0.65, 1.5, 0.15, 0.125, 0.0, 0.0), 18),
-        58: ((0.45, 1.5, 0.14, 0.0625, 0.0, 0.0), 20),
+        # The original two traces made this look like a narrow, single-blob
+        # prey split.  Five later Submission #4 traces show the real policy is
+        # wider, permits fragmented states and predators, and rearms after
+        # roughly thirty rounds.
+        58: ((0.55, 1.0, 0.30, 0.50, 0.0, 1.0), 30),
         59: ((0.80, 2.0, 0.15, 0.125, 0.0, 0.0), 17),
         63: ((0.45, 2.0, 0.20, 0.25, 0.0, 0.0), 5),
     }

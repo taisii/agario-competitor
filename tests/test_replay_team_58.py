@@ -47,11 +47,13 @@ def _choose(strategy: ReplayTeam58Strategy, game: SimpleNamespace):
     return strategy.choose(StrategyContext(game=game, query=SimpleNamespace()))
 
 
-def test_team_58_uses_both_sources_and_preserves_failed_gate() -> None:
+def test_team_58_uses_all_seven_sources_and_preserves_failed_gate() -> None:
     strategy = ReplayTeam58Strategy()
 
     assert strategy.profile.team_id == 58
-    assert strategy.profile.source_matches == (11667, 11694)
+    assert strategy.profile.source_matches == (
+        11667, 11694, 13939, 14015, 14048, 14054, 14062,
+    )
     assert strategy.profile.validation_passed is False
 
 
@@ -89,7 +91,7 @@ def test_team_58_cannot_split_below_engine_mass_threshold() -> None:
     assert decision.split is False
 
 
-def test_team_58_profile_can_emit_mass_eligible_virus_split() -> None:
+def test_team_58_profile_can_emit_observed_high_mass_prey_split() -> None:
     prey = VisibleBlobModel(
         player_id=1,
         team_id=9,
@@ -100,7 +102,7 @@ def test_team_58_profile_can_emit_mass_eligible_virus_split() -> None:
     virus = VirusModel(virus_id=1, pos=(32.0, 30.0), radius=1.5)
     decision = _choose(
         ReplayTeam58Strategy(),
-        _game(own_radius=1.42, enemies=(prey,), viruses=(virus,)),
+        _game(own_radius=3.0, enemies=(prey,), viruses=(virus,)),
     )
 
     assert decision.split is True

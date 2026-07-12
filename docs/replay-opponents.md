@@ -57,7 +57,8 @@ Multiple dated cohorts can be combined without copying or flattening them:
 ```bash
 uv run python scripts/replay_imitation.py \
   --replay-dir .agario/replays/official/latest-20 \
-  --replay-dir .agario/replays/official/submission-4
+  --replay-dir .agario/replays/official/submission-4 \
+  --replay-dir .agario/replays/official/submission-4-extra
 ```
 
 If cross-validation shows that a team's behavior changed between cohorts,
@@ -67,7 +68,9 @@ replace only that team's training scope with one or more repeated overrides:
 uv run python scripts/replay_imitation.py \
   --replay-dir .agario/replays/official/latest-20 \
   --replay-dir .agario/replays/official/submission-4 \
-  --team-replay-dir 15=.agario/replays/official/latest-20
+  --team-replay-dir 58=.agario/replays/official/latest-20 \
+  --team-replay-dir 58=.agario/replays/official/submission-4 \
+  --team-replay-dir 58=.agario/replays/official/submission-4-extra
 ```
 
 This writes fitted profiles to `bots/strategies/replay_profiles.py` and the
@@ -256,3 +259,13 @@ Team 55's apparent loss of its 24-heading grid was a fitter bug: 6,401 of
 commands are continuous angles. Grid phase detection now refits from circular
 inliers, preserving the ordinary movement grid without pretending the newer
 split events do not exist.
+
+Submission #4 later completed 19 additional matches (`13969`–`14062`), stored
+under `.agario/replays/official/submission-4-extra/`. They contain 480,422
+events and add traces for nine top-ten targets. Cohort selection was rerun
+instead of blindly combining them. Only team 58 improved materially: adding
+five traces lowers autonomous LOMO direction median from 32.2° to 26.2°.
+The expanded evidence also replaces its narrow single-blob split rule with a
+30-round re-arm rule that permits the observed fragmented and predator-visible
+events. The other targets retain their prior cohorts because the additional
+traces worsened direction or split generalization.
