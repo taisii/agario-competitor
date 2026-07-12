@@ -64,7 +64,7 @@ def test_team_58_initial_safe_direction_is_food_attracted() -> None:
     assert decision.direction[0] > 0.8
 
 
-def test_team_58_inertia_resists_reversed_food_target() -> None:
+def test_team_58_autonomous_profile_retargets_reversed_food() -> None:
     strategy = ReplayTeam58Strategy()
     first = _choose(
         strategy,
@@ -76,7 +76,7 @@ def test_team_58_inertia_resists_reversed_food_target() -> None:
     )
 
     assert first.direction[0] > 0.8
-    assert second.direction[0] > 0.0
+    assert second.direction[0] < -0.9
 
 
 def test_team_58_cannot_split_below_engine_mass_threshold() -> None:

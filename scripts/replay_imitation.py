@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 import math
 from pathlib import Path
@@ -314,6 +314,56 @@ def fit_regime_directions(
     return tuple(result)
 
 
+def fit_autonomous_directions(
+    samples: Sequence[ReplaySample],
+    ridge: float = 0.25,
+    iterations: int = 1,
+) -> tuple[tuple[float, ...], tuple[tuple[float, ...], ...]]:
+    """Fit against the direction history the clone will actually produce.
+
+    Replay extraction records the teacher's preceding command in the stateful
+    ``previous`` features.  At runtime those features contain the clone's own
+    preceding prediction instead, so a plain regression is trained on state it
+    will not observe after its first mistake.  Iteratively replaying each trace
+    with the current model removes that teacher-forcing mismatch.
+    """
+    previous_index = FEATURE_NAMES.index("previous")
+    previous_left_index = FEATURE_NAMES.index("previous_left")
+    direction_weights = fit_direction(samples, ridge)
+    regime_weights = fit_regime_directions(samples, direction_weights, ridge)
+
+    for _ in range(iterations):
+        previous_by_trace: dict[tuple[int, int], tuple[float, float]] = defaultdict(
+            lambda: (0.0, 0.0)
+        )
+        autonomous_samples: list[ReplaySample] = []
+        for sample in sorted(
+            samples,
+            key=lambda item: (item.match_id, item.player_id, item.round_number),
+        ):
+            key = (sample.match_id, sample.player_id)
+            previous = previous_by_trace[key]
+            features = list(sample.direction_features)
+            features[previous_index] = previous
+            features[previous_left_index] = (-previous[1], previous[0])
+            autonomous_sample = replace(sample, direction_features=tuple(features))
+            autonomous_samples.append(autonomous_sample)
+
+            weights = regime_weights[_sample_regime(sample)]
+            x = sum(weight * vector[0] for weight, vector in zip(weights, features))
+            y = sum(weight * vector[1] for weight, vector in zip(weights, features))
+            previous_by_trace[key] = _unit(x, y)
+
+        direction_weights = fit_direction(autonomous_samples, ridge)
+        regime_weights = fit_regime_directions(
+            autonomous_samples,
+            direction_weights,
+            ridge,
+        )
+
+    return direction_weights, regime_weights
+
+
 def _split_scores(weights: Sequence[float], samples: Sequence[ReplaySample]) -> list[float]:
     return [
         sum(weight * value for weight, value in zip(weights, sample.split_features))
@@ -433,11 +483,11 @@ def detect_angle_grid(samples: Sequence[ReplaySample]) -> tuple[int, float]:
 
 def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
     direction_ridge = 0.005 if team_id in {35, 49} else 0.25
-    direction_weights = fit_direction(samples, direction_ridge)
-    regime_direction_weights = fit_regime_directions(
+    autonomous_teams = {3, 9, 14, 15, 35, 49, 58, 59, 63}
+    direction_weights, regime_direction_weights = fit_autonomous_directions(
         samples,
-        direction_weights,
         direction_ridge,
+        iterations=1 if team_id in autonomous_teams else 0,
     )
     split_weights, split_threshold = fit_split(samples)
     angle_bins, angle_offset = detect_angle_grid(samples)

@@ -66,7 +66,7 @@ def test_team15_direction_is_unit_length() -> None:
     assert math.isclose(math.hypot(*decision.direction), 1.0)
 
 
-def test_team15_preserves_inertia_against_reversed_food() -> None:
+def test_team15_autonomous_profile_retargets_reversed_food() -> None:
     strategy = ReplayTeam15Strategy()
     east = _choose(
         strategy,
@@ -78,7 +78,7 @@ def test_team15_preserves_inertia_against_reversed_food() -> None:
     )
 
     assert east.direction[0] > 0.0
-    assert west.direction[0] > -0.95
+    assert west.direction[0] < -0.95
 
 
 def test_team15_cannot_split_below_engine_mass_threshold() -> None:
