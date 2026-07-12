@@ -54,7 +54,7 @@ uv run simulation 8:bots/my_bot.py
 To run benchmark matches in parallel and aggregate results, run:
 
 ```bash
-uv run python scripts/benchmark_simulations.py --trials 8 --jobs 2
+uv run python scripts/benchmark_simulations.py --trials 8 --jobs 1
 ```
 
 The benchmark runner writes one isolated simulation workspace per match under
@@ -68,6 +68,17 @@ randomly selected official-replay clone strategies, run:
 ```bash
 uv run simulation 1:bots/entries/replay_dominance.py 7:bots/entries/random_replay_opponent.py --headless
 ```
+
+To screen it against every saved strategy, with individual matches sharing one
+global parallel-job limit, run:
+
+```bash
+uv run python scripts/benchmark_all_strategies.py --trials 2 --jobs 1
+```
+
+The matrix uses the no-recording fast runner by default. Add `--official` for a
+final process-layout and recording check after narrowing the candidates; it is
+substantially slower and is not intended for the exhaustive screen.
 
 ## Building the official submission
 

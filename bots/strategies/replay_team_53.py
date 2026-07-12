@@ -16,13 +16,14 @@ from strategies.replay_imitation import (
     EAT_SIZE_RATIO,
     ImitationBlob,
     ImitationObservation,
+    _relations,
     observation_from_context,
     predict_direction,
 )
 from strategies.replay_profiles import PROFILES
+from strategies.randomness import MASK_64, unit_interval
 
 
-_MASK_64 = (1 << 64) - 1
 _SPLIT_RATE = 0.042
 _MAX_SPLIT_PREY_DISTANCE = 12.0
 
@@ -87,7 +88,7 @@ class ReplayTeam53Strategy:
         if own.radius * own.radius < 2.0:
             return None
 
-        predators, prey = self._relations(observation)
+        predators, prey, _ = _relations(observation)
         if predators or not prey:
             return None
         nearest = min(
@@ -102,31 +103,8 @@ class ReplayTeam53Strategy:
             return None
         return (own, nearest, distance)
 
-    def _relations(
-        self,
-        observation: ImitationObservation,
-    ) -> tuple[list[ImitationBlob], list[ImitationBlob]]:
-        predators: list[ImitationBlob] = []
-        prey: list[ImitationBlob] = []
-        for other in observation.visible_blobs:
-            can_eat_us = any(
-                other.radius * other.radius
-                >= own.radius * own.radius * EAT_SIZE_RATIO
-                for own in observation.own_blobs
-            )
-            can_be_eaten = any(
-                own.radius * own.radius
-                >= other.radius * other.radius * EAT_SIZE_RATIO
-                for own in observation.own_blobs
-            )
-            if can_eat_us:
-                predators.append(other)
-            elif can_be_eaten:
-                prey.append(other)
-        return predators, prey
-
     def _regime(self, observation: ImitationObservation) -> str:
-        predators, prey = self._relations(observation)
+        predators, prey, _ = _relations(observation)
         if predators:
             return "predator_escape"
         if prey:
@@ -150,13 +128,5 @@ class ReplayTeam53Strategy:
             ^ (round(own_radius * 1_000_000) * 0x8EBC6AF09C88C6E3)
             ^ (round(prey_radius * 1_000_000) * 0xA0761D6478BD642F)
             ^ (round(prey_distance * 1_000_000) * 0x589965CC75374CC3)
-        ) & _MASK_64
-        return cls._mix64(value) / float(1 << 64)
-
-    @staticmethod
-    def _mix64(value: int) -> int:
-        value ^= value >> 30
-        value = (value * 0xBF58476D1CE4E5B9) & _MASK_64
-        value ^= value >> 27
-        value = (value * 0x94D049BB133111EB) & _MASK_64
-        return (value ^ (value >> 31)) & _MASK_64
+        ) & MASK_64
+        return unit_interval(value)

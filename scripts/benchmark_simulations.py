@@ -73,8 +73,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--jobs",
         type=int,
-        default=2,
-        help="Parallel simulations. Each simulation launches the engine plus submissions.",
+        default=1,
+        help=(
+            "Concurrent matches. Each match already launches the engine and eight "
+            "bots; raise only after verifying the submissions are lightweight."
+        ),
     )
     parser.add_argument(
         "--variants",
@@ -199,8 +202,10 @@ async def run_all(
     random_seed: int,
     headless: bool,
     fast: bool,
+    semaphore: asyncio.Semaphore | None = None,
 ) -> list[dict[str, Any]]:
-    semaphore = asyncio.Semaphore(max(jobs, 1))
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(max(jobs, 1))
     tasks = []
     for trial in range(trials):
         for variant in variants:

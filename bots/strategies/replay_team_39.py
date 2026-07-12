@@ -13,10 +13,7 @@ import math
 from lib.models.blob_model import BlobModel
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.features import BlobRelation, extract_visible_features, normalise
-
-
-_MASK_64 = (1 << 64) - 1
-_GOLDEN_RATIO_64 = 0x9E3779B97F4A7C15
+from strategies.randomness import GOLDEN_RATIO_64, MASK_64, mix64, unit_interval
 
 
 class ReplayTeam39Strategy:
@@ -112,8 +109,8 @@ class ReplayTeam39Strategy:
             ^ (round_number * 0xA0761D6478BD642F)
             ^ (round(center_x * 1_000_000) * 0xE7037ED1A0B428DB)
             ^ (round(center_y * 1_000_000) * 0x8EBC6AF09C88C6E3)
-        ) & _MASK_64
-        self._rng_state = self._mix64(seed)
+        ) & MASK_64
+        self._rng_state = mix64(seed)
         self._heading = self._random_unit_vector()
 
     def _predator_avoidance(
@@ -177,18 +174,9 @@ class ReplayTeam39Strategy:
         return normalise((x, y))
 
     def _random_fraction(self) -> float:
-        self._rng_state = (self._rng_state + _GOLDEN_RATIO_64) & _MASK_64
-        value = self._mix64(self._rng_state)
-        return value / float(1 << 64)
+        self._rng_state = (self._rng_state + GOLDEN_RATIO_64) & MASK_64
+        return unit_interval(self._rng_state)
 
     def _random_unit_vector(self) -> tuple[float, float]:
         angle = math.tau * self._random_fraction()
         return (math.cos(angle), math.sin(angle))
-
-    @staticmethod
-    def _mix64(value: int) -> int:
-        value ^= value >> 30
-        value = (value * 0xBF58476D1CE4E5B9) & _MASK_64
-        value ^= value >> 27
-        value = (value * 0x94D049BB133111EB) & _MASK_64
-        return (value ^ (value >> 31)) & _MASK_64

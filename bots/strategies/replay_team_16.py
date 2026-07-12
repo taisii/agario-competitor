@@ -23,15 +23,13 @@ from strategies.replay_imitation import (
     predict_direction,
 )
 from strategies.replay_profiles import PROFILES
+from strategies.randomness import MASK_64, unit_interval
 
 
 TEAM_ID = 16
 PROFILE = PROFILES[TEAM_ID]
 MAX_SPLIT_PREY_DISTANCE = 21.0
 SPLIT_RATE = 0.202
-
-_MASK_64 = (1 << 64) - 1
-
 
 class ReplayTeam16Strategy:
     """Fitted continuous direction policy with sparse prey splits."""
@@ -138,13 +136,5 @@ class ReplayTeam16Strategy:
             ^ (round(own_radius * 1_000_000) * 0x8EBC6AF09C88C6E3)
             ^ (round(prey_radius * 1_000_000) * 0xA0761D6478BD642F)
             ^ (round(prey_distance * 1_000_000) * 0x589965CC75374CC3)
-        ) & _MASK_64
-        return cls._mix64(value) / float(1 << 64)
-
-    @staticmethod
-    def _mix64(value: int) -> int:
-        value ^= value >> 30
-        value = (value * 0xBF58476D1CE4E5B9) & _MASK_64
-        value ^= value >> 27
-        value = (value * 0x94D049BB133111EB) & _MASK_64
-        return (value ^ (value >> 31)) & _MASK_64
+        ) & MASK_64
+        return unit_interval(value)

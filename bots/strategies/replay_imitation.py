@@ -14,8 +14,8 @@ import math
 from typing import Iterable, Sequence
 
 from lib.config.player import EAT_SIZE_RATIO
-from simulation.rules import can_consume_virus
 from strategies.base import StrategyContext, StrategyDecision
+from strategies.randomness import MASK_64, mix64
 
 
 EPS = 1e-9
@@ -65,7 +65,6 @@ class ImitationBlob:
     y: float
     radius: float
     player_id: int = -1
-    team_id: int = -1
     blob_id: int = -1
     merge_cooldown: int = 0
 
@@ -75,7 +74,6 @@ class ImitationPoint:
     x: float
     y: float
     radius: float = 0.0
-    entity_id: int = -1
 
 
 @dataclass(frozen=True)
@@ -89,6 +87,38 @@ class ImitationObservation:
     visible_viruses: tuple[ImitationPoint, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ObservationAnalysis:
+    center: tuple[float, float]
+    total_mass: float
+    largest_radius: float
+    merge_ready_fraction: float
+    predators: tuple[ImitationBlob, ...]
+    prey: tuple[ImitationBlob, ...]
+    neutral: tuple[ImitationBlob, ...]
+    edible_viruses: tuple[ImitationPoint, ...]
+    dangerous_viruses: tuple[ImitationPoint, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EntitySummary:
+    nearest: ImitationBlob | ImitationPoint | None
+    nearest_distance: float
+    nearest_vector: tuple[float, float]
+    field_vector: tuple[float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class PredictionFeatures:
+    analysis: ObservationAnalysis
+    food: EntitySummary
+    prey: EntitySummary
+    predators: EntitySummary
+    neutral: EntitySummary
+    edible_viruses: EntitySummary
+    dangerous_viruses: EntitySummary
+
+
 @dataclass(frozen=True)
 class ReplayProfile:
     team_id: int
@@ -100,10 +130,6 @@ class ReplayProfile:
     regime_direction_weights: tuple[tuple[float, ...], ...] = ()
     fragmented_direction_weights: tuple[tuple[float, ...], ...] = ()
     direction_override_weights: tuple[tuple[float, ...], ...] = ()
-    # Backward-compatible name used by an earlier profile generator.  Keeping
-    # the schema tolerant prevents a freshly generated profile module from
-    # failing during import while the fitter and runtime are updated together.
-    context_direction_weights: tuple[tuple[float, ...], ...] = ()
     angle_bins: int = 0
     angle_offset: float = 0.0
     probabilistic_angle_bins: int = 0
@@ -124,7 +150,6 @@ class ReplayProfile:
         for field_name, conditional_weights in (
             ("regime_direction_weights", self.regime_direction_weights),
             ("fragmented_direction_weights", self.fragmented_direction_weights),
-            ("context_direction_weights", self.context_direction_weights),
             ("direction_override_weights", self.direction_override_weights),
         ):
             if conditional_weights and (
@@ -134,44 +159,93 @@ class ReplayProfile:
                     for weights in conditional_weights
                 )
             ):
-                raise ValueError(
-                    f"{field_name} must contain eight feature vectors"
-                )
+                raise ValueError(f"{field_name} must contain eight feature vectors")
         if self.angle_grid_rates and len(self.angle_grid_rates) != 8:
             raise ValueError("angle_grid_rates must contain eight regime rates")
 
-    @property
-    def conditional_direction_weights(self) -> tuple[tuple[float, ...], ...]:
-        return self.regime_direction_weights or self.context_direction_weights
+
+_LAST_ANALYSIS: tuple[ImitationObservation, ObservationAnalysis] | None = None
+_LAST_PREDICTION: tuple[ImitationObservation, PredictionFeatures] | None = None
+
+
+def analyze_observation(observation: ImitationObservation) -> ObservationAnalysis:
+    """Derive all relation features once for one immutable observation."""
+
+    global _LAST_ANALYSIS
+    if _LAST_ANALYSIS is not None and _LAST_ANALYSIS[0] is observation:
+        return _LAST_ANALYSIS[1]
+
+    own_masses = tuple(blob.radius * blob.radius for blob in observation.own_blobs)
+    total_mass = sum(own_masses)
+    smallest_own_mass = min(own_masses, default=math.inf)
+    largest_own_mass = max(own_masses, default=0.0)
+    predators: list[ImitationBlob] = []
+    prey: list[ImitationBlob] = []
+    neutral: list[ImitationBlob] = []
+    for other in observation.visible_blobs:
+        other_mass = other.radius * other.radius
+        if other_mass >= smallest_own_mass * EAT_SIZE_RATIO:
+            predators.append(other)
+        elif largest_own_mass >= other_mass * EAT_SIZE_RATIO:
+            prey.append(other)
+        else:
+            neutral.append(other)
+
+    edible_viruses: list[ImitationPoint] = []
+    dangerous_viruses: list[ImitationPoint] = []
+    for virus in observation.visible_viruses:
+        target = (
+            edible_viruses
+            if largest_own_mass > virus.radius * virus.radius * EAT_SIZE_RATIO
+            else dangerous_viruses
+        )
+        target.append(virus)
+    analysis = ObservationAnalysis(
+        center=(
+            (
+                sum(blob.x * mass for blob, mass in zip(observation.own_blobs, own_masses))
+                / total_mass,
+                sum(blob.y * mass for blob, mass in zip(observation.own_blobs, own_masses))
+                / total_mass,
+            )
+            if total_mass > EPS
+            else (30.0, 30.0)
+        ),
+        total_mass=total_mass,
+        largest_radius=max((blob.radius for blob in observation.own_blobs), default=0.0),
+        merge_ready_fraction=(
+            sum(blob.merge_cooldown <= 0 for blob in observation.own_blobs)
+            / len(observation.own_blobs)
+            if observation.own_blobs
+            else 0.0
+        ),
+        predators=tuple(predators),
+        prey=tuple(prey),
+        neutral=tuple(neutral),
+        edible_viruses=tuple(edible_viruses),
+        dangerous_viruses=tuple(dangerous_viruses),
+    )
+    _LAST_ANALYSIS = (observation, analysis)
+    return analysis
 
 
 def observation_regime(observation: ImitationObservation) -> int:
-    predators, prey, _ = _relations(observation)
-    edible_virus = any(
-        can_consume_virus(
-            own.radius,
-            virus.radius,
-            eat_size_ratio=EAT_SIZE_RATIO,
-        )
-        for own in observation.own_blobs
-        for virus in observation.visible_viruses
+    analysis = analyze_observation(observation)
+    return (
+        (1 if analysis.predators else 0)
+        | (2 if analysis.prey else 0)
+        | (4 if analysis.edible_viruses else 0)
     )
-    return (1 if predators else 0) | (2 if prey else 0) | (4 if edible_virus else 0)
 
 
 def stable_unit_interval(team_id: int, player_id: int, round_number: int) -> float:
     """Return a reproducible pseudo-random value without hidden process state."""
-    mask = (1 << 64) - 1
     value = (
         team_id * 0x9E3779B97F4A7C15
         + player_id * 0x94D049BB133111EB
         + round_number * 0xBF58476D1CE4E5B9
-    ) & mask
-    value ^= value >> 30
-    value = (value * 0xBF58476D1CE4E5B9) & mask
-    value ^= value >> 27
-    value = (value * 0x94D049BB133111EB) & mask
-    value ^= value >> 31
+    ) & MASK_64
+    value = mix64(value)
     return (value & ((1 << 53) - 1)) / float(1 << 53)
 
 
@@ -198,11 +272,7 @@ def _nearest_vector(
     *,
     away: bool = False,
 ) -> tuple[float, float]:
-    if not entities:
-        return (0.0, 0.0)
-    entity = min(entities, key=lambda item: math.hypot(item.x - origin[0], item.y - origin[1]))
-    sign = -1.0 if away else 1.0
-    return _unit((sign * (entity.x - origin[0]), sign * (entity.y - origin[1])))
+    return _summarize_entities(origin, entities, away=away).nearest_vector
 
 
 def _field_vector(
@@ -211,6 +281,17 @@ def _field_vector(
     *,
     away: bool = False,
 ) -> tuple[float, float]:
+    return _summarize_entities(origin, entities, away=away).field_vector
+
+
+def _summarize_entities(
+    origin: tuple[float, float],
+    entities: Iterable[ImitationBlob | ImitationPoint],
+    *,
+    away: bool = False,
+) -> EntitySummary:
+    nearest: ImitationBlob | ImitationPoint | None = None
+    nearest_distance_squared = math.inf
     x = 0.0
     y = 0.0
     sign = -1.0 if away else 1.0
@@ -218,61 +299,70 @@ def _field_vector(
         dx = entity.x - origin[0]
         dy = entity.y - origin[1]
         distance_squared = dx * dx + dy * dy
+        if distance_squared < nearest_distance_squared:
+            nearest = entity
+            nearest_distance_squared = distance_squared
         if distance_squared <= EPS:
             continue
         scale = sign / (distance_squared + 0.25)
         x += dx * scale
         y += dy * scale
-    return _unit((x, y))
+    nearest_vector = (
+        _unit(
+            (
+                sign * (nearest.x - origin[0]),
+                sign * (nearest.y - origin[1]),
+            )
+        )
+        if nearest is not None
+        else (0.0, 0.0)
+    )
+    return EntitySummary(
+        nearest=nearest,
+        nearest_distance=math.sqrt(nearest_distance_squared),
+        nearest_vector=nearest_vector,
+        field_vector=_unit((x, y)),
+    )
+
+
+def _prediction_features(observation: ImitationObservation) -> PredictionFeatures:
+    global _LAST_PREDICTION
+    if _LAST_PREDICTION is not None and _LAST_PREDICTION[0] is observation:
+        return _LAST_PREDICTION[1]
+
+    analysis = analyze_observation(observation)
+    center = analysis.center
+    features = PredictionFeatures(
+        analysis=analysis,
+        food=_summarize_entities(center, observation.visible_food),
+        prey=_summarize_entities(center, analysis.prey),
+        predators=_summarize_entities(center, analysis.predators, away=True),
+        neutral=_summarize_entities(center, analysis.neutral, away=True),
+        edible_viruses=_summarize_entities(center, analysis.edible_viruses),
+        dangerous_viruses=_summarize_entities(
+            center, analysis.dangerous_viruses, away=True
+        ),
+    )
+    _LAST_PREDICTION = (observation, features)
+    return features
 
 
 def _relations(
     observation: ImitationObservation,
-) -> tuple[list[ImitationBlob], list[ImitationBlob], list[ImitationBlob]]:
-    predators: list[ImitationBlob] = []
-    prey: list[ImitationBlob] = []
-    neutral: list[ImitationBlob] = []
-    for other in observation.visible_blobs:
-        can_eat_us = any(
-            other.radius * other.radius
-            >= own.radius * own.radius * EAT_SIZE_RATIO
-            for own in observation.own_blobs
-        )
-        can_be_eaten = any(
-            own.radius * own.radius
-            >= other.radius * other.radius * EAT_SIZE_RATIO
-            for own in observation.own_blobs
-        )
-        if can_eat_us:
-            predators.append(other)
-        elif can_be_eaten:
-            prey.append(other)
-        else:
-            neutral.append(other)
-    return predators, prey, neutral
+) -> tuple[
+    tuple[ImitationBlob, ...], tuple[ImitationBlob, ...], tuple[ImitationBlob, ...]
+]:
+    analysis = analyze_observation(observation)
+    return analysis.predators, analysis.prey, analysis.neutral
 
 
 def direction_feature_vectors(
     observation: ImitationObservation,
     previous_direction: tuple[float, float] = (0.0, 0.0),
 ) -> tuple[tuple[float, float], ...]:
-    center = _mass_center(observation.own_blobs)
-    predators, prey, neutral = _relations(observation)
-    edible_viruses = [
-        virus
-        for virus in observation.visible_viruses
-        if any(
-            can_consume_virus(
-                own.radius,
-                virus.radius,
-                eat_size_ratio=EAT_SIZE_RATIO,
-            )
-            for own in observation.own_blobs
-        )
-    ]
-    dangerous_viruses = [
-        virus for virus in observation.visible_viruses if virus not in edible_viruses
-    ]
+    features = _prediction_features(observation)
+    analysis = features.analysis
+    center = analysis.center
 
     left = max(center[0], 0.15)
     right = max(observation.arena_size - center[0], 0.15)
@@ -286,17 +376,22 @@ def direction_feature_vectors(
         (0.0, 1.0),
         previous,
         (-previous[1], previous[0]),
-        _unit((observation.arena_size / 2.0 - center[0], observation.arena_size / 2.0 - center[1])),
+        _unit(
+            (
+                observation.arena_size / 2.0 - center[0],
+                observation.arena_size / 2.0 - center[1],
+            )
+        ),
         wall,
-        _nearest_vector(center, observation.visible_food),
-        _field_vector(center, observation.visible_food),
-        _nearest_vector(center, prey),
-        _field_vector(center, prey),
-        _nearest_vector(center, predators, away=True),
-        _field_vector(center, predators, away=True),
-        _nearest_vector(center, neutral, away=True),
-        _nearest_vector(center, edible_viruses),
-        _nearest_vector(center, dangerous_viruses, away=True),
+        features.food.nearest_vector,
+        features.food.field_vector,
+        features.prey.nearest_vector,
+        features.prey.field_vector,
+        features.predators.nearest_vector,
+        features.predators.field_vector,
+        features.neutral.nearest_vector,
+        features.edible_viruses.nearest_vector,
+        features.dangerous_viruses.nearest_vector,
     )
     assert len(vectors) == len(FEATURE_NAMES)
     return vectors
@@ -307,43 +402,25 @@ def split_feature_values(
     previous_direction: tuple[float, float] = (0.0, 0.0),
     proposed_direction: tuple[float, float] = (0.0, 0.0),
 ) -> tuple[float, ...]:
-    center = _mass_center(observation.own_blobs)
-    predators, prey, _ = _relations(observation)
-    nearest_prey = min(
-        prey,
-        key=lambda item: math.hypot(item.x - center[0], item.y - center[1]),
-        default=None,
-    )
-    nearest_predator = min(
-        predators,
-        key=lambda item: math.hypot(item.x - center[0], item.y - center[1]),
-        default=None,
-    )
-    largest_radius = max((blob.radius for blob in observation.own_blobs), default=0.0)
-    total_mass = sum(blob.radius * blob.radius for blob in observation.own_blobs)
-    edible_viruses = [
-        virus
-        for virus in observation.visible_viruses
-        if any(
-            can_consume_virus(
-                own.radius,
-                virus.radius,
-                eat_size_ratio=EAT_SIZE_RATIO,
-            )
-            for own in observation.own_blobs
-        )
-    ]
-    nearest_virus = min(
-        edible_viruses,
-        key=lambda item: math.hypot(item.x - center[0], item.y - center[1]),
-        default=None,
-    )
+    features = _prediction_features(observation)
+    analysis = features.analysis
+    center = analysis.center
+    nearest_prey = features.prey.nearest
+    nearest_predator = features.predators.nearest
+    largest_radius = analysis.largest_radius
+    total_mass = analysis.total_mass
+    nearest_virus = features.edible_viruses.nearest
     wall_distance = min(
-        center[0], center[1], observation.arena_size - center[0], observation.arena_size - center[1]
+        center[0],
+        center[1],
+        observation.arena_size - center[0],
+        observation.arena_size - center[1],
     ) / max(observation.arena_size, EPS)
     previous = _unit(previous_direction)
     proposed = _unit(proposed_direction)
-    turn_amount = 1.0 - max(-1.0, min(1.0, previous[0] * proposed[0] + previous[1] * proposed[1]))
+    turn_amount = 1.0 - max(
+        -1.0, min(1.0, previous[0] * proposed[0] + previous[1] * proposed[1])
+    )
 
     values = (
         1.0,
@@ -351,27 +428,32 @@ def split_feature_values(
         math.log1p(total_mass),
         len(observation.own_blobs) / 16.0,
         largest_radius / 10.0,
-        (
-            sum(blob.merge_cooldown <= 0 for blob in observation.own_blobs)
-            / max(len(observation.own_blobs), 1)
-        ),
+        analysis.merge_ready_fraction,
         1.0 if nearest_prey is not None else 0.0,
         (
-            math.hypot(nearest_prey.x - center[0], nearest_prey.y - center[1]) / 20.0
+            features.prey.nearest_distance / 20.0
             if nearest_prey is not None
             else 2.0
         ),
-        (largest_radius / max(nearest_prey.radius, EPS) if nearest_prey is not None else 0.0),
+        (
+            largest_radius / max(nearest_prey.radius, EPS)
+            if nearest_prey is not None
+            else 0.0
+        ),
         1.0 if nearest_predator is not None else 0.0,
         (
-            math.hypot(nearest_predator.x - center[0], nearest_predator.y - center[1]) / 20.0
+            features.predators.nearest_distance / 20.0
             if nearest_predator is not None
             else 2.0
         ),
-        (nearest_predator.radius / max(largest_radius, EPS) if nearest_predator is not None else 0.0),
+        (
+            nearest_predator.radius / max(largest_radius, EPS)
+            if nearest_predator is not None
+            else 0.0
+        ),
         1.0 if nearest_virus is not None else 0.0,
         (
-            math.hypot(nearest_virus.x - center[0], nearest_virus.y - center[1]) / 20.0
+            features.edible_viruses.nearest_distance / 20.0
             if nearest_virus is not None
             else 2.0
         ),
@@ -388,7 +470,7 @@ def predict_direction(
     previous_direction: tuple[float, float] = (0.0, 0.0),
 ) -> tuple[float, float]:
     feature_vectors = direction_feature_vectors(observation, previous_direction)
-    conditional_weights = profile.conditional_direction_weights
+    conditional_weights = profile.regime_direction_weights
     regime = observation_regime(observation)
     override_weights = (
         profile.direction_override_weights[regime]
@@ -400,11 +482,17 @@ def predict_direction(
         if len(observation.own_blobs) > 1 and profile.fragmented_direction_weights
         else ()
     )
-    weights = override_weights if override_weights and any(override_weights) else (
-        fragmented_weights if fragmented_weights else (
-            conditional_weights[regime]
-            if conditional_weights
-            else profile.direction_weights
+    weights = (
+        override_weights
+        if override_weights and any(override_weights)
+        else (
+            fragmented_weights
+            if fragmented_weights
+            else (
+                conditional_weights[regime]
+                if conditional_weights
+                else profile.direction_weights
+            )
         )
     )
     x = sum(weight * vector[0] for weight, vector in zip(weights, feature_vectors))
@@ -416,7 +504,9 @@ def predict_direction(
     if profile.angle_bins > 0:
         step = math.tau / profile.angle_bins
         angle = math.atan2(direction[1], direction[0])
-        angle = round((angle - profile.angle_offset) / step) * step + profile.angle_offset
+        angle = (
+            round((angle - profile.angle_offset) / step) * step + profile.angle_offset
+        )
         direction = (math.cos(angle), math.sin(angle))
     elif (
         profile.probabilistic_angle_bins > 0
@@ -462,7 +552,8 @@ def predict_split(
             and values[3] <= blob_count_max
             and values[5] >= merge_ready_fraction_min
             and values[9] <= predator_visible_max
-            and observation.round_number - last_split_round >= profile.split_cooldown_rounds
+            and observation.round_number - last_split_round
+            >= profile.split_cooldown_rounds
         )
         return can_split and rule_matches, score
     return can_split and score >= profile.split_threshold, score
@@ -476,7 +567,6 @@ def observation_from_context(context: StrategyContext) -> ImitationObservation:
             y=blob.pos[1],
             radius=blob.radius,
             player_id=game.state.me.player_id,
-            team_id=getattr(game.state.me, "team_id", -1),
             blob_id=blob.blob_id,
             merge_cooldown=blob.merge_cooldown,
         )
@@ -488,18 +578,17 @@ def observation_from_context(context: StrategyContext) -> ImitationObservation:
             y=blob.pos[1],
             radius=blob.radius,
             player_id=blob.player_id,
-            team_id=blob.team_id,
             blob_id=blob.blob_id,
             merge_cooldown=blob.merge_cooldown,
         )
         for blob in game.state.visible_blobs
     )
     visible_food = tuple(
-        ImitationPoint(food.pos[0], food.pos[1], entity_id=food.food_id)
+        ImitationPoint(food.pos[0], food.pos[1])
         for food in game.state.visible_food
     )
     visible_viruses = tuple(
-        ImitationPoint(virus.pos[0], virus.pos[1], virus.radius, virus.virus_id)
+        ImitationPoint(virus.pos[0], virus.pos[1], virus.radius)
         for virus in game.state.visible_viruses
     )
     return ImitationObservation(
@@ -524,7 +613,9 @@ class ReplayImitationStrategy:
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         observation = observation_from_context(context)
-        direction = predict_direction(self.profile, observation, self._previous_direction)
+        direction = predict_direction(
+            self.profile, observation, self._previous_direction
+        )
         split, split_score = predict_split(
             self.profile,
             observation,
@@ -549,19 +640,9 @@ class ReplayImitationStrategy:
         )
 
 
-class ProfiledReplayImitationStrategy(ReplayImitationStrategy):
-    """Thin adapter for opponents that differ only by their fitted profile.
+def create_profiled_replay_strategy(team_id: int) -> ReplayImitationStrategy:
+    """Construct a fitted replay strategy without a team-specific wrapper."""
 
-    Concrete replay modules keep their public class names, but no longer need
-    to duplicate the constructor that wires a team profile into the shared
-    imitation policy.
-    """
+    from strategies.replay_profiles import PROFILES
 
-    replay_profile: ReplayProfile
-
-    def __init__(self) -> None:
-        super().__init__(self.replay_profile)
-        # Preserve an explicitly declared public name if a compatibility class
-        # supplies one.  The fallback produced by ReplayImitationStrategy is
-        # already correct for generated profiles.
-        self.name = type(self).name
+    return ReplayImitationStrategy(PROFILES[team_id])

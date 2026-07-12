@@ -11,13 +11,9 @@ of relying solely on the generic fitted split classifier.
 
 import math
 
-from lib.config.player import (
-    BASE_PLAYER_SPEED,
-    MIN_PLAYER_SPEED,
-    PLAYER_SPEED_RADIUS_FACTOR,
-)
-from simulation.rules import can_consume_virus, movement_speed
+from simulation.rules import can_consume_virus
 from strategies.base import StrategyContext, StrategyDecision
+from strategies.features import player_speed as _speed
 from strategies.replay_imitation import (
     EAT_SIZE_RATIO,
     ImitationBlob,
@@ -46,15 +42,6 @@ SAFE_FARM_MIN_FOOD = 5
 SPLIT_SAFETY_DISTANCE = 14.0
 
 SPLIT_EJECT_SPEED = 1.6
-def _speed(radius: float) -> float:
-    return movement_speed(
-        radius,
-        base_speed=BASE_PLAYER_SPEED,
-        radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
-        minimum_speed=MIN_PLAYER_SPEED,
-    )
-
-
 def _quantize_32(direction: tuple[float, float]) -> tuple[float, float]:
     direction = _unit(direction)
     if direction == (0.0, 0.0):
@@ -79,7 +66,6 @@ class ReplayTeam44Strategy(ReplayImitationStrategy):
 
     def __init__(self) -> None:
         super().__init__(PROFILES[44])
-        self.name = type(self).name
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         observation = observation_from_context(context)

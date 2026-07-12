@@ -83,7 +83,6 @@ class PlayerState:
 class ReplayState:
     arena_size: float
     max_rounds: int
-    turn_duration: float
     players: dict[int, PlayerState]
     food: dict[int, tuple[float, float]] = field(default_factory=dict)
     viruses: dict[int, tuple[float, float, float]] = field(default_factory=dict)
@@ -168,7 +167,6 @@ def initial_state(start: dict[str, Any]) -> ReplayState:
     return ReplayState(
         arena_size=float(start["arena_size"]),
         max_rounds=int(start["max_rounds"]),
-        turn_duration=float(start.get("turn_duration_seconds", 0.1)),
         players=players,
     )
 

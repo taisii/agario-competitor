@@ -32,7 +32,6 @@ class ReplayTeam35Strategy(ReplayImitationStrategy):
 
     def __init__(self) -> None:
         super().__init__(PROFILES[35])
-        self.name = type(self).name
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         observation = observation_from_context(context)

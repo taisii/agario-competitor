@@ -42,7 +42,7 @@ class ReplayTeam29Strategy:
 
         return StrategyDecision(
             direction=direction,
-            split=self._split_decision(observation),
+            split=False,
             target_kind=target_kind,
             target_id="29",
             reason=reason,
@@ -58,8 +58,3 @@ class ReplayTeam29Strategy:
             return (0.0, 0.0)
         center = _mass_center(observation.own_blobs)
         return _unit(_nearest_vector(center, observation.visible_food))
-
-    @staticmethod
-    def _split_decision(observation: ImitationObservation) -> bool:
-        del observation
-        return False

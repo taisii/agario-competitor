@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -7,7 +8,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.benchmark_all_strategies import summarize_opponent_rows  # noqa: E402
+from scripts import benchmark_all_strategies  # noqa: E402
+from scripts.benchmark_all_strategies import (  # noqa: E402
+    run_cell,
+    summarize_opponent_rows,
+)
 
 
 def test_summary_requires_every_match_to_finish_with_a_rank() -> None:
@@ -43,3 +48,37 @@ def test_summary_passes_only_a_majority_over_all_requested_matches() -> None:
 
     assert summary["wins"] == 2
     assert summary["passed"] is True
+
+
+def test_matrix_cell_reuses_match_runner_and_global_job_limit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    semaphore = asyncio.Semaphore(3)
+    captured: dict[str, object] = {}
+    expected = [{"return_code": 0, "result_type": "SUCCESS"}]
+
+    async def fake_run_all(**kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(benchmark_all_strategies, "run_all", fake_run_all)
+    monkeypatch.setattr(benchmark_all_strategies, "write_outputs", lambda *_: None)
+
+    actual = asyncio.run(
+        run_cell(
+            candidate="replay_dominance",
+            opponent="replay_team_2",
+            candidate_slot=7,
+            trials=4,
+            output_root=tmp_path,
+            semaphore=semaphore,
+            fast=True,
+        )
+    )
+
+    assert actual == expected
+    assert captured["semaphore"] is semaphore
+    assert captured["fast"] is True
+    assert captured["trials"] == 4
+    assert captured["tracked_slots"] == (7,)

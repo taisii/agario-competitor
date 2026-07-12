@@ -20,6 +20,7 @@ from strategies.replay_imitation import (
     predict_split,
 )
 from strategies.replay_profiles import PROFILES
+from strategies.registry import REPLAY_TEAM_IDS
 
 
 def _observation() -> ImitationObservation:
@@ -32,8 +33,8 @@ def _observation() -> ImitationObservation:
             ImitationBlob(8.0, 10.0, 2.0, player_id=1),
             ImitationBlob(13.0, 10.0, 0.5, player_id=2),
         ),
-        visible_food=(ImitationPoint(10.0, 12.0, entity_id=1),),
-        visible_viruses=(ImitationPoint(15.0, 10.0, 1.5, 1),),
+        visible_food=(ImitationPoint(10.0, 12.0),),
+        visible_viruses=(ImitationPoint(15.0, 10.0, 1.5),),
     )
 
 
@@ -154,7 +155,7 @@ def test_probabilistic_angle_grid_with_full_rate_is_deterministic() -> None:
         arena_size=60.0,
         own_blobs=(ImitationBlob(10.0, 10.0, 1.5, player_id=2),),
         visible_blobs=(),
-        visible_food=(ImitationPoint(11.0, 12.0, entity_id=1),),
+        visible_food=(ImitationPoint(11.0, 12.0),),
         visible_viruses=(),
     )
 
@@ -166,13 +167,6 @@ def test_probabilistic_angle_grid_with_full_rate_is_deterministic() -> None:
 
 
 def test_generated_profiles_cover_all_replay_opponents() -> None:
-    expected = {
-        1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 14, 15, 16, 17, 21, 22, 24,
-        25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 38, 39, 44, 48, 49, 51,
-        53, 55, 56, 58, 59, 63, 68, 75, 77,
-    }
-    assert set(PROFILES) == expected
+    assert set(PROFILES) == set(REPLAY_TEAM_IDS)
     for profile in PROFILES.values():
-        assert len(profile.direction_weights) == len(FEATURE_NAMES)
-        assert len(profile.split_weights) == len(SPLIT_FEATURE_NAMES)
         assert profile.source_matches

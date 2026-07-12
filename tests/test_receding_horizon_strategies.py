@@ -202,23 +202,6 @@ def test_replay_dominance_second_root_avoids_official_virus_massacre() -> None:
     ).first_reason
 
 
-def test_replay_dominance_does_not_bypass_beam_with_direct_virus_mode() -> None:
-    strategy = ReplayDominanceStrategy()
-    own = OwnBlob(blob_id=0, x=10.0, y=10.0, radius=2.0)
-    virus = VirusModel(virus_id=7, pos=(12.0, 10.0), radius=1.5)
-
-    decision = strategy._direct_virus_decision(
-        own_blobs=(own,),
-        enemies=(),
-        viruses=(virus,),
-        arena_size=60.0,
-        rank_position=1,
-        progress=0.9,
-    )
-
-    assert decision is None
-
-
 def test_replay_dominance_continues_safe_virus_chain_when_late_and_fragmented() -> None:
     strategy = ReplayDominanceStrategy()
     own_blobs = (
@@ -289,10 +272,7 @@ def test_replay_dominance_evaluates_scoreboard_rival_before_ordinary_actions() -
         allow_split=True,
     )
 
-    assert any(
-        action.reason in {"rival_prey", "split_rival_prey"}
-        for action in actions[:3]
-    )
+    assert any(action.reason in {"prey", "split_prey"} for action in actions[:3])
 
 
 def test_replay_dominance_keeps_safe_split_candidates_in_late_lead() -> None:
@@ -327,7 +307,7 @@ def test_replay_dominance_keeps_safe_split_candidates_in_late_lead() -> None:
         allow_split=False,
     )
 
-    assert any(action.reason == "split_rival_prey" for action in actions)
+    assert any(action.reason == "split_prey" for action in actions)
 
 
 def test_replay_dominance_scores_wall_clamp_by_actual_movement() -> None:
@@ -478,27 +458,6 @@ def test_replay_dominance_merges_before_virus_like_engine_failure_replay() -> No
     assert math.isclose(sum(blob.mass for blob in after), expected_mass)
 
 
-def test_replay_dominance_virus_potential_rewards_safe_approach_without_mode() -> None:
-    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
-    virus = VirusModel(virus_id=7, pos=(20.0, 10.0), radius=1.5)
-
-    def node_at(x: float) -> SearchNode:
-        return SearchNode(
-            own_blobs=(OwnBlob(blob_id=0, x=x, y=10.0, radius=2.0),),
-            enemies=(),
-            score=0.0,
-            first_direction=(1.0, 0.0),
-            first_split=False,
-            first_reason="keep",
-            last_direction=(1.0, 0.0),
-        )
-
-    far = strategy._virus_potential(node_at(8.0), (virus,), 60.0)
-    near = strategy._virus_potential(node_at(12.0), (virus,), 60.0)
-
-    assert near > far > 0.0
-
-
 def test_replay_dominance_prices_virus_fragment_survival_without_banning_it() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
     virus = VirusModel(virus_id=7, pos=(4.0, 30.0), radius=1.5)
@@ -549,9 +508,6 @@ def test_replay_dominance_prices_virus_fragment_survival_without_banning_it() ->
 
     assert 0.0 < trapped_retention < open_retention < 1.0
     assert actions == [Action((0.0, 0.0), reason="virus_harvest")]
-    assert strategy._virus_potential(trapped, (virus,), 60.0) < (
-        strategy._virus_potential(open_space, (open_virus,), 60.0)
-    )
 
 
 def test_replay_dominance_penalises_wall_only_when_predator_blocks_retreat() -> None:
@@ -727,7 +683,6 @@ def test_replay_dominance_ignores_virus_that_decay_makes_unreachable() -> None:
         last_direction=(1.0, 0.0),
     )
 
-    assert strategy._virus_potential(node, (virus,), 60.0) == 0.0
     assert strategy._virus_actions(
         node=node,
         viruses=(virus,),

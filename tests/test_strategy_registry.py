@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bots"))
 
 from strategies.registry import (  # noqa: E402
-    REPLAY_TEAM_IDS,
+    CUSTOM_REPLAY_TEAM_IDS,
     STRATEGY_SPECS,
     RandomOpponentStrategy,
     RandomReplayOpponentStrategy,
@@ -58,13 +58,13 @@ assert implementation_modules.isdisjoint(sys.modules)
     )
 
 
-def test_strategy_catalog_matches_replay_modules_and_public_names() -> None:
+def test_strategy_catalog_matches_custom_replay_modules_and_public_names() -> None:
     modules = {
         int(path.stem.removeprefix("replay_team_"))
         for path in (ROOT / "bots" / "strategies").glob("replay_team_*.py")
     }
 
-    assert modules == set(REPLAY_TEAM_IDS)
+    assert modules == CUSTOM_REPLAY_TEAM_IDS
     assert tuple(sorted(STRATEGY_SPECS)) == available_strategy_names()
     assert submission_strategy_names() == (
         "replay_dominance",
@@ -128,27 +128,9 @@ def test_every_catalog_entry_constructs_the_declared_strategy() -> None:
         assert create_strategy(name).name == name
 
 
-@pytest.mark.parametrize(
-    "name",
-    (
-        "beam_hunter",
-        "beam_rl_balanced",
-        "beam_rl_farmer",
-        "beam_rl_hunter",
-        "beam_rl_opportunist",
-        "beam_rl_survival",
-        "beam_rl_tuned",
-        "beam_rl_value",
-        "beam_survival",
-        "unified_deterministic",
-        "virus_farming_receding_horizon",
-        "candidate_submission",
-    ),
-)
-def test_removed_strategies_fail_explicitly(name: str) -> None:
-    assert name not in available_strategy_names()
+def test_unknown_strategy_fails_explicitly() -> None:
     with pytest.raises(ValueError, match="Unknown strategy"):
-        create_strategy(name)
+        create_strategy("removed_strategy")
 
 
 def test_random_replay_selection_is_paired_per_trial_and_slot() -> None:

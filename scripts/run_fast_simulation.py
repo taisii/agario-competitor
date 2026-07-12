@@ -54,6 +54,9 @@ def main() -> None:
             stderr_file = (io_dir / "submission.err").open("wb")
             opened_logs.extend((stdout_file, stderr_file))
             bot_env = env.copy()
+            bot_env["BOT_METRICS_ENABLED"] = (
+                "1" if player_id in variant_slots else "0"
+            )
             if player_id in variant_slots:
                 bot_env.update(variant_env)
             bots.append(

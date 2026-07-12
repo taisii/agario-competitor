@@ -44,7 +44,7 @@ class ReplayTeam25Strategy:
         predators, prey, _ = _relations(observation)
         return StrategyDecision(
             direction=direction,
-            split=self._split_decision(observation),
+            split=False,
             target_kind=target_kind,
             target_id="25",
             reason=reason,
@@ -75,8 +75,3 @@ class ReplayTeam25Strategy:
                 "team25_nearest_food",
             )
         return ((0.0, 0.0), "none", "team25_no_target")
-
-    @staticmethod
-    def _split_decision(observation: ImitationObservation) -> bool:
-        del observation
-        return False

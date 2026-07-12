@@ -10,6 +10,7 @@ profile and retains the profile's failed validation marker.
 """
 
 import math
+from collections.abc import Sequence
 
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.replay_imitation import (
@@ -114,7 +115,7 @@ class ReplayTeam68Strategy:
 
 
 def _nearest(
-    origin: tuple[float, float], blobs: list[ImitationBlob]
+    origin: tuple[float, float], blobs: Sequence[ImitationBlob]
 ) -> ImitationBlob | None:
     return min(
         blobs,

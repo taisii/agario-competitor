@@ -7,11 +7,14 @@ The remaining 140 slots collapse to 42 stable opponent `team_id` values.
 Replay files do not include public team names, so clone names intentionally use
 those stable IDs: `replay_team_<id>`.
 
-Each opponent has two runnable files:
+Each opponent has a runnable simulator entry:
 
-- `bots/strategies/replay_team_<id>.py`: the inferred policy.
 - `bots/entries/replay_team_<id>.py`: a simulator entry point that runs that
   policy directly and does not depend on global environment configuration.
+
+Profile-only opponents are constructed directly from
+`bots/strategies/replay_profiles.py`. Only opponents with genuinely custom
+logic have a `bots/strategies/replay_team_<id>.py` module.
 
 The shared fitter and visibility reconstruction live in
 `scripts/replay_imitation.py` and `bots/strategies/replay_imitation.py`. They
@@ -36,12 +39,15 @@ uv run simulation \
   1:bots/entries/replay_team_44.py
 ```
 
-Smoke-test every available clone in mixed 8-player matches, with three matches
-running in parallel:
+Smoke-test every available clone in mixed 8-player matches:
 
 ```bash
-uv run python scripts/simulate_replay_opponents.py --jobs 3
+uv run python scripts/simulate_replay_opponents.py
 ```
+
+The smoke test uses the no-recording fast runner. Add `--official` for final
+process-layout verification. One match already runs eight bot processes, so
+increase `--jobs` only after confirming the selected opponents are lightweight.
 
 The batch report and full simulator workspaces are written below
 `.agario/replay-imitation/simulations/`.
@@ -103,8 +109,8 @@ but are not mislabeled as exact behavioral copies.
 
 ## Per-opponent verdicts
 
-All 42 entries compile, pass their dedicated tests, and finish mixed local
-simulations without a ban or timeout. Eleven pass the full-data autonomous
+All 42 entries construct through the shared strategy catalog and finish mixed
+local simulations without a ban or timeout. Eleven pass the full-data autonomous
 shadow gate. Nine also pass the stronger match-held-out gate. `Style only`
 means the clone reproduces observed direction grids, inertia, target priority,
 or split frequency, but not the exact hidden random sequence or split timing.

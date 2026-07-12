@@ -6,21 +6,20 @@ from dataclasses import dataclass
 
 from lib.config.arena import ARENA_SIZE, MAX_BLOB_COUNT
 from lib.config.player import (
-    BASE_PLAYER_SPEED,
     EAT_SIZE_RATIO,
-    MIN_PLAYER_SPEED,
-    PLAYER_SPEED_RADIUS_FACTOR,
     SPLIT_EJECT_SPEED,
     SPLIT_MIN_MASS,
 )
 from lib.models.blob_model import BlobModel, VisibleBlobModel
 from lib.models.virus_model import VirusModel
-from simulation.rules import (
-    can_consume_virus,
-    movement_speed,
-)
+from simulation.rules import can_consume_virus
 from strategies.base import StrategyContext, StrategyDecision
-from strategies.features import can_eat_player_blob, normalise, squared_distance
+from strategies.features import (
+    can_eat_player_blob,
+    normalise,
+    player_speed as _speed,
+    squared_distance,
+)
 
 
 SQRT2 = math.sqrt(2.0)
@@ -429,15 +428,6 @@ class PotentialFieldHunterStrategy:
                 base[0] * sin_jitter + base[1] * cos_jitter,
             )
         ) or self._last_direction
-
-
-def _speed(radius: float) -> float:
-    return movement_speed(
-        radius,
-        base_speed=BASE_PLAYER_SPEED,
-        radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
-        minimum_speed=MIN_PLAYER_SPEED,
-    )
 
 
 def _mass(radius: float) -> float:

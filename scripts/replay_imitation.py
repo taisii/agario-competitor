@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
 import json
 import math
+import os
 from pathlib import Path
 import statistics
 import sys
@@ -28,6 +30,7 @@ from strategies.replay_imitation import (  # noqa: E402
     split_feature_values,
     stable_unit_interval,
 )
+from strategies.registry import REPLAY_TEAM_IDS  # noqa: E402
 
 
 USER_TEAM_ID = 73
@@ -37,7 +40,6 @@ VISION_REFERENCE_SUM_OF_RADII = 12.0
 @dataclass
 class PlayerState:
     player_id: int
-    team_id: int
     alive: bool
     blobs: dict[int, ImitationBlob]
 
@@ -61,7 +63,7 @@ def _unit(x: float, y: float) -> tuple[float, float]:
     return (x / magnitude, y / magnitude)
 
 
-def _player_from_event(payload: dict[str, object], team_id: int) -> PlayerState:
+def _player_from_event(payload: dict[str, object]) -> PlayerState:
     player_id = int(payload["player_id"])
     blobs = {
         int(blob["blob_id"]): ImitationBlob(
@@ -69,7 +71,6 @@ def _player_from_event(payload: dict[str, object], team_id: int) -> PlayerState:
             y=float(blob["pos"][1]),
             radius=float(blob["radius"]),
             player_id=player_id,
-            team_id=team_id,
             blob_id=int(blob["blob_id"]),
             merge_cooldown=int(blob.get("merge_cooldown", 0)),
         )
@@ -77,7 +78,6 @@ def _player_from_event(payload: dict[str, object], team_id: int) -> PlayerState:
     }
     return PlayerState(
         player_id=player_id,
-        team_id=team_id,
         alive=bool(payload.get("alive", True)),
         blobs=blobs,
     )
@@ -180,7 +180,7 @@ def extract_samples(path: Path) -> list[ReplaySample]:
         for payload in started["players"]
     }
     players = {
-        int(payload["player_id"]): _player_from_event(payload, int(payload["team_id"]))
+        int(payload["player_id"]): _player_from_event(payload)
         for payload in started["players"]
     }
     foods: dict[int, ImitationPoint] = {}
@@ -230,7 +230,7 @@ def extract_samples(path: Path) -> list[ReplaySample]:
             for food in event["foods"]:
                 food_id = int(food["food_id"])
                 foods[food_id] = ImitationPoint(
-                    float(food["pos"][0]), float(food["pos"][1]), entity_id=food_id
+                    float(food["pos"][0]), float(food["pos"][1])
                 )
         elif event_type == "event_food_eaten":
             for food_id in event["food_ids"]:
@@ -242,13 +242,12 @@ def extract_samples(path: Path) -> list[ReplaySample]:
                     float(virus["pos"][0]),
                     float(virus["pos"][1]),
                     float(virus["radius"]),
-                    virus_id,
                 )
         elif event_type == "event_virus_consumed":
             viruses.pop(int(event["virus_id"]), None)
         elif event_type == "event_player_moved":
             player_id = int(event["player_id"])
-            players[player_id] = _player_from_event(event, team_by_player[player_id])
+            players[player_id] = _player_from_event(event)
 
     return samples
 
@@ -308,18 +307,6 @@ def _sample_regime(sample: ReplaySample) -> int:
         | (2 if sample.split_features[6] > 0.5 else 0)
         | (4 if sample.split_features[12] > 0.5 else 0)
     )
-
-
-def fit_regime_directions(
-    samples: Sequence[ReplaySample],
-    global_weights: tuple[float, ...],
-    ridge: float = 0.25,
-) -> tuple[tuple[float, ...], ...]:
-    result: list[tuple[float, ...]] = []
-    for regime in range(8):
-        subset = [sample for sample in samples if _sample_regime(sample) == regime]
-        result.append(fit_direction(subset, ridge) if len(subset) >= 40 else global_weights)
-    return tuple(result)
 
 
 def fit_autonomous_directions(
@@ -852,6 +839,15 @@ def _profile_with_validation(
     )
 
 
+def _fit_team(
+    item: tuple[int, list[ReplaySample]],
+) -> tuple[int, ReplayProfile, dict[str, object]]:
+    team_id, samples = item
+    validation = cross_validate(team_id, samples)
+    profile = _profile_with_validation(_profile(team_id, samples), validation)
+    return team_id, profile, validation
+
+
 def write_profiles(path: Path, profiles: Sequence[ReplayProfile]) -> None:
     lines = [
         "from __future__ import annotations",
@@ -918,12 +914,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--existing-strategies-only",
         action="store_true",
-        help="Generate profiles only for replay_team_<id>.py strategies already in the repository",
+        help="Generate profiles only for replay teams in the strategy catalog",
     )
     parser.add_argument(
         "--report-out",
         type=Path,
         default=ROOT / ".agario/replay-imitation/report.json",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=min(4, os.cpu_count() or 1),
+        help="Worker processes for independent replay extraction and team fitting",
     )
     return parser.parse_args()
 
@@ -940,12 +942,15 @@ def main() -> None:
     )
     if not replay_paths:
         raise SystemExit(f"No replays found in {', '.join(map(str, replay_dirs))}")
-    for path in replay_paths:
-        path_samples = extract_samples(path)
-        samples_by_path[path.resolve()] = path_samples
-        for sample in path_samples:
-            if sample.team_id != USER_TEAM_ID:
-                samples_by_team[sample.team_id].append(sample)
+    workers = max(1, args.jobs)
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        extracted = executor.map(extract_samples, replay_paths)
+        path_results = zip(replay_paths, extracted, strict=True)
+        for path, path_samples in path_results:
+            samples_by_path[path.resolve()] = path_samples
+            for sample in path_samples:
+                if sample.team_id != USER_TEAM_ID:
+                    samples_by_team[sample.team_id].append(sample)
 
     team_replay_dirs: dict[int, list[Path]] = defaultdict(list)
     for specification in args.team_replay_dir:
@@ -970,17 +975,12 @@ def main() -> None:
         samples_by_team[team_id] = selected
 
     if args.existing_strategies_only:
-        existing_team_ids = {
-            int(path.stem.removeprefix("replay_team_"))
-            for path in (ROOT / "bots/strategies").glob("replay_team_*.py")
-            if path.stem.removeprefix("replay_team_").isdigit()
-        }
         samples_by_team = defaultdict(
             list,
             {
                 team_id: samples
                 for team_id, samples in samples_by_team.items()
-                if team_id in existing_team_ids
+                if team_id in REPLAY_TEAM_IDS
             },
         )
 
@@ -1004,22 +1004,25 @@ def main() -> None:
         },
         "teams": {},
     }
-    for team_id, samples in sorted(samples_by_team.items()):
-        validation = cross_validate(team_id, samples)
-        final_profile = _profile_with_validation(_profile(team_id, samples), validation)
-        profiles.append(final_profile)
-        report["teams"][str(team_id)] = {
-            "matches": list(final_profile.source_matches),
-            "sample_count": len(samples),
-            "angle_bins": final_profile.angle_bins,
-            "validation": validation,
-        }
-        print(
-            f"team {team_id:>2}: {'PASS' if final_profile.validation_passed else 'FAIL'} "
-            f"median={final_profile.direction_median_error:.1f}deg "
-            f"within30={final_profile.direction_within_30_rate:.1%} "
-            f"splitF1={final_profile.split_f1:.2f}"
-        )
+    team_items = sorted(samples_by_team.items())
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        fitted_teams = executor.map(_fit_team, team_items)
+        for team_id, final_profile, validation in fitted_teams:
+            samples = samples_by_team[team_id]
+            profiles.append(final_profile)
+            report["teams"][str(team_id)] = {
+                "matches": list(final_profile.source_matches),
+                "sample_count": len(samples),
+                "angle_bins": final_profile.angle_bins,
+                "validation": validation,
+            }
+            print(
+                f"team {team_id:>2}: "
+                f"{'PASS' if final_profile.validation_passed else 'FAIL'} "
+                f"median={final_profile.direction_median_error:.1f}deg "
+                f"within30={final_profile.direction_within_30_rate:.1%} "
+                f"splitF1={final_profile.split_f1:.2f}"
+            )
 
     args.profiles_out.parent.mkdir(parents=True, exist_ok=True)
     args.report_out.parent.mkdir(parents=True, exist_ok=True)
