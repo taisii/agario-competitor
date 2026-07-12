@@ -303,12 +303,14 @@ def _sample_regime(sample: ReplaySample) -> int:
 
 
 def fit_regime_directions(
-    samples: Sequence[ReplaySample], global_weights: tuple[float, ...]
+    samples: Sequence[ReplaySample],
+    global_weights: tuple[float, ...],
+    ridge: float = 0.25,
 ) -> tuple[tuple[float, ...], ...]:
     result: list[tuple[float, ...]] = []
     for regime in range(8):
         subset = [sample for sample in samples if _sample_regime(sample) == regime]
-        result.append(fit_direction(subset) if len(subset) >= 40 else global_weights)
+        result.append(fit_direction(subset, ridge) if len(subset) >= 40 else global_weights)
     return tuple(result)
 
 
@@ -414,8 +416,13 @@ def detect_angle_grid(samples: Sequence[ReplaySample]) -> tuple[int, float]:
 
 
 def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
-    direction_weights = fit_direction(samples)
-    regime_direction_weights = fit_regime_directions(samples, direction_weights)
+    direction_ridge = 0.005 if team_id == 49 else 0.25
+    direction_weights = fit_direction(samples, direction_ridge)
+    regime_direction_weights = fit_regime_directions(
+        samples,
+        direction_weights,
+        direction_ridge,
+    )
     split_weights, split_threshold = fit_split(samples)
     angle_bins, angle_offset = detect_angle_grid(samples)
     # Team 49's split policy is edge-triggered. Static classification fires on

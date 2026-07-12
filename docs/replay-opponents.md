@@ -204,5 +204,5 @@ split every frame. A team-specific 18-round re-arm interval now sits on top of
 the geometric rule (prey visible within 13 arena units, radius ratio at least
 1.5, no predator). Mean held-out split F1 rises from 0.22 to 0.74. Its overall
 LOMO verdict remains FAIL because direction is just below the aggregate gate
-(69.4% rather than 70% within 30°) and not every split fold reaches 70%
+(69.8% rather than 70% within 30°) and not every split fold reaches 70%
 precision and recall.
