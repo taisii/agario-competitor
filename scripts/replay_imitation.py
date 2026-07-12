@@ -318,7 +318,12 @@ def fit_autonomous_directions(
     samples: Sequence[ReplaySample],
     ridge: float = 0.25,
     iterations: int = 1,
-) -> tuple[tuple[float, ...], tuple[tuple[float, ...], ...]]:
+    distinguish_fragmented: bool = False,
+) -> tuple[
+    tuple[float, ...],
+    tuple[tuple[float, ...], ...],
+    tuple[tuple[float, ...], ...],
+]:
     """Fit against the direction history the clone will actually produce.
 
     Replay extraction records the teacher's preceding command in the stateful
@@ -330,7 +335,22 @@ def fit_autonomous_directions(
     previous_index = FEATURE_NAMES.index("previous")
     previous_left_index = FEATURE_NAMES.index("previous_left")
     direction_weights = fit_direction(samples, ridge)
-    regime_weights = fit_regime_directions(samples, direction_weights, ridge)
+    regime_count = 16 if distinguish_fragmented else 8
+
+    def regime(sample: ReplaySample) -> int:
+        base = _sample_regime(sample)
+        return base | (8 if distinguish_fragmented and sample.split_features[3] > 0.0625 else 0)
+
+    def fit_regimes(training: Sequence[ReplaySample]) -> tuple[tuple[float, ...], ...]:
+        fitted: list[tuple[float, ...]] = []
+        for index in range(regime_count):
+            subset = [sample for sample in training if regime(sample) == index]
+            fitted.append(
+                fit_direction(subset, ridge) if len(subset) >= 40 else direction_weights
+            )
+        return tuple(fitted)
+
+    regime_weights = fit_regimes(samples)
 
     for _ in range(iterations):
         previous_by_trace: dict[tuple[int, int], tuple[float, float]] = defaultdict(
@@ -349,19 +369,19 @@ def fit_autonomous_directions(
             autonomous_sample = replace(sample, direction_features=tuple(features))
             autonomous_samples.append(autonomous_sample)
 
-            weights = regime_weights[_sample_regime(sample)]
+            weights = regime_weights[regime(sample)]
             x = sum(weight * vector[0] for weight, vector in zip(weights, features))
             y = sum(weight * vector[1] for weight, vector in zip(weights, features))
             previous_by_trace[key] = _unit(x, y)
 
         direction_weights = fit_direction(autonomous_samples, ridge)
-        regime_weights = fit_regime_directions(
-            autonomous_samples,
-            direction_weights,
-            ridge,
-        )
+        regime_weights = fit_regimes(autonomous_samples)
 
-    return direction_weights, regime_weights
+    return (
+        direction_weights,
+        regime_weights[:8],
+        regime_weights[8:] if distinguish_fragmented else (),
+    )
 
 
 def _split_scores(weights: Sequence[float], samples: Sequence[ReplaySample]) -> list[float]:
@@ -484,10 +504,11 @@ def detect_angle_grid(samples: Sequence[ReplaySample]) -> tuple[int, float]:
 def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
     direction_ridge = 0.005 if team_id in {35, 49} else 0.25
     autonomous_teams = {3, 9, 14, 15, 35, 49, 58, 59, 63}
-    direction_weights, regime_direction_weights = fit_autonomous_directions(
+    direction_weights, regime_direction_weights, fragmented_direction_weights = fit_autonomous_directions(
         samples,
         direction_ridge,
         iterations=1 if team_id in autonomous_teams else 0,
+        distinguish_fragmented=team_id == 9,
     )
     split_weights, split_threshold = fit_split(samples)
     angle_bins, angle_offset = detect_angle_grid(samples)
@@ -520,6 +541,7 @@ def _profile(team_id: int, samples: Sequence[ReplaySample]) -> ReplayProfile:
         team_id=team_id,
         direction_weights=direction_weights,
         regime_direction_weights=regime_direction_weights,
+        fragmented_direction_weights=fragmented_direction_weights,
         direction_override_weights=direction_override_weights,
         split_weights=split_weights,
         split_threshold=split_threshold,
@@ -564,10 +586,18 @@ def evaluate_profile(profile: ReplayProfile, samples: Sequence[ReplaySample]) ->
             if profile.direction_override_weights
             else ()
         )
+        fragmented_weights = (
+            profile.fragmented_direction_weights[regime]
+            if sample.split_features[3] > 0.0625
+            and profile.fragmented_direction_weights
+            else ()
+        )
         weights = override_weights if override_weights and any(override_weights) else (
-            profile.regime_direction_weights[regime]
-            if profile.regime_direction_weights
-            else profile.direction_weights
+            fragmented_weights if fragmented_weights else (
+                profile.regime_direction_weights[regime]
+                if profile.regime_direction_weights
+                else profile.direction_weights
+            )
         )
         x = sum(
             weight * vector[0]
@@ -710,6 +740,7 @@ def _profile_with_validation(
         direction_weights=profile.direction_weights,
         regime_direction_weights=profile.regime_direction_weights,
         direction_override_weights=profile.direction_override_weights,
+        fragmented_direction_weights=profile.fragmented_direction_weights,
         split_weights=profile.split_weights,
         split_threshold=profile.split_threshold,
         split_rule=profile.split_rule,
@@ -744,6 +775,7 @@ def write_profiles(path: Path, profiles: Sequence[ReplayProfile]) -> None:
                 f"        team_id={profile.team_id},",
                 f"        direction_weights={profile.direction_weights!r},",
                 f"        regime_direction_weights={profile.regime_direction_weights!r},",
+                f"        fragmented_direction_weights={profile.fragmented_direction_weights!r},",
                 f"        direction_override_weights={profile.direction_override_weights!r},",
                 f"        split_weights={profile.split_weights!r},",
                 f"        split_threshold={split_threshold},",

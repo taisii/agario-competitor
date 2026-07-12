@@ -97,6 +97,7 @@ class ReplayProfile:
     split_rule: tuple[float, ...] = ()
     split_cooldown_rounds: int = 0
     regime_direction_weights: tuple[tuple[float, ...], ...] = ()
+    fragmented_direction_weights: tuple[tuple[float, ...], ...] = ()
     direction_override_weights: tuple[tuple[float, ...], ...] = ()
     # Backward-compatible name used by an earlier profile generator.  Keeping
     # the schema tolerant prevents a freshly generated profile module from
@@ -119,6 +120,7 @@ class ReplayProfile:
             raise ValueError("split_rule must contain six thresholds")
         for field_name, conditional_weights in (
             ("regime_direction_weights", self.regime_direction_weights),
+            ("fragmented_direction_weights", self.fragmented_direction_weights),
             ("context_direction_weights", self.context_direction_weights),
             ("direction_override_weights", self.direction_override_weights),
         ):
@@ -362,10 +364,17 @@ def predict_direction(
         if profile.direction_override_weights
         else ()
     )
+    fragmented_weights = (
+        profile.fragmented_direction_weights[regime]
+        if len(observation.own_blobs) > 1 and profile.fragmented_direction_weights
+        else ()
+    )
     weights = override_weights if override_weights and any(override_weights) else (
-        conditional_weights[regime]
-        if conditional_weights
-        else profile.direction_weights
+        fragmented_weights if fragmented_weights else (
+            conditional_weights[regime]
+            if conditional_weights
+            else profile.direction_weights
+        )
     )
     x = sum(weight * vector[0] for weight, vector in zip(weights, feature_vectors))
     y = sum(weight * vector[1] for weight, vector in zip(weights, feature_vectors))

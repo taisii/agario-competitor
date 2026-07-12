@@ -112,6 +112,32 @@ def test_direction_override_replaces_one_observation_regime() -> None:
     assert direction == (1.0, 0.0)
 
 
+def test_fragmented_direction_weights_apply_only_after_split() -> None:
+    base = _nearest_food_profile()
+    fragmented = [[0.0] * len(FEATURE_NAMES) for _ in range(8)]
+    fragmented[3][FEATURE_NAMES.index("nearest_predator_escape")] = 1.0
+    profile = ReplayProfile(
+        team_id=9,
+        direction_weights=base.direction_weights,
+        split_weights=base.split_weights,
+        split_threshold=math.inf,
+        fragmented_direction_weights=tuple(tuple(weights) for weights in fragmented),
+    )
+    single = _observation()
+    split = ImitationObservation(
+        round_number=single.round_number,
+        max_rounds=single.max_rounds,
+        arena_size=single.arena_size,
+        own_blobs=single.own_blobs + (ImitationBlob(11.0, 10.0, 1.0, player_id=0),),
+        visible_blobs=single.visible_blobs,
+        visible_food=single.visible_food,
+        visible_viruses=single.visible_viruses,
+    )
+
+    assert predict_direction(profile, single) == (0.0, 1.0)
+    assert predict_direction(profile, split) == (1.0, 0.0)
+
+
 def test_generated_profiles_cover_all_replay_opponents() -> None:
     expected = {
         1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 14, 15, 16, 17, 21, 22, 24,
