@@ -118,7 +118,7 @@ or split frequency, but not the exact hidden random sequence or split timing.
 | 10 | FAIL | FAIL | Regime-fitted direction; unstable split timing |
 | 12 | FAIL | FAIL | Food/escape/inertia mixture; sparse split |
 | 13 | PASS | FAIL | Food/inertia movement; uniquely identified prey split |
-| 14 | FAIL | FAIL | Prey pursuit and predator escape mixture |
+| 14 | FAIL | FAIL | Prey/escape mixture; close-prey split with 15-round re-arm |
 | 15 | FAIL | FAIL | Strong inertia with unstable targets and split timing |
 | 16 | FAIL | FAIL | Fitted direction; sparse child-safe prey split |
 | 17 | PASS | PASS | Nearest food or predator field; no split |
@@ -233,3 +233,9 @@ deterministic safe-prey gate and 90-round re-arm interval shared by runtime and
 evaluation. Mean held-out split F1 rises from 0.17 to 0.42 (full-trace F1
 0.49). Match 11756 contains one unmatched split, so the overall verdict stays
 FAIL rather than treating frequency matching as behavioral reproduction.
+
+Team 14 uses a close-prey gate with a 15-round re-arm interval. Across all
+seven traces the fixed rule reaches precision 65.4%, recall 53.1%, and F1
+0.59, versus mean held-out F1 0.22 for the generic classifier. Two new events
+in match 13939 remain unmatched, and direction is still below its gate, so the
+overall verdict remains FAIL.

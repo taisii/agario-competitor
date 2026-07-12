@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """Replay-derived opponent strategy for official team 14.
 
-The four source matches show stable prey-chase and predator-escape regimes,
-but safe movement and the 30 sparse split commands do not generalize across
-matches.  This wrapper preserves the measured autonomous profile and its
-failed validation flag rather than replacing it with an unsupported rule.
+Seven source matches show prey-chase and predator-escape regimes. Split events
+use a close-prey gate with a 15-round re-arm interval; this substantially
+improves held-out event reproduction while the direction policy remains below
+the strict cross-match gate.
 """
 
 from strategies.replay_imitation import ReplayImitationStrategy
