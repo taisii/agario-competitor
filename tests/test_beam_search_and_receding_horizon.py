@@ -20,6 +20,7 @@ from strategies.receding_horizon import (  # noqa: E402
     _split_attack_reach,
 )
 from lib.models.food_model import FoodModel  # noqa: E402
+from lib.models.virus_model import VirusModel  # noqa: E402
 from lib.models.blob_model import BlobModel, VisibleBlobModel  # noqa: E402
 from strategies.base import StrategyContext  # noqa: E402
 from strategies.features import can_eat_player_blob  # noqa: E402
@@ -117,6 +118,234 @@ def test_replay_utility_cache_reuses_the_same_physical_state() -> None:
 
     assert first == second
     assert calls == 1
+
+
+def test_replay_node_opportunities_are_computed_once_without_stale_reuse() -> None:
+    strategy = ReplayDominanceStrategy()
+    own = OwnBlob(blob_id=0, x=50.0, y=30.0, radius=2.0)
+    enemy = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=59.0,
+        y=30.0,
+        radius=1.0,
+        direction=(1.0, 0.0),
+    )
+    node = RecedingHorizonSearchNode(
+        own_blobs=(own,),
+        enemies=(enemy,),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+    foods = (FoodModel(food_id=1, pos=(52.0, 31.0)),)
+    viruses = (VirusModel(virus_id=1, pos=(47.0, 30.0), radius=1.5),)
+    calls = {"prey": 0, "virus": 0, "gradient": 0, "utility": 0}
+    original_prey = strategy._prey_capture_probability
+    original_virus = strategy._post_virus_retained_mass_fraction
+    original_gradient = strategy._approximate_value_gradient
+    original_utility = strategy._search_utility
+
+    def counted_prey(*args, **kwargs):
+        calls["prey"] += 1
+        return original_prey(*args, **kwargs)
+
+    def counted_virus(*args, **kwargs):
+        calls["virus"] += 1
+        return original_virus(*args, **kwargs)
+
+    def counted_gradient(*args, **kwargs):
+        calls["gradient"] += 1
+        return original_gradient(*args, **kwargs)
+
+    def counted_utility(*args, **kwargs):
+        calls["utility"] += 1
+        return original_utility(*args, **kwargs)
+
+    strategy._prey_capture_probability = counted_prey  # type: ignore[method-assign]
+    strategy._post_virus_retained_mass_fraction = counted_virus  # type: ignore[method-assign]
+    strategy._approximate_value_gradient = counted_gradient  # type: ignore[method-assign]
+    strategy._search_utility = counted_utility  # type: ignore[method-assign]
+
+    for _ in range(2):
+        strategy._candidate_actions(
+            node=node,
+            foods=foods,
+            food_targets=(),
+            viruses=viruses,
+            arena_size=60.0,
+            first_step=True,
+        )
+        strategy._cached_search_utility(
+            node,
+            foods=foods,
+            viruses=viruses,
+            arena_size=60.0,
+            safety_weight=1.0,
+        )
+
+    assert calls == {"prey": 1, "virus": 1, "gradient": 1, "utility": 1}
+
+    first_expected_mass = strategy._prey_expected_mass(node, enemy, 60.0)
+    nearer_node = replace(node, own_blobs=(replace(own, x=55.0),))
+    second_expected_mass = strategy._prey_expected_mass(nearer_node, enemy, 60.0)
+
+    assert calls["prey"] == 2
+    assert second_expected_mass > first_expected_mass
+
+
+def test_replay_step_moves_each_post_split_blob_exactly_once() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    original_move = strategy._move_own
+    move_calls = 0
+
+    def counted_move(*args, **kwargs):
+        nonlocal move_calls
+        move_calls += 1
+        return original_move(*args, **kwargs)
+
+    strategy._move_own = counted_move  # type: ignore[method-assign]
+
+    def node_for(*blobs: OwnBlob) -> RecedingHorizonSearchNode:
+        return RecedingHorizonSearchNode(
+            own_blobs=blobs,
+            enemies=(),
+            score=0.0,
+            first_direction=(1.0, 0.0),
+            first_split=False,
+            first_reason="keep",
+            last_direction=(1.0, 0.0),
+        )
+
+    def run(node, *, split: bool = False):
+        return strategy._step(
+            node=node,
+            action=RecedingHorizonAction((1.0, 0.0), split=split),
+            foods=(),
+            viruses=(),
+            arena_size=60.0,
+            first_step=True,
+            safety_weight=1.0,
+            aggression=1.0,
+        )
+
+    result = run(node_for(OwnBlob(0, 59.0, 30.0, 1.0)))
+    assert move_calls == 1
+    assert result.movement_efficiency == 0.0
+
+    move_calls = 0
+    split = run(node_for(OwnBlob(0, 56.0, 30.0, 2.0)), split=True)
+    assert move_calls == 2
+    assert len(split.node.own_blobs) == 2
+    assert all(blob.x <= 60.0 - blob.radius for blob in split.node.own_blobs)
+
+    move_calls = 0
+    run(
+        node_for(
+            OwnBlob(0, 20.0, 20.0, 1.0),
+            OwnBlob(1, 24.0, 20.0, 1.0),
+        )
+    )
+    assert move_calls == 2
+
+
+def test_replay_prey_route_uses_the_blob_that_can_actually_close() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=2, angular_samples=8)
+    far_primary = OwnBlob(blob_id=0, x=25.0, y=30.0, radius=3.0)
+    near_fragment = OwnBlob(blob_id=1, x=54.0, y=30.0, radius=2.0)
+    enemy = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=59.0,
+        y=30.0,
+        radius=1.0,
+        direction=(1.0, 0.0),
+    )
+    node = RecedingHorizonSearchNode(
+        own_blobs=(far_primary, near_fragment),
+        enemies=(enemy,),
+        score=0.0,
+        first_direction=(0.0, 1.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(0.0, 1.0),
+    )
+
+    opportunity = strategy._prey_opportunity(node, enemy, 60.0)
+    actions = strategy._candidate_actions(
+        node=node,
+        foods=(),
+        food_targets=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+    )
+
+    assert opportunity.origin is near_fragment
+    assert any(
+        action.reason == "prey" and action.direction == opportunity.direction
+        for action in actions
+    )
+
+
+def test_replay_split_prey_is_a_continuous_ranked_candidate() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=2, angular_samples=8)
+    own = OwnBlob(blob_id=0, x=50.0, y=30.0, radius=3.0)
+    enemy = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=59.0,
+        y=30.0,
+        radius=1.0,
+        direction=(1.0, 0.0),
+    )
+    node = RecedingHorizonSearchNode(
+        own_blobs=(own,),
+        enemies=(enemy,),
+        score=0.0,
+        first_direction=(0.0, 1.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(0.0, 1.0),
+    )
+    opportunity = strategy._split_prey_opportunity(node, enemy, 60.0)
+    actions = strategy._candidate_actions(
+        node=node,
+        foods=(),
+        food_targets=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+    )
+    toward = strategy._approximate_action_value(
+        node=node,
+        action=RecedingHorizonAction(
+            opportunity.direction,
+            split=True,
+            reason="split_prey",
+        ),
+        foods=(),
+        arena_size=60.0,
+        value_gradient=(0.0, 0.0),
+    )
+    sideways = strategy._approximate_action_value(
+        node=node,
+        action=RecedingHorizonAction(
+            (0.0, 1.0),
+            split=True,
+            reason="angle",
+        ),
+        foods=(),
+        arena_size=60.0,
+        value_gradient=(0.0, 0.0),
+    )
+
+    assert opportunity.origin is own
+    assert opportunity.capture_probability > 0.0
+    assert any(action.reason == "split_prey" for action in actions)
+    assert toward > sideways
 
 
 def test_threat_aware_receding_horizon_captures_safely_while_leading_late() -> None:

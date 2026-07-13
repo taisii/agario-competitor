@@ -168,6 +168,66 @@ class SearchNode:
 class StepResult:
     node: SearchNode
     fatal: bool = False
+    movement_efficiency: float = 1.0
+    hazard_summary: HazardSummary | None = None
+
+
+@dataclass(frozen=True)
+class MovementMetrics:
+    """Direction-dependent movement facts computed once per transition."""
+
+    blocked_distance: float
+    efficiency: float
+
+
+@dataclass(frozen=True)
+class NodeGeometry:
+    """Action-independent mass geometry for one search node."""
+
+    total_mass: float
+    center: tuple[float, float]
+    primary: OwnBlob
+
+
+@dataclass(frozen=True)
+class VirusOpportunity:
+    """Best acquisition route for one virus from one search state."""
+
+    origin: OwnBlob
+    direction: tuple[float, float]
+    gap: float
+    retained_mass_fraction: float
+    expected_mass: float
+
+
+@dataclass(frozen=True)
+class PreyOpportunity:
+    """Best non-split pursuer for one enemy in one search state."""
+
+    origin: OwnBlob | None
+    direction: tuple[float, float]
+    capture_probability: float
+    expected_mass: float
+
+
+@dataclass(frozen=True)
+class SplitPreyOpportunity:
+    """Best split-intercept route for one enemy in one search state."""
+
+    origin: OwnBlob | None
+    direction: tuple[float, float]
+    capture_probability: float
+    expected_mass: float
+
+
+@dataclass(frozen=True)
+class HazardSummary:
+    """One own/enemy pair scan used by admissibility and state value."""
+
+    min_margin: float
+    unavoidable: bool
+    safe_mass: float
+    continuation_probability: float
 
 
 class ThreatAwareRecedingHorizonStrategy:
@@ -586,6 +646,12 @@ class ThreatAwareRecedingHorizonStrategy:
         self._utility_cache.clear()
         self._virus_retention_cache.clear()
         self._risk_envelope_cache.clear()
+        self._node_geometry_cache.clear()
+        self._prey_opportunity_cache.clear()
+        self._split_prey_opportunity_cache.clear()
+        self._virus_opportunity_cache.clear()
+        self._value_gradient_cache.clear()
+        self._hazard_summary_cache.clear()
         self._own_player_id = int(state.me.player_id)
         self._current_round = int(state.round)
         rankings = tuple(int(player_id) for player_id in state.rankings)
@@ -618,7 +684,7 @@ class ThreatAwareRecedingHorizonStrategy:
             last_direction=self.previous_direction,
         )
         foods = tuple(state.visible_food)
-        gradient = self._approximate_value_gradient(
+        gradient = self._cached_value_gradient(
             node=node,
             foods=foods,
             viruses=viruses,
@@ -649,23 +715,25 @@ class ThreatAwareRecedingHorizonStrategy:
         ]
         prey.sort(key=lambda enemy: self._prey_candidate_priority(node, enemy, arena_size))
         for enemy in prey[:2]:
+            opportunity = self._prey_opportunity(node, enemy, arena_size)
             actions.append(
                 Action(
-                    self._intercept_direction(node.primary, enemy),
+                    opportunity.direction,
                     reason="approx_prey",
                 )
             )
+        node_geometry = self._node_geometry(node)
         if foods:
             nearest_food = min(
                 foods,
-                key=lambda food: squared_distance(node.center, food.pos),
+                key=lambda food: squared_distance(node_geometry.center, food.pos),
             )
             actions.append(
                 Action(
                     normalise(
                         (
-                            nearest_food.pos[0] - node.center[0],
-                            nearest_food.pos[1] - node.center[1],
+                            nearest_food.pos[0] - node_geometry.center[0],
+                            nearest_food.pos[1] - node_geometry.center[1],
                         )
                     ),
                     reason="approx_food",
@@ -681,6 +749,7 @@ class ThreatAwareRecedingHorizonStrategy:
                     foods=foods,
                     arena_size=arena_size,
                     value_gradient=gradient,
+                    node_geometry=node_geometry,
                 ),
                 action,
             )
@@ -1170,10 +1239,10 @@ class ThreatAwareRecedingHorizonStrategy:
         before_move = own_blobs
         own_blobs = [self._move_own(blob, direction, arena_size) for blob in own_blobs]
         base_score = self._uses_base_transition_score()
-        blocked_movement = (
-            self._blocked_movement_distance(before_move, own_blobs, direction)
-            if base_score
-            else 0.0
+        movement = self._movement_metrics(
+            before_move,
+            own_blobs,
+            direction,
         )
         enemies = self._move_enemies(node.enemies, own_blobs, arena_size)
 
@@ -1287,9 +1356,13 @@ class ThreatAwareRecedingHorizonStrategy:
                 projected_captures=projected_captures,
                 min_safety_margin=-math.inf,
             )
-            return StepResult(dead, fatal=True)
+            return StepResult(
+                dead,
+                fatal=True,
+                movement_efficiency=movement.efficiency,
+            )
 
-        risk_penalty, min_margin, unavoidable = self._risk_score(
+        risk_penalty, min_margin, unavoidable, hazard_summary = self._risk_analysis(
             own_blobs,
             enemies,
             safety_weight,
@@ -1305,7 +1378,7 @@ class ThreatAwareRecedingHorizonStrategy:
                 arena_size,
                 aggression,
             )
-            score -= blocked_movement * BLOCKED_MOVEMENT_COST
+            score -= movement.blocked_distance * BLOCKED_MOVEMENT_COST
             score -= self._turn_cost(node.last_direction, direction)
             score -= max(0, len(own_blobs) - 1) * 0.65
 
@@ -1327,7 +1400,12 @@ class ThreatAwareRecedingHorizonStrategy:
         # A split is admissible only when every resulting fragment survives the
         # immediate interaction pass and remains outside adversarial split reach.
         unsafe_split = action.split and (split_lost_fragment or min_margin <= 0.0)
-        return StepResult(next_node, fatal=unavoidable or unsafe_split)
+        return StepResult(
+            next_node,
+            fatal=unavoidable or unsafe_split,
+            movement_efficiency=movement.efficiency,
+            hazard_summary=hazard_summary,
+        )
 
     def _resolve_own_viruses(
         self,
@@ -1533,24 +1611,58 @@ class ThreatAwareRecedingHorizonStrategy:
     ) -> float:
         """Return the mass-weighted movement lost when the arena clamps a move."""
 
+        return self._movement_metrics(before, after, direction).blocked_distance
+
+    def _movement_metrics(
+        self,
+        before: list[OwnBlob],
+        after: list[OwnBlob],
+        direction: tuple[float, float],
+    ) -> MovementMetrics:
+        """Measure wall loss and useful progress from one completed own move.
+
+        Replay evaluation used to move every blob once to estimate useful
+        progress and then move it again in the physical transition.  This
+        single pass makes the completed physical move authoritative for both
+        scoring terms.
+        """
+
         if not before:
-            return 0.0
+            return MovementMetrics(blocked_distance=0.0, efficiency=1.0)
         after_by_id = {blob.blob_id: blob for blob in after}
         total_mass = sum(blob.mass for blob in before)
         if total_mass <= EPSILON:
-            return 0.0
+            return MovementMetrics(blocked_distance=0.0, efficiency=1.0)
 
         lost = 0.0
+        expected_useful = 0.0
+        actual_useful = 0.0
+        unit = normalise(direction)
         for blob in before:
             moved = after_by_id.get(blob.blob_id)
             if moved is None:
                 continue
-            intended_dx = direction[0] * player_speed(blob.radius) + blob.eject_vx
-            intended_dy = direction[1] * player_speed(blob.radius) + blob.eject_vy
+            speed = player_speed(blob.radius)
+            intended_dx = unit[0] * speed + blob.eject_vx
+            intended_dy = unit[1] * speed + blob.eject_vy
             intended_distance = math.hypot(intended_dx, intended_dy)
             actual_distance = math.dist(blob.pos, moved.pos)
             lost += blob.mass * max(0.0, intended_distance - actual_distance)
-        return lost / total_mass
+            expected_useful += blob.mass * speed
+            actual_useful += blob.mass * max(
+                0.0,
+                (moved.x - blob.x) * unit[0]
+                + (moved.y - blob.y) * unit[1],
+            )
+        efficiency = (
+            1.0
+            if expected_useful <= EPSILON
+            else _clamp(actual_useful / expected_useful, 0.0, 1.0)
+        )
+        return MovementMetrics(
+            blocked_distance=lost / total_mass,
+            efficiency=efficiency,
+        )
 
     def _apply_attraction(self, blobs: list[OwnBlob], arena_size: float) -> list[OwnBlob]:
         if len(blobs) <= 1:
@@ -2103,6 +2215,21 @@ class ThreatAwareRecedingHorizonStrategy:
         remaining = tuple(enemy_by_key[key] for key in sorted(enemy_by_key))
         return survivors, remaining, score, captures
 
+    def _risk_analysis(
+        self,
+        own_blobs: list[OwnBlob],
+        enemies: tuple[EnemyBlob, ...],
+        safety_weight: float,
+        arena_size: float = ARENA_SIZE,
+    ) -> tuple[float, float, bool, HazardSummary | None]:
+        penalty, margin, unavoidable = self._risk_score(
+            own_blobs,
+            enemies,
+            safety_weight,
+            arena_size,
+        )
+        return penalty, margin, unavoidable, None
+
     def _risk_score(
         self,
         own_blobs: list[OwnBlob],
@@ -2176,7 +2303,25 @@ class ThreatAwareRecedingHorizonStrategy:
     ) -> float:
         """Estimate how much a nearby wall blocks direct retreat from an enemy."""
 
-        away_x, away_y = normalise((own.x - enemy.x, own.y - enemy.y))
+        return self._wall_trap_factor_at(
+            own.x,
+            own.y,
+            own.radius,
+            enemy,
+            arena_size,
+        )
+
+    def _wall_trap_factor_at(
+        self,
+        own_x: float,
+        own_y: float,
+        own_radius: float,
+        enemy: EnemyBlob,
+        arena_size: float,
+    ) -> float:
+        """Numeric wall risk used by both model objects and virtual fragments."""
+
+        away_x, away_y = normalise((own_x - enemy.x, own_y - enemy.y))
         if away_x == 0.0 and away_y == 0.0:
             return 0.0
 
@@ -2186,10 +2331,10 @@ class ThreatAwareRecedingHorizonStrategy:
         # while the outward component keeps unrelated nearby walls irrelevant.
         escape_horizon = 10.0
         walls = (
-            (own.x - own.radius, max(0.0, -away_x)),
-            (arena_size - own.radius - own.x, max(0.0, away_x)),
-            (own.y - own.radius, max(0.0, -away_y)),
-            (arena_size - own.radius - own.y, max(0.0, away_y)),
+            (own_x - own_radius, max(0.0, -away_x)),
+            (arena_size - own_radius - own_x, max(0.0, away_x)),
+            (own_y - own_radius, max(0.0, -away_y)),
+            (arena_size - own_radius - own_y, max(0.0, away_y)),
         )
         blocked = sum(
             outward_component
@@ -2603,6 +2748,44 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         self._risk_envelope_cache: dict[
             int, tuple[tuple[EnemyBlob, ...], tuple[EnemyBlob, ...]]
         ] = {}
+        self._node_geometry_cache: dict[
+            int,
+            tuple[SearchNode, NodeGeometry],
+        ] = {}
+        self._prey_opportunity_cache: dict[
+            tuple[int, tuple[int, int], float],
+            tuple[SearchNode, EnemyBlob, PreyOpportunity],
+        ] = {}
+        self._split_prey_opportunity_cache: dict[
+            tuple[int, tuple[int, int], float],
+            tuple[SearchNode, EnemyBlob, SplitPreyOpportunity],
+        ] = {}
+        self._virus_opportunity_cache: dict[
+            tuple[int, int, float],
+            tuple[SearchNode, VirusModel, VirusOpportunity | None],
+        ] = {}
+        self._value_gradient_cache: dict[
+            tuple[int, int, int, float],
+            tuple[
+                SearchNode,
+                tuple[FoodModel, ...],
+                tuple[VirusModel, ...],
+                tuple[float, float],
+            ],
+        ] = {}
+        self._hazard_summary_cache: dict[
+            tuple[
+                tuple[OwnBlob, ...],
+                tuple[EnemyBlob, ...],
+                float,
+                float,
+            ],
+            HazardSummary,
+        ] = {}
+        self._virus_fragment_layout_cache: dict[
+            tuple[float, int],
+            tuple[tuple[float, float], ...],
+        ] = {}
         self.transition_budget_scale = int(
             os.environ.get("BOT_REPLAY_TRANSITION_BUDGET_SCALE", "6")
         )
@@ -2633,6 +2816,21 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         self._profile_seconds[name] = self._profile_seconds.get(name, 0.0) + elapsed
         self._profile_calls[name] = self._profile_calls.get(name, 0) + 1
 
+    def _record_cache_access(self, name: str, *, hit: bool) -> None:
+        key = f"{name}_{'hit' if hit else 'miss'}"
+        self._profile_calls[key] = self._profile_calls.get(key, 0) + 1
+
+    def _clear_turn_caches(self) -> None:
+        self._utility_cache.clear()
+        self._virus_retention_cache.clear()
+        self._risk_envelope_cache.clear()
+        self._node_geometry_cache.clear()
+        self._prey_opportunity_cache.clear()
+        self._split_prey_opportunity_cache.clear()
+        self._virus_opportunity_cache.clear()
+        self._value_gradient_cache.clear()
+        self._hazard_summary_cache.clear()
+
     def _emit_profile(self, decision: StrategyDecision) -> None:
         if self._profile_every_n <= 0 or self._current_round % self._profile_every_n:
             return
@@ -2657,7 +2855,13 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             f" virus_ms={seconds.get('virus_retention', 0.0) * 1000.0:.3f}"
             f" envelope_ms={seconds.get('risk_envelope', 0.0) * 1000.0:.3f}"
             f" candidate_calls={calls.get('candidate', 0)}"
-            f" step_calls={calls.get('step', 0)}",
+            f" step_calls={calls.get('step', 0)}"
+            f" node_cache={calls.get('node_hit', 0)}/{calls.get('node_miss', 0)}"
+            f" prey_cache={calls.get('prey_hit', 0)}/{calls.get('prey_miss', 0)}"
+            f" split_prey_cache={calls.get('split_prey_hit', 0)}/{calls.get('split_prey_miss', 0)}"
+            f" virus_cache={calls.get('virus_hit', 0)}/{calls.get('virus_miss', 0)}"
+            f" gradient_cache={calls.get('gradient_hit', 0)}/{calls.get('gradient_miss', 0)}"
+            f" hazard_cache={calls.get('hazard_hit', 0)}/{calls.get('hazard_miss', 0)}",
             file=sys.stderr,
             flush=True,
         )
@@ -2709,9 +2913,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         profile_started = perf_counter()
         # Cache the complete value and its expensive virus/future-enemy
         # subproblems across candidate generation and rollout evaluation.
-        self._utility_cache.clear()
-        self._virus_retention_cache.clear()
-        self._risk_envelope_cache.clear()
+        self._clear_turn_caches()
         self._root_proxy_scores = ()
         self._root_candidate_families = {}
         state = context.game.state
@@ -2797,6 +2999,35 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             arena_size=arena_size,
             limit=3 if first_step else 1,
         )
+        prey_opportunities = sorted(
+            (
+                (enemy, self._prey_opportunity(node, enemy, arena_size))
+                for enemy in node.enemies
+                if not enemy.stale_rounds
+            ),
+            key=lambda item: (
+                -item[1].expected_mass,
+                item[0].player_id,
+                item[0].blob_id,
+            ),
+        )
+        prey_actions: list[Action] = []
+        for enemy, opportunity in prey_opportunities[: 3 if first_step else 2]:
+            if opportunity.origin is not None:
+                prey_actions.append(Action(opportunity.direction, reason="prey"))
+            split_opportunity = self._split_prey_opportunity(
+                node,
+                enemy,
+                arena_size,
+            )
+            if split_opportunity.origin is not None:
+                prey_actions.append(
+                    Action(
+                        split_opportunity.direction,
+                        split=True,
+                        reason="split_prey",
+                    )
+                )
 
         # A direct flee vector can point into the arena clamp when a predator
         # approaches from the interior.  Wide tangents stay in the same search
@@ -2821,17 +3052,19 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             [
                 *wide_escape_actions,
                 *virus_actions,
+                *prey_actions,
                 *inherited,
             ]
         )
         gradient_started = perf_counter()
-        value_gradient = self._approximate_value_gradient(
+        value_gradient = self._cached_value_gradient(
             node=node,
             foods=foods,
             viruses=viruses,
             arena_size=arena_size,
         )
         self._record_profile("gradient", perf_counter() - gradient_started)
+        node_geometry = self._node_geometry(node)
         scored = tuple(
             sorted(
                 (
@@ -2843,6 +3076,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                             foods=foods,
                             arena_size=arena_size,
                             value_gradient=value_gradient,
+                            node_geometry=node_geometry,
                         ),
                     )
                     for action in actions
@@ -2886,6 +3120,104 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             return "position"
         return "explore"
 
+    def _node_geometry(self, node: SearchNode) -> NodeGeometry:
+        cached = self._node_geometry_cache.get(id(node))
+        if cached is not None and cached[0] is node:
+            self._record_cache_access("node", hit=True)
+            return cached[1]
+        primary = max(node.own_blobs, key=lambda blob: blob.radius)
+        total_mass = sum(blob.mass for blob in node.own_blobs)
+        center = (
+            primary.pos
+            if total_mass <= EPSILON
+            else (
+                sum(blob.x * blob.mass for blob in node.own_blobs) / total_mass,
+                sum(blob.y * blob.mass for blob in node.own_blobs) / total_mass,
+            )
+        )
+        geometry = NodeGeometry(
+            total_mass=total_mass,
+            center=center,
+            primary=primary,
+        )
+        self._node_geometry_cache[id(node)] = (node, geometry)
+        self._record_cache_access("node", hit=False)
+        return geometry
+
+    def _virus_opportunity(
+        self,
+        node: SearchNode,
+        virus: VirusModel,
+        arena_size: float,
+    ) -> VirusOpportunity | None:
+        """Return the best route to a virus, shared by every evaluator."""
+
+        cache_key = (id(node), virus.virus_id, arena_size)
+        cached = self._virus_opportunity_cache.get(cache_key)
+        if cached is not None and cached[0] is node and cached[1] is virus:
+            self._record_cache_access("virus", hit=True)
+            return cached[2]
+
+        best: VirusOpportunity | None = None
+        for origin in node.own_blobs:
+            if not self._can_still_consume_virus_at_contact(origin, virus):
+                continue
+            gap = max(0.0, math.dist(origin.pos, virus.pos) - origin.radius)
+            retention = self._virus_retained_mass_fraction(
+                node,
+                origin,
+                virus,
+                arena_size,
+            )
+            opportunity = VirusOpportunity(
+                origin=origin,
+                direction=normalise(
+                    (virus.pos[0] - origin.x, virus.pos[1] - origin.y)
+                ),
+                gap=gap,
+                retained_mass_fraction=retention,
+                expected_mass=(
+                    virus.radius
+                    * virus.radius
+                    * retention
+                    * math.exp(-gap / self._VIRUS_POTENTIAL_HORIZON)
+                ),
+            )
+            if best is None or opportunity.expected_mass > best.expected_mass:
+                best = opportunity
+
+        self._virus_opportunity_cache[cache_key] = (node, virus, best)
+        self._record_cache_access("virus", hit=False)
+        return best
+
+    def _cached_value_gradient(
+        self,
+        *,
+        node: SearchNode,
+        foods: tuple[FoodModel, ...],
+        viruses: tuple[VirusModel, ...],
+        arena_size: float,
+    ) -> tuple[float, float]:
+        cache_key = (id(node), id(foods), id(viruses), arena_size)
+        cached = self._value_gradient_cache.get(cache_key)
+        if (
+            cached is not None
+            and cached[0] is node
+            and cached[1] is foods
+            and cached[2] is viruses
+        ):
+            self._record_cache_access("gradient", hit=True)
+            return cached[3]
+        gradient = self._approximate_value_gradient(
+            node=node,
+            foods=foods,
+            viruses=viruses,
+            arena_size=arena_size,
+        )
+        self._value_gradient_cache[cache_key] = (node, foods, viruses, gradient)
+        self._record_cache_access("gradient", hit=False)
+        return gradient
+
     def _approximate_value_gradient(
         self,
         *,
@@ -2927,12 +3259,20 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 gradient_x += away[0] * weight
                 gradient_y += away[1] * weight
 
-        center = node.center
+        geometry = self._node_geometry(node)
         for food in foods:
             if food.food_id in node.eaten_food_ids:
                 continue
-            direction = normalise((food.pos[0] - center[0], food.pos[1] - center[1]))
-            gap = max(0.0, math.dist(center, food.pos) - node.primary.radius)
+            direction = normalise(
+                (
+                    food.pos[0] - geometry.center[0],
+                    food.pos[1] - geometry.center[1],
+                )
+            )
+            gap = max(
+                0.0,
+                math.dist(geometry.center, food.pos) - geometry.primary.radius,
+            )
             weight = (
                 100.0
                 * FOOD_RADIUS
@@ -2946,33 +3286,15 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         for virus in viruses:
             if virus.virus_id in node.consumed_virus_ids:
                 continue
-            best: tuple[float, OwnBlob] | None = None
-            for origin in node.own_blobs:
-                if not self._can_still_consume_virus_at_contact(origin, virus):
-                    continue
-                gap = max(0.0, math.dist(origin.pos, virus.pos) - origin.radius)
-                retention = self._virus_retained_mass_fraction(
-                    node,
-                    origin,
-                    virus,
-                    arena_size,
+            opportunity = self._virus_opportunity(node, virus, arena_size)
+            if opportunity is not None:
+                weight = (
+                    100.0
+                    * opportunity.expected_mass
+                    / self._VIRUS_POTENTIAL_HORIZON
                 )
-                value = (
-                    virus.radius
-                    * virus.radius
-                    * retention
-                    * math.exp(-gap / self._VIRUS_POTENTIAL_HORIZON)
-                )
-                if best is None or value > best[0]:
-                    best = (value, origin)
-            if best is not None:
-                value, origin = best
-                direction = normalise(
-                    (virus.pos[0] - origin.x, virus.pos[1] - origin.y)
-                )
-                weight = 100.0 * value / self._VIRUS_POTENTIAL_HORIZON
-                gradient_x += direction[0] * weight
-                gradient_y += direction[1] * weight
+                gradient_x += opportunity.direction[0] * weight
+                gradient_y += opportunity.direction[1] * weight
 
         for enemy in node.enemies:
             if enemy.stale_rounds:
@@ -2982,14 +3304,13 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 for own in node.own_blobs
             ):
                 continue
-            expected_mass = self._prey_expected_mass(node, enemy, arena_size)
-            direction = normalise((enemy.x - center[0], enemy.y - center[1]))
+            opportunity = self._prey_opportunity(node, enemy, arena_size)
             # Capturing a neighbouring rival removes both its mass and its
             # future scoreboard pressure, so it belongs in the same gradient
             # as food and virus growth rather than a separate attack mode.
-            weight = 100.0 * expected_mass / 6.0
-            gradient_x += direction[0] * weight
-            gradient_y += direction[1] * weight
+            weight = 100.0 * opportunity.expected_mass / 6.0
+            gradient_x += opportunity.direction[0] * weight
+            gradient_y += opportunity.direction[1] * weight
 
         return gradient_x, gradient_y
 
@@ -3001,11 +3322,13 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         foods: tuple[FoodModel, ...],
         arena_size: float,
         value_gradient: tuple[float, float],
+        node_geometry: NodeGeometry | None = None,
     ) -> float:
         """Project the shared state-value gradient through one cheap action."""
 
         direction = normalise(action.direction)
-        total_mass = max(node.total_mass, EPSILON)
+        geometry = node_geometry or self._node_geometry(node)
+        total_mass = max(geometry.total_mass, EPSILON)
         displacement_x = 0.0
         displacement_y = 0.0
         for own in node.own_blobs:
@@ -3021,17 +3344,26 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         if not action.split:
             return value
 
-        capture_bonus = max(
-            (
-                100.0
-                * enemy.mass
-                * (1.0 + self._rival_values.get(enemy.player_id, 0.0))
-                for enemy in node.enemies
-                if not enemy.stale_rounds
-                and self._split_can_capture(node, enemy, direction)
-            ),
-            default=0.0,
-        )
+        capture_bonus = 0.0
+        for enemy in node.enemies:
+            if enemy.stale_rounds:
+                continue
+            opportunity = self._split_prey_opportunity(
+                node,
+                enemy,
+                arena_size,
+            )
+            if opportunity.origin is None:
+                continue
+            alignment = max(
+                0.0,
+                direction[0] * opportunity.direction[0]
+                + direction[1] * opportunity.direction[1],
+            )
+            capture_bonus = max(
+                capture_bonus,
+                100.0 * opportunity.expected_mass * alignment**4,
+            )
         food_bonus = 0.0
         for food in foods:
             if food.food_id in node.eaten_food_ids:
@@ -3067,11 +3399,6 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             arena_size=arena_size,
             safety_weight=safety_weight,
         )
-        movement_efficiency = self._movement_efficiency(
-            node.own_blobs,
-            action.direction,
-            arena_size,
-        )
         physics_started = perf_counter()
         result = super()._step(
             node=node,
@@ -3095,6 +3422,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             viruses=viruses,
             arena_size=arena_size,
             safety_weight=safety_weight,
+            hazard_summary=result.hazard_summary,
         )
         direction = normalise(action.direction)
         shaped_node = replace(
@@ -3103,7 +3431,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 node.score
                 + after
                 - before
-                - (1.0 - movement_efficiency) * 2.0
+                - (1.0 - result.movement_efficiency) * 2.0
                 - self._turn_cost(node.last_direction, direction) * 0.6
             ),
         )
@@ -3126,6 +3454,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         viruses,
         arena_size: float,
         safety_weight: float,
+        hazard_summary: HazardSummary | None = None,
     ) -> float:
         profile_started = perf_counter()
         key = (
@@ -3147,6 +3476,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             viruses=viruses,
             arena_size=arena_size,
             safety_weight=safety_weight,
+            hazard_summary=hazard_summary,
         )
         self._utility_cache[key] = value
         self._record_profile("utility", perf_counter() - profile_started)
@@ -3160,49 +3490,23 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         viruses,
         arena_size: float,
         safety_weight: float,
+        hazard_summary: HazardSummary | None = None,
     ) -> float:
         """Return one mass-normalised utility shared by every action type."""
         if not node.own_blobs:
             return -1_000_000.0
 
-        risk_enemies = self._risk_enemies(node.enemies)
-        survival_midpoint = (
-            self.survival_midpoint_base
-            + self.survival_midpoint_scale * safety_weight
+        hazard = hazard_summary or self._hazard_summary(
+            node.own_blobs,
+            node.enemies,
+            safety_weight,
+            arena_size,
         )
-        safe_mass = 0.0
-        survival_probabilities: list[float] = []
-        for own in node.own_blobs:
-            survival = 1.0
-            for enemy in risk_enemies:
-                if not can_eat_player_blob(enemy.radius, own.radius):
-                    continue
-                danger_radius = enemy.radius
-                if _can_split_eat(enemy.radius, own.radius):
-                    danger_radius = max(
-                        danger_radius,
-                        _split_attack_reach(enemy.radius),
-                    )
-                margin = (
-                    math.dist(own.pos, enemy.pos)
-                    - danger_radius
-                    - enemy.stale_rounds * 0.35
-                    - self._wall_trap_factor(own, enemy, arena_size) * 4.0
-                )
-                scaled = _clamp(
-                    (margin - survival_midpoint)
-                    / max(self.survival_temperature, 0.1),
-                    -40.0,
-                    40.0,
-                )
-                survival = min(survival, 1.0 / (1.0 + math.exp(-scaled)))
-            survival_probabilities.append(survival)
-            safe_mass += own.mass * survival
-
+        safe_mass = hazard.safe_mass
         # Fragment outcomes are correlated: one predator can sweep several
         # pieces in sequence.  An independent-union probability would make a
         # 16-way split artificially look almost certain to survive.
-        continuation_probability = max(survival_probabilities, default=0.0)
+        continuation_probability = hazard.continuation_probability
 
         opportunities: list[float] = []
         for food in foods:
@@ -3219,30 +3523,11 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         for virus in viruses:
             if virus.virus_id in node.consumed_virus_ids:
                 continue
-            candidates = [
-                own
-                for own in node.own_blobs
-                if self._can_still_consume_virus_at_contact(own, virus)
-            ]
-            virus_values: list[float] = []
-            for origin in candidates:
-                gap = max(0.0, math.dist(origin.pos, virus.pos) - origin.radius)
-                retention = self._virus_retained_mass_fraction(
-                    node,
-                    origin,
-                    virus,
-                    arena_size,
-                )
-                virus_values.append(
-                    virus.radius
-                    * virus.radius
-                    * retention
-                    * math.exp(-gap / self._VIRUS_POTENTIAL_HORIZON)
-                )
-            if virus_values:
+            opportunity = self._virus_opportunity(node, virus, arena_size)
+            if opportunity is not None:
                 # One virus is one resource even when several of our blobs can
                 # reach it.  Count the best acquisition route, not every origin.
-                opportunities.append(max(virus_values))
+                opportunities.append(opportunity.expected_mass)
 
         for enemy in node.enemies:
             if enemy.stale_rounds:
@@ -3280,7 +3565,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
     ) -> tuple[float, ...]:
         return (
             -self._prey_expected_mass(node, enemy, arena_size),
-            squared_distance(node.center, enemy.pos),
+            squared_distance(self._node_geometry(node).center, enemy.pos),
             enemy.player_id,
             enemy.blob_id,
         )
@@ -3345,16 +3630,168 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         enemy: EnemyBlob,
         arena_size: float,
     ) -> float:
-        capture_probability = max(
-            (
-                self._prey_capture_probability(own, enemy, arena_size)
-                for own in node.own_blobs
-                if can_eat_player_blob(own.radius, enemy.radius)
-            ),
-            default=0.0,
+        return self._prey_opportunity(node, enemy, arena_size).expected_mass
+
+    def _prey_opportunity(
+        self,
+        node: SearchNode,
+        enemy: EnemyBlob,
+        arena_size: float,
+    ) -> PreyOpportunity:
+        cache_key = (id(node), enemy.key, arena_size)
+        cached = self._prey_opportunity_cache.get(cache_key)
+        if cached is not None and cached[0] is node and cached[1] is enemy:
+            self._record_cache_access("prey", hit=True)
+            return cached[2]
+
+        best_origin: OwnBlob | None = None
+        capture_probability = 0.0
+        for own in node.own_blobs:
+            if not can_eat_player_blob(own.radius, enemy.radius):
+                continue
+            probability = self._prey_capture_probability(own, enemy, arena_size)
+            if best_origin is None or probability > capture_probability:
+                best_origin = own
+                capture_probability = probability
+        direction = (
+            self._intercept_direction(best_origin, enemy)
+            if best_origin is not None
+            else (0.0, 0.0)
         )
         rival_value = self._rival_values.get(enemy.player_id, 0.0)
-        return capture_probability * enemy.mass * (1.0 + rival_value)
+        opportunity = PreyOpportunity(
+            origin=best_origin,
+            direction=direction,
+            capture_probability=capture_probability,
+            expected_mass=(
+                capture_probability * enemy.mass * (1.0 + rival_value)
+            ),
+        )
+        self._prey_opportunity_cache[cache_key] = (node, enemy, opportunity)
+        self._record_cache_access("prey", hit=False)
+        return opportunity
+
+    def _split_prey_opportunity(
+        self,
+        node: SearchNode,
+        enemy: EnemyBlob,
+        arena_size: float,
+    ) -> SplitPreyOpportunity:
+        cache_key = (id(node), enemy.key, arena_size)
+        cached = self._split_prey_opportunity_cache.get(cache_key)
+        if cached is not None and cached[0] is node and cached[1] is enemy:
+            self._record_cache_access("split_prey", hit=True)
+            return cached[2]
+
+        best_origin: OwnBlob | None = None
+        best_direction = (0.0, 0.0)
+        capture_probability = 0.0
+        if len(node.own_blobs) < MAX_BLOB_COUNT:
+            for own in node.own_blobs:
+                if own.mass < SPLIT_MIN_MASS:
+                    continue
+                child_radius = own.radius / SQRT2
+                if not can_eat_player_blob(child_radius, enemy.radius):
+                    continue
+                direction = self._intercept_direction(own, enemy)
+                probability = self._split_prey_capture_probability(
+                    own,
+                    enemy,
+                    direction,
+                    arena_size,
+                )
+                if best_origin is None or probability > capture_probability:
+                    best_origin = own
+                    best_direction = direction
+                    capture_probability = probability
+
+        rival_value = self._rival_values.get(enemy.player_id, 0.0)
+        opportunity = SplitPreyOpportunity(
+            origin=best_origin,
+            direction=best_direction,
+            capture_probability=capture_probability,
+            expected_mass=(
+                capture_probability * enemy.mass * (1.0 + rival_value)
+            ),
+        )
+        self._split_prey_opportunity_cache[cache_key] = (
+            node,
+            enemy,
+            opportunity,
+        )
+        self._record_cache_access("split_prey", hit=False)
+        return opportunity
+
+    def _split_prey_capture_probability(
+        self,
+        own: OwnBlob,
+        enemy: EnemyBlob,
+        direction: tuple[float, float],
+        arena_size: float,
+    ) -> float:
+        """Estimate a split intercept from the same clamped movement model."""
+
+        unit = normalise(direction)
+        child_radius = own.radius / SQRT2
+        child = OwnBlob(
+            blob_id=-1,
+            x=_clamp(
+                own.x + unit[0] * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
+                child_radius,
+                arena_size - child_radius,
+            ),
+            y=_clamp(
+                own.y + unit[1] * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
+                child_radius,
+                arena_size - child_radius,
+            ),
+            radius=child_radius,
+            merge_cooldown=SPLIT_COOLDOWN_FRAMES,
+            eject_vx=unit[0] * SPLIT_EJECT_SPEED,
+            eject_vy=unit[1] * SPLIT_EJECT_SPEED,
+        )
+        initial_gap = max(
+            0.0,
+            math.dist(child.pos, enemy.pos) - child.radius,
+        )
+        moved_child = self._move_own(child, unit, arena_size)
+        observed = normalise(enemy.direction)
+        flee = normalise(
+            (enemy.x - moved_child.x, enemy.y - moved_child.y)
+        )
+        flee_direction = normalise(
+            (
+                flee[0] * 0.62 + observed[0] * 0.38,
+                flee[1] * 0.62 + observed[1] * 0.38,
+            )
+        )
+        enemy_speed = player_speed(enemy.radius)
+        moved_enemy = (
+            _clamp(
+                enemy.x + flee_direction[0] * enemy_speed,
+                enemy.radius,
+                arena_size - enemy.radius,
+            ),
+            _clamp(
+                enemy.y + flee_direction[1] * enemy_speed,
+                enemy.radius,
+                arena_size - enemy.radius,
+            ),
+        )
+        next_gap = max(
+            0.0,
+            math.dist(moved_child.pos, moved_enemy) - child.radius,
+        )
+        if next_gap <= EPSILON:
+            return 1.0
+        closing = initial_gap - next_gap
+        temperature = self._CAPTURE_CLOSING_TEMPERATURE
+        scaled = _clamp(closing / temperature, -40.0, 40.0)
+        effective_closing = temperature * math.log1p(math.exp(scaled))
+        return math.exp(
+            -next_gap
+            / max(effective_closing, EPSILON)
+        )
 
     def _prey_capture_probability(
         self,
@@ -3418,20 +3855,9 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         virus approach.
         """
         unit = normalise(direction)
-        expected = 0.0
-        useful = 0.0
-        for blob in own_blobs:
-            speed = player_speed(blob.radius)
-            moved = self._move_own(blob, unit, arena_size)
-            expected += blob.mass * speed
-            useful += blob.mass * max(
-                0.0,
-                (moved.x - blob.x) * unit[0]
-                + (moved.y - blob.y) * unit[1],
-            )
-        if expected <= EPSILON:
-            return 1.0
-        return _clamp(useful / expected, 0.0, 1.0)
+        before = list(own_blobs)
+        after = [self._move_own(blob, unit, arena_size) for blob in before]
+        return self._movement_metrics(before, after, unit).efficiency
 
     def _virus_retained_mass_fraction(
         self,
@@ -3501,19 +3927,34 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         )
         return risk_enemies
 
-    def _risk_score(
+    def _hazard_summary(
         self,
-        own_blobs: list[OwnBlob],
+        own_blobs: tuple[OwnBlob, ...] | list[OwnBlob],
         enemies: tuple[EnemyBlob, ...],
         safety_weight: float,
-        arena_size: float = ARENA_SIZE,
-    ) -> tuple[float, float, bool]:
-        """Compute only split admissibility; utility prices continuous risk."""
+        arena_size: float,
+    ) -> HazardSummary:
+        """Evaluate each own/enemy geometry once for one physical state."""
 
+        own_tuple = own_blobs if isinstance(own_blobs, tuple) else tuple(own_blobs)
+        cache_key = (own_tuple, enemies, arena_size, safety_weight)
+        cached = self._hazard_summary_cache.get(cache_key)
+        if cached is not None:
+            self._record_cache_access("hazard", hit=True)
+            return cached
+
+        survival_midpoint = (
+            self.survival_midpoint_base
+            + self.survival_midpoint_scale * safety_weight
+        )
+        temperature = max(self.survival_temperature, 0.1)
         min_margin = math.inf
         endangered_blob_ids: set[int] = set()
+        safe_mass = 0.0
+        survival_probabilities: list[float] = []
         risk_enemies = self._risk_enemies(enemies)
-        for own in own_blobs:
+        for own in own_tuple:
+            survival = 1.0
             for enemy in risk_enemies:
                 if not can_eat_player_blob(enemy.radius, own.radius):
                     continue
@@ -3523,12 +3964,68 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                         danger_radius,
                         _split_attack_reach(enemy.radius),
                     )
-                margin = math.dist(own.pos, enemy.pos) - danger_radius
-                min_margin = min(min_margin, margin)
-                if margin <= 0.0 and enemy.blob_id >= 0:
+                raw_margin = math.dist(own.pos, enemy.pos) - danger_radius
+                min_margin = min(min_margin, raw_margin)
+                if raw_margin <= 0.0 and enemy.blob_id >= 0:
                     endangered_blob_ids.add(own.blob_id)
-        unavoidable = bool(own_blobs) and len(endangered_blob_ids) == len(own_blobs)
-        return 0.0, min_margin, unavoidable
+                utility_margin = (
+                    raw_margin
+                    - enemy.stale_rounds * 0.35
+                    - self._wall_trap_factor(own, enemy, arena_size) * 4.0
+                )
+                scaled = _clamp(
+                    (utility_margin - survival_midpoint) / temperature,
+                    -40.0,
+                    40.0,
+                )
+                survival = min(survival, 1.0 / (1.0 + math.exp(-scaled)))
+            survival_probabilities.append(survival)
+            safe_mass += own.mass * survival
+
+        summary = HazardSummary(
+            min_margin=min_margin,
+            unavoidable=(
+                bool(own_tuple)
+                and len(endangered_blob_ids) == len(own_tuple)
+            ),
+            safe_mass=safe_mass,
+            continuation_probability=max(survival_probabilities, default=0.0),
+        )
+        self._hazard_summary_cache[cache_key] = summary
+        self._record_cache_access("hazard", hit=False)
+        return summary
+
+    def _risk_analysis(
+        self,
+        own_blobs: list[OwnBlob],
+        enemies: tuple[EnemyBlob, ...],
+        safety_weight: float,
+        arena_size: float = ARENA_SIZE,
+    ) -> tuple[float, float, bool, HazardSummary]:
+        summary = self._hazard_summary(
+            own_blobs,
+            enemies,
+            safety_weight,
+            arena_size,
+        )
+        return 0.0, summary.min_margin, summary.unavoidable, summary
+
+    def _risk_score(
+        self,
+        own_blobs: list[OwnBlob],
+        enemies: tuple[EnemyBlob, ...],
+        safety_weight: float,
+        arena_size: float = ARENA_SIZE,
+    ) -> tuple[float, float, bool]:
+        """Compute only split admissibility; utility prices continuous risk."""
+
+        summary = self._hazard_summary(
+            own_blobs,
+            enemies,
+            safety_weight,
+            arena_size,
+        )
+        return 0.0, summary.min_margin, summary.unavoidable
 
     def _post_virus_retained_mass_fraction(
         self,
@@ -3567,33 +4064,56 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         )
         if not risk_enemies:
             return 1.0
-        fragments = self._virus_replacement_fragments(
-            origin=origin,
-            piece_radius=piece_radius,
-            piece_count=piece_count,
-            arena_size=arena_size,
-            occupied_ids={blob.blob_id for blob in own_blobs},
-        )
+        layout_key = (piece_radius, piece_count)
+        offsets = self._virus_fragment_layout_cache.get(layout_key)
+        if offsets is None:
+            offsets = virus_replacement_positions(
+                center_x=0.0,
+                center_y=0.0,
+                piece_radius=piece_radius,
+                piece_count=piece_count,
+                overlap_epsilon=SAME_PLAYER_OVERLAP_EPSILON,
+            )
+            self._virus_fragment_layout_cache[layout_key] = offsets
         post_blobs = [
-            blob for blob in own_blobs if blob.blob_id != origin.blob_id
-        ] + fragments
+            (blob.x, blob.y, blob.radius, blob.mass)
+            for blob in own_blobs
+            if blob.blob_id != origin.blob_id
+        ]
+        post_blobs.extend(
+            (
+                _clamp(
+                    origin.x + offset_x,
+                    piece_radius,
+                    arena_size - piece_radius,
+                ),
+                _clamp(
+                    origin.y + offset_y,
+                    piece_radius,
+                    arena_size - piece_radius,
+                ),
+                piece_radius,
+                piece_radius * piece_radius,
+            )
+            for offset_x, offset_y in offsets
+        )
         if not post_blobs:
             return 0.0
 
         retained_mass = 0.0
-        for blob in post_blobs:
+        for blob_x, blob_y, blob_radius, blob_mass in post_blobs:
             retention = 1.0
             for enemy in risk_enemies:
-                if not can_eat_player_blob(enemy.radius, blob.radius):
+                if not can_eat_player_blob(enemy.radius, blob_radius):
                     continue
                 danger_radius = enemy.radius
-                if _can_split_eat(enemy.radius, blob.radius):
+                if _can_split_eat(enemy.radius, blob_radius):
                     danger_radius = max(
                         danger_radius,
                         _split_attack_reach(enemy.radius),
                     )
                 margin = (
-                    math.dist(blob.pos, enemy.pos)
+                    math.hypot(blob_x - enemy.x, blob_y - enemy.y)
                     - danger_radius
                     - enemy.stale_rounds * 0.35
                 )
@@ -3603,14 +4123,20 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 pressure = _clamp((8.0 - margin) / 8.0, 0.0, 1.0)
                 if pressure <= 0.0:
                     continue
-                wall_trap = self._wall_trap_factor(blob, enemy, arena_size)
+                wall_trap = self._wall_trap_factor_at(
+                    blob_x,
+                    blob_y,
+                    blob_radius,
+                    enemy,
+                    arena_size,
+                )
                 predator_retention = 1.0 - pressure * (
                     0.55 + 0.45 * wall_trap
                 )
                 retention = min(retention, predator_retention)
-            retained_mass += blob.mass * retention
+            retained_mass += blob_mass * retention
         return _clamp(
-            retained_mass / max(sum(blob.mass for blob in post_blobs), EPSILON),
+            retained_mass / max(sum(blob[3] for blob in post_blobs), EPSILON),
             0.0,
             1.0,
         )
@@ -3627,30 +4153,15 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         for virus in viruses:
             if virus.virus_id in node.consumed_virus_ids:
                 continue
-            candidates = [
-                blob
-                for blob in node.own_blobs
-                if self._can_still_consume_virus_at_contact(blob, virus)
-            ]
-            if not candidates:
+            opportunity = self._virus_opportunity(node, virus, arena_size)
+            if opportunity is None:
                 continue
-            origin = min(
-                candidates,
-                key=lambda blob: squared_distance(blob.pos, virus.pos),
-            )
-            retained_mass_fraction = self._virus_retained_mass_fraction(
-                node, origin, virus, arena_size
-            )
-            gap = max(0.0, math.dist(origin.pos, virus.pos) - origin.radius)
-            direction = normalise(
-                (virus.pos[0] - origin.x, virus.pos[1] - origin.y)
-            )
             scored.append(
                 (
-                    -retained_mass_fraction,
-                    gap,
+                    -opportunity.expected_mass,
+                    opportunity.gap,
                     virus.virus_id,
-                    Action(direction, reason="virus_harvest"),
+                    Action(opportunity.direction, reason="virus_harvest"),
                 )
             )
         scored.sort(key=lambda item: (item[0], item[1], item[2]))
