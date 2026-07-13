@@ -446,7 +446,6 @@ def test_threat_aware_receding_horizon_resolves_predator_growth_cascade() -> Non
     survivors, enemies, score, captures = strategy._resolve_interactions(
         [small, larger],
         (predator,),
-        set(),
     )
 
     assert not survivors

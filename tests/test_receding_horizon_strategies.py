@@ -23,6 +23,7 @@ from strategies.receding_horizon import (  # noqa: E402
     OwnBlob,
     ReplayDominanceStrategy,
     SearchNode,
+    StepResult,
 )
 from strategies.registry import (  # noqa: E402
     available_strategy_names,
@@ -71,11 +72,25 @@ def test_replay_dominance_uses_blob_scaled_deterministic_transition_budget() -> 
     strategy = ReplayDominanceStrategy()
 
     assert strategy._uses_compute_time_bank() is True
+    assert strategy.depth == 1
+    assert strategy.width == 1
     assert strategy._transition_budget(1) == 6
     assert strategy._transition_budget(2) == 3
     assert strategy._transition_budget(4) == 2
     assert strategy._transition_budget(16) == 2
     assert strategy._transition_budget(1, 12) == 2
+
+
+def test_replay_dominance_preserves_explicit_depth_and_width_environment(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("BOT_RECEDING_HORIZON_DEPTH", "4")
+    monkeypatch.setenv("BOT_RECEDING_HORIZON_WIDTH", "3")
+
+    strategy = ReplayDominanceStrategy()
+
+    assert strategy.depth == 4
+    assert strategy.width == 3
 
 
 def test_replay_dominance_stops_before_generating_an_unusable_depth() -> None:
@@ -122,6 +137,53 @@ def test_enemy_memory_threat_model_includes_future_virus_fragments() -> None:
     assert strategy._stale_enemy_can_threaten_transition(
         sweeping_stale, (own,), (virus,)
     )
+
+
+def test_enemy_memory_does_not_predict_track_replaced_by_visible_blob(
+    monkeypatch,
+) -> None:
+    strategy = ReplayDominanceStrategy()
+    strategy.enemy_tracks[(1, 0)] = EnemyTrack(
+        player_id=1,
+        blob_id=0,
+        x=10.0,
+        y=10.0,
+        radius=2.0,
+        direction=(1.0, 0.0),
+        last_seen_round=4,
+    )
+    visible = SimpleNamespace(
+        player_id=1,
+        blob_id=0,
+        pos=(12.0, 10.0),
+        radius=2.0,
+        merge_cooldown=0,
+    )
+    context = SimpleNamespace(
+        game=SimpleNamespace(
+            state=SimpleNamespace(
+                round=5,
+                visible_blobs=(visible,),
+                view_center=(30.0, 30.0),
+                vision_size=60.0,
+            )
+        )
+    )
+
+    def fail_if_predicted(_radius):
+        raise AssertionError("visible track prediction must be skipped")
+
+    monkeypatch.setattr(
+        "strategies.receding_horizon.player_speed",
+        fail_if_predicted,
+    )
+    enemies = strategy._update_enemy_memory(
+        context,
+        (OwnBlob(blob_id=0, x=30.0, y=30.0, radius=1.0),),
+        60.0,
+    )
+
+    assert enemies[0].pos == visible.pos
 
 
 def test_replay_dominance_does_not_reorder_by_semantic_family() -> None:
@@ -235,7 +297,6 @@ def test_replay_dominance_continues_safe_virus_chain_when_late_and_fragmented() 
         viruses=(virus,),
         arena_size=60.0,
         first_step=True,
-        allow_split=False,
     )
 
     assert any(action.reason == "virus_harvest" for action in actions)
@@ -269,7 +330,6 @@ def test_replay_dominance_evaluates_scoreboard_rival_before_ordinary_actions() -
         viruses=(),
         arena_size=60.0,
         first_step=True,
-        allow_split=True,
     )
 
     assert any(action.reason in {"prey", "split_prey"} for action in actions[:3])
@@ -303,8 +363,6 @@ def test_replay_dominance_keeps_safe_split_candidates_in_late_lead() -> None:
         viruses=(),
         arena_size=60.0,
         first_step=True,
-        # The base policy passes False for a late top-two player.
-        allow_split=False,
     )
 
     assert any(action.reason == "split_prey" for action in actions)
@@ -314,8 +372,161 @@ def test_replay_dominance_scores_wall_clamp_by_actual_movement() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
     own = OwnBlob(blob_id=0, x=2.0, y=10.0, radius=2.0)
 
-    assert strategy._movement_efficiency((own,), (-1.0, 0.0), 60.0) == 0.0
-    assert strategy._movement_efficiency((own,), (1.0, 0.0), 60.0) == 1.0
+    blocked = strategy._move_own_blobs((own,), (-1.0, 0.0), 60.0)
+    unblocked = strategy._move_own_blobs((own,), (1.0, 0.0), 60.0)
+
+    assert blocked.efficiency == 0.0
+    assert unblocked.efficiency == 1.0
+
+
+def test_replay_step_moves_each_own_blob_once(monkeypatch) -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    node = SearchNode(
+        own_blobs=(OwnBlob(blob_id=0, x=20.0, y=20.0, radius=2.0),),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+    original = strategy._move_own
+    calls = 0
+
+    def counted_move(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(strategy, "_move_own", counted_move)
+    strategy._step(
+        node=node,
+        action=Action((1.0, 0.0), reason="keep"),
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+        safety_weight=1.3,
+        aggression=1.0,
+    )
+
+    assert calls == len(node.own_blobs)
+
+
+def test_replay_reuses_each_transition_hazard_for_child_utility(
+    monkeypatch,
+) -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=8)
+    own = SimpleNamespace(
+        blob_id=0,
+        pos=(20.0, 20.0),
+        radius=1.0,
+        merge_cooldown=0,
+    )
+    state = SimpleNamespace(
+        round=100,
+        max_rounds=1400,
+        rankings=[0, 1, 2, 3, 4, 5, 6, 7],
+        me=SimpleNamespace(player_id=0, blobs={0: own}),
+        map=SimpleNamespace(size=60.0),
+        visible_blobs=(),
+        visible_food=(FoodModel(food_id=1, pos=(22.0, 20.0)),),
+        visible_viruses=(),
+        view_center=(20.0, 20.0),
+        vision_size=40.0,
+    )
+    context = SimpleNamespace(
+        game=SimpleNamespace(state=state),
+        query=SimpleNamespace(update={}),
+    )
+    original = strategy._hazard_summary
+    calls = 0
+
+    def counted_hazard(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(strategy, "_hazard_summary", counted_hazard)
+    decision = strategy._choose(context, deadline=float("inf"), turn_budget=1.0)
+
+    # The parent value needs one hazard summary. Each exact transition then
+    # computes its child summary once and passes it into child utility.
+    assert calls == 1 + decision.diagnostics["transitions_evaluated"]
+
+
+def test_replay_candidate_analysis_reuses_virus_and_prey_values() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    strategy._profile_active = True
+    strategy._rival_values = {1: 1.0}
+    own = OwnBlob(blob_id=0, x=20.0, y=20.0, radius=3.0)
+    prey = EnemyBlob(player_id=1, blob_id=0, x=24.0, y=20.0, radius=1.0)
+    virus = VirusModel(virus_id=7, pos=(22.0, 20.0), radius=1.5)
+    node = SearchNode(
+        own_blobs=(own,),
+        enemies=(prey,),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+
+    strategy._candidate_actions(
+        node=node,
+        foods=(),
+        food_targets=(),
+        viruses=(virus,),
+        arena_size=60.0,
+        first_step=True,
+    )
+
+    counts = strategy._profile_counts
+    assert counts["virus_miss"] == 1
+    assert counts["virus_hit"] >= 1
+    assert counts["prey_miss"] == 1
+    assert counts["prey_hit"] >= 1
+
+
+def test_disabled_replay_profile_does_not_read_inner_timers(monkeypatch) -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    strategy._profile_every_n = 0
+    strategy._profile_active = False
+    node = SearchNode(
+        own_blobs=(OwnBlob(blob_id=0, x=20.0, y=20.0, radius=2.0),),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+
+    def unexpected_timer():
+        raise AssertionError("disabled inner profiling must not read the clock")
+
+    monkeypatch.setattr(
+        "strategies.receding_horizon.perf_counter",
+        unexpected_timer,
+    )
+    strategy._candidate_actions(
+        node=node,
+        foods=(),
+        food_targets=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+    )
+    strategy._step(
+        node=node,
+        action=Action((1.0, 0.0), reason="keep"),
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+        safety_weight=1.3,
+        aggression=1.0,
+    )
 
 
 def test_replay_dominance_prices_prey_by_clamped_closing_speed() -> None:
@@ -441,7 +652,7 @@ def test_replay_dominance_merges_before_virus_like_engine_failure_replay() -> No
     expected_mass = sum(blob.mass for blob in own_blobs) + virus.radius**2
     stabilised = strategy._stabilise_own_blobs(own_blobs, 60.0)
 
-    after, _, _, _ = strategy._resolve_own_viruses(
+    after, _, _ = strategy._resolve_own_viruses(
         own_blobs=stabilised,
         viruses=(virus,),
         consumed_virus_ids=consumed,
@@ -522,18 +733,30 @@ def test_replay_dominance_penalises_wall_only_when_predator_blocks_retreat() -> 
         radius=3.0,
     )
 
-    safe_edge = strategy._position_value(
-        [edge_blob], (), (), set(), 60.0, 1.0
-    )
-    trapped_edge = strategy._position_value(
-        [edge_blob], (predator,), (), set(), 60.0, 1.0
-    )
-    open_center = strategy._position_value(
-        [center_blob], (predator,), (), set(), 60.0, 1.0
-    )
+    def utility(own: OwnBlob, enemies: tuple[EnemyBlob, ...]) -> float:
+        node = SearchNode(
+            own_blobs=(own,),
+            enemies=enemies,
+            score=0.0,
+            first_direction=(1.0, 0.0),
+            first_split=False,
+            first_reason="keep",
+            last_direction=(1.0, 0.0),
+        )
+        return strategy._search_utility(
+            node,
+            foods=(),
+            viruses=(),
+            arena_size=60.0,
+            safety_weight=1.0,
+        )
+
+    safe_edge = utility(edge_blob, ())
+    trapped_edge = utility(edge_blob, (predator,))
+    open_center = utility(center_blob, (predator,))
 
     assert trapped_edge < open_center
-    assert safe_edge == 0.0
+    assert trapped_edge < safe_edge
 
 
 def test_replay_dominance_keeps_wide_escape_routes_in_anytime_prefix() -> None:
@@ -563,7 +786,6 @@ def test_replay_dominance_keeps_wide_escape_routes_in_anytime_prefix() -> None:
         viruses=(),
         arena_size=60.0,
         first_step=True,
-        allow_split=False,
     )
     reasons = [action.reason for action in actions]
 
@@ -615,8 +837,109 @@ def test_replay_dominance_proxy_promotes_high_value_prey_without_family_slot() -
         aggression=1.0,
         transition_budget=2,
     )
+    strategy._run_pending_audit()
     assert strategy._audit_samples == 1
     assert strategy._audit_last_exact_rank is not None
+
+
+def test_replay_audit_uses_best_admissible_action_and_isolates_caches(
+    monkeypatch,
+) -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    strategy._audit_every_n = 1
+    strategy._current_round = 0
+    own = OwnBlob(blob_id=0, x=20.0, y=20.0, radius=2.0)
+    node = SearchNode(
+        own_blobs=(own,),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+    actions = (
+        Action((1.0, 0.0), split=True, reason="fatal_high"),
+        Action((0.0, 1.0), reason="safe"),
+    )
+    original_utility_cache = strategy._utility_cache
+
+    def fake_step(*, action, **_kwargs):
+        score = 100.0 if action.reason == "fatal_high" else 10.0
+        return StepResult(
+            replace(node, score=score),
+            fatal=action.reason == "fatal_high",
+        )
+
+    monkeypatch.setattr(strategy, "_step", fake_step)
+    elapsed = strategy._audit_root_candidate_ranking(
+        node=node,
+        actions=actions,
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        safety_weight=1.3,
+        aggression=1.0,
+        transition_budget=2,
+    )
+    strategy._run_pending_audit()
+
+    assert elapsed == 0.0
+    assert strategy._audit_last_raw_rank == 1
+    assert strategy._audit_last_exact_rank == 2
+    assert strategy._audit_last_fatal_count == 1
+    assert strategy._utility_cache is original_utility_cache
+
+
+def test_replay_audit_runs_after_and_does_not_change_search_decision() -> None:
+    own = SimpleNamespace(
+        blob_id=0,
+        pos=(20.0, 20.0),
+        radius=3.0,
+        merge_cooldown=0,
+    )
+    prey = SimpleNamespace(
+        player_id=1,
+        blob_id=0,
+        pos=(24.0, 20.0),
+        radius=1.0,
+        merge_cooldown=0,
+    )
+    state = SimpleNamespace(
+        round=100,
+        max_rounds=1400,
+        rankings=[0, 1, 2, 3, 4, 5, 6, 7],
+        me=SimpleNamespace(player_id=0, blobs={0: own}),
+        map=SimpleNamespace(size=60.0),
+        visible_blobs=(prey,),
+        visible_food=(FoodModel(food_id=1, pos=(22.0, 20.0)),),
+        visible_viruses=(),
+        view_center=(20.0, 20.0),
+        vision_size=40.0,
+    )
+    context = SimpleNamespace(
+        game=SimpleNamespace(state=state),
+        query=SimpleNamespace(update={}),
+    )
+    normal = ReplayDominanceStrategy(depth=1, width=1, angular_samples=8)
+    audited = ReplayDominanceStrategy(depth=1, width=1, angular_samples=8)
+    audited._audit_every_n = 1
+
+    expected = normal._choose(context, deadline=float("inf"), turn_budget=1.0)
+    actual = audited._choose(context, deadline=float("inf"), turn_budget=1.0)
+
+    assert (
+        actual.direction,
+        actual.split,
+        actual.reason,
+        actual.score,
+    ) == (
+        expected.direction,
+        expected.split,
+        expected.reason,
+        expected.score,
+    )
+    assert audited._audit_samples == 1
 
 
 def test_approximate_fallback_keeps_inertia_unless_escape_is_urgent() -> None:
@@ -639,6 +962,45 @@ def test_approximate_fallback_keeps_inertia_unless_escape_is_urgent() -> None:
     assert emergency[0] < 0.0
 
 
+def test_approximate_fallback_preserves_escape_semantics_when_gradient_matches() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    strategy.previous_direction = (0.0, 1.0)
+    own = SimpleNamespace(
+        blob_id=0,
+        pos=(30.0, 30.0),
+        radius=1.0,
+        merge_cooldown=0,
+    )
+    predator = SimpleNamespace(
+        player_id=1,
+        blob_id=0,
+        pos=(35.0, 30.0),
+        radius=3.0,
+        merge_cooldown=0,
+    )
+    state = SimpleNamespace(
+        round=100,
+        rankings=[0, 1, 2, 3, 4, 5, 6, 7],
+        me=SimpleNamespace(player_id=0, blobs={0: own}),
+        map=SimpleNamespace(size=60.0),
+        visible_blobs=(predator,),
+        visible_food=(),
+        visible_viruses=(),
+        view_center=(30.0, 30.0),
+        vision_size=60.0,
+    )
+    context = SimpleNamespace(
+        game=SimpleNamespace(state=state),
+        query=SimpleNamespace(update={}),
+    )
+
+    decision = strategy._time_budget_fallback(context)
+
+    assert "escape" in decision.reason
+    assert decision.target_kind == "escape"
+    assert decision.direction[0] < -0.9
+
+
 def test_replay_dominance_does_not_hide_trapped_fragment_behind_safe_center() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
     anchor = OwnBlob(blob_id=0, x=30.0, y=30.0, radius=3.0)
@@ -651,11 +1013,29 @@ def test_replay_dominance_does_not_hide_trapped_fragment_behind_safe_center() ->
         radius=3.0,
     )
 
-    safe = strategy._position_value(
-        [anchor, trapped_fragment], (), (), set(), 60.0, 1.0
+    safe_node = SearchNode(
+        own_blobs=(anchor, trapped_fragment),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
     )
-    exposed = strategy._position_value(
-        [anchor, trapped_fragment], (predator,), (), set(), 60.0, 1.0
+    exposed_node = replace(safe_node, enemies=(predator,))
+    safe = strategy._search_utility(
+        safe_node,
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        safety_weight=1.0,
+    )
+    exposed = strategy._search_utility(
+        exposed_node,
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        safety_weight=1.0,
     )
 
     assert exposed < safe

@@ -62,6 +62,28 @@ The benchmark runner writes one isolated simulation workspace per match under
 at the benchmark root. The default smoke benchmark runs four `food_greedy`
 bots and four `survival_greedy` bots.
 
+Replay-dominance profiling is opt-in. To sample one complete turn in every 100
+without charging every turn for timers, add
+`BOT_REPLAY_PROFILE_EVERY_N=100` to a benchmark variant. The structured sample
+is stored in `decision_diagnostics.replay_profile` and separates additive phase
+time from nested inclusive operation time. Cache and candidate counters include
+conservation data (`lookups = hits + misses` and
+`raw = unique + zero_drops + duplicate_drops`). Aggregate and validate it with:
+
+```bash
+uv run python scripts/analyze_replay_profile.py \
+  .agario/benchmarks/<run>/<variant>/run_*/match/submission0/bot_metrics.jsonl
+```
+
+The analyzer fails closed if any input contains no profile samples, uses an
+unsupported schema, or violates a per-sample timing, cache, or candidate
+invariant. This prevents an uninstrumented or mismatched log from being used as
+refactoring evidence accidentally.
+
+`BOT_REPLAY_AUDIT_EVERY_N` performs additional exact transitions and is intended
+only for an offline ranking audit. Its caches, counters, fatal candidates, and
+elapsed time are isolated from the normal search profile.
+
 To test the default replay-dominance receding-horizon strategy against seven
 randomly selected official-replay clone strategies, run:
 
