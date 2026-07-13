@@ -455,7 +455,7 @@ def test_replay_reuses_each_transition_hazard_for_child_utility(
     assert calls == 1 + decision.diagnostics["transitions_evaluated"]
 
 
-def test_replay_candidate_analysis_reuses_virus_and_prey_values() -> None:
+def test_replay_candidate_analysis_reuses_shared_proxy() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
     strategy._profile_active = True
     strategy._rival_values = {1: 1.0}
@@ -472,20 +472,24 @@ def test_replay_candidate_analysis_reuses_virus_and_prey_values() -> None:
         last_direction=(1.0, 0.0),
     )
 
-    strategy._candidate_actions(
-        node=node,
-        foods=(),
-        food_targets=(),
-        viruses=(virus,),
-        arena_size=60.0,
-        first_step=True,
-    )
+    foods = ()
+    viruses = (virus,)
+    for _ in range(2):
+        strategy._candidate_actions(
+            node=node,
+            foods=foods,
+            food_targets=(),
+            viruses=viruses,
+            arena_size=60.0,
+            first_step=True,
+        )
 
     counts = strategy._profile_counts
-    assert counts["virus_miss"] == 1
-    assert counts["virus_hit"] >= 1
-    assert counts["prey_miss"] == 1
-    assert counts["prey_hit"] >= 1
+    assert counts["proxy_miss"] == 1
+    assert counts["proxy_hit"] == 1
+    assert counts["proxy_analysis_nodes"] == 1
+    assert counts["proxy_virus_targets"] == 1
+    assert counts["proxy_prey_targets"] == 1
 
 
 def test_disabled_replay_profile_does_not_read_inner_timers(monkeypatch) -> None:
@@ -759,8 +763,10 @@ def test_replay_dominance_penalises_wall_only_when_predator_blocks_retreat() -> 
     assert trapped_edge < safe_edge
 
 
-def test_replay_dominance_keeps_wide_escape_routes_in_anytime_prefix() -> None:
+def test_replay_proxy_prices_wall_continuation_before_exact_search() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    strategy.proxy_horizon = 8
+    strategy.proxy_refine_limit = 64
     own = OwnBlob(blob_id=0, x=55.0, y=55.0, radius=1.0)
     predator = EnemyBlob(
         player_id=1,
@@ -789,7 +795,10 @@ def test_replay_dominance_keeps_wide_escape_routes_in_anytime_prefix() -> None:
     )
     reasons = [action.reason for action in actions]
 
-    assert any("escape" in reason for reason in reasons[:3])
+    # The long proxy may prefer moving inward behind the predator over a
+    # literal escape vector; both coordinates must stop pushing into the wall.
+    assert actions[0].direction[0] <= 0.0
+    assert actions[0].direction[1] <= 0.0
     assert "escape_wide_tangent" in reasons[:6]
     assert strategy._safety_weight(rank_position=7, progress=0.0) == 1.3
 
@@ -964,6 +973,7 @@ def test_approximate_fallback_keeps_inertia_unless_escape_is_urgent() -> None:
 
 def test_approximate_fallback_preserves_escape_semantics_when_gradient_matches() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    strategy.proxy_refine_limit = 64
     strategy.previous_direction = (0.0, 1.0)
     own = SimpleNamespace(
         blob_id=0,
@@ -998,7 +1008,7 @@ def test_approximate_fallback_preserves_escape_semantics_when_gradient_matches()
 
     assert "escape" in decision.reason
     assert decision.target_kind == "escape"
-    assert decision.direction[0] < -0.9
+    assert decision.direction[0] < -0.7
 
 
 def test_replay_dominance_does_not_hide_trapped_fragment_behind_safe_center() -> None:

@@ -367,16 +367,51 @@ def score_outcome(outcome: dict[str, Any], tracked_slots: tuple[int, ...]) -> di
 
 def summarize_metrics(workspace: Path, tracked_slots: tuple[int, ...]) -> dict[str, Any]:
     elapsed_ms: list[float] = []
+    competition_remaining_ms: list[float] = []
+    competition_remaining_last_ms: list[float] = []
     dots_all: list[float] = []
     dots_predator_1: list[float] = []
     dots_predator_2: list[float] = []
     samples = 0
+    proxy_only_turns = 0
+    candidate_total = 0
+    refined_total = 0
+    exact_transitions = 0
+    prey_turns = 0
+    split_turns = 0
+    observed_round_gaps = 0
 
     for slot in tracked_slots:
         path = workspace / f"submission{slot}" / "bot_metrics.jsonl"
         rows = read_jsonl(path)
         samples += len(rows)
         elapsed_ms.extend(row.get("decision_elapsed_ms", 0.0) for row in rows)
+        slot_remaining: list[float] = []
+        for row in rows:
+            diagnostics = row.get("decision_diagnostics", {})
+            if not isinstance(diagnostics, dict):
+                continue
+            remaining = diagnostics.get("competition_compute_remaining_ms")
+            if isinstance(remaining, (int, float)):
+                slot_remaining.append(float(remaining))
+            proxy_only_turns += bool(diagnostics.get("proxy_only"))
+            candidate_total += int(
+                diagnostics.get("fallback_candidates")
+                or diagnostics.get("root_actions_generated")
+                or 0
+            )
+            refined_total += int(diagnostics.get("proxy_candidates_refined") or 0)
+            exact_transitions += int(diagnostics.get("transitions_evaluated") or 0)
+            prey_turns += "prey" in str(row.get("decision_reason") or "")
+            split_turns += bool(row.get("decision_split"))
+        competition_remaining_ms.extend(slot_remaining)
+        if slot_remaining:
+            competition_remaining_last_ms.append(slot_remaining[-1])
+        for previous, current in zip(rows, rows[1:]):
+            previous_round = previous.get("round")
+            current_round = current.get("round")
+            if isinstance(previous_round, int) and isinstance(current_round, int):
+                observed_round_gaps += max(0, current_round - previous_round - 1)
         for previous, current in zip(rows, rows[1:]):
             dot = direction_dot(previous, current)
             if dot is None:
@@ -393,8 +428,31 @@ def summarize_metrics(workspace: Path, tracked_slots: tuple[int, ...]) -> dict[s
 
     return {
         "metric_samples": samples,
+        "decision_total_ms": sum(elapsed_ms),
         "decision_avg_ms": mean(elapsed_ms) if elapsed_ms else None,
+        "decision_p95_ms": percentile(elapsed_ms, 0.95),
+        "decision_p99_ms": percentile(elapsed_ms, 0.99),
         "decision_max_ms": max(elapsed_ms) if elapsed_ms else None,
+        "competition_remaining_min_ms": (
+            min(competition_remaining_ms) if competition_remaining_ms else None
+        ),
+        "competition_remaining_last_ms": (
+            min(competition_remaining_last_ms)
+            if competition_remaining_last_ms
+            else None
+        ),
+        "competition_exhausted_samples": sum(
+            remaining <= 0.0 for remaining in competition_remaining_ms
+        ),
+        "proxy_only_turns": proxy_only_turns,
+        "candidate_total": candidate_total,
+        "candidate_avg": candidate_total / samples if samples else None,
+        "refined_total": refined_total,
+        "refined_avg": refined_total / samples if samples else None,
+        "exact_transitions": exact_transitions,
+        "prey_turns": prey_turns,
+        "split_turns": split_turns,
+        "observed_round_gaps": observed_round_gaps,
         "direction_pairs": len(dots_all),
         "direction_avg_dot": mean(dots_all) if dots_all else None,
         "direction_reversals": sum(1 for dot in dots_all if dot < -0.25),
@@ -428,6 +486,17 @@ def direction_dot(previous: dict[str, Any], current: dict[str, Any]) -> float | 
     return max(-1.0, min(1.0, dot))
 
 
+def percentile(values: list[float], quantile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * quantile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+
 def write_outputs(workspace_root: Path, results: list[dict[str, Any]]) -> None:
     (workspace_root / "results.json").write_text(
         json.dumps(results, indent=2, sort_keys=True) + "\n"
@@ -445,8 +514,23 @@ def write_outputs(workspace_root: Path, results: list[dict[str, Any]]) -> None:
         "tracked_mass_sum",
         "tracked_mass_mean",
         "tracked_mass_max",
+        "decision_total_ms",
         "decision_avg_ms",
+        "decision_p95_ms",
+        "decision_p99_ms",
         "decision_max_ms",
+        "competition_remaining_min_ms",
+        "competition_remaining_last_ms",
+        "competition_exhausted_samples",
+        "proxy_only_turns",
+        "candidate_total",
+        "candidate_avg",
+        "refined_total",
+        "refined_avg",
+        "exact_transitions",
+        "prey_turns",
+        "split_turns",
+        "observed_round_gaps",
         "direction_avg_dot",
         "direction_reversals",
         "predator1_avg_dot",
@@ -472,7 +556,7 @@ def print_summary(
     print(f"Tracked slots: {','.join(str(slot) for slot in tracked_slots)}")
     print(
         "variant  matches  success  top1_rate  avg_best_rank  avg_mean_rank  "
-        "avg_mass_sum  avg_ms  max_ms  pred2_rev_rate"
+        "avg_mass_sum  total_ms  p99_ms  min_remaining_ms  pred2_rev_rate"
     )
     for variant in sorted({result["variant"] for result in results}):
         rows = [result for result in results if result["variant"] == variant]
@@ -487,8 +571,9 @@ def print_summary(
             f"{avg_number(rows, 'tracked_best_rank'):>13.3f} "
             f"{avg_number(rows, 'tracked_mean_rank'):>13.3f} "
             f"{avg_number(rows, 'tracked_mass_sum'):>12.3f} "
-            f"{avg_number(rows, 'decision_avg_ms'):>7.3f} "
-            f"{max_number(rows, 'decision_max_ms'):>6.3f} "
+            f"{avg_number(rows, 'decision_total_ms'):>8.1f} "
+            f"{max_number(rows, 'decision_p99_ms'):>7.3f} "
+            f"{min_number(rows, 'competition_remaining_min_ms'):>16.1f} "
             f"{ratio(pred2_reversals, pred2_pairs):>14.3f}"
         )
 
@@ -507,6 +592,11 @@ def avg_number(rows: list[dict[str, Any]], field: str) -> float:
 def max_number(rows: list[dict[str, Any]], field: str) -> float:
     values = [row[field] for row in rows if row.get(field) is not None]
     return max(values) if values else float("nan")
+
+
+def min_number(rows: list[dict[str, Any]], field: str) -> float:
+    values = [row[field] for row in rows if row.get(field) is not None]
+    return min(values) if values else float("nan")
 
 
 def ratio(numerator: int, denominator: int) -> float:

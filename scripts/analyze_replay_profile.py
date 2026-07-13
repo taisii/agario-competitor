@@ -31,6 +31,7 @@ CACHE_SPECS = {
     "virus": ("virus_hit", "virus_miss", "cache_virus"),
     "gradient": ("gradient_hit", "gradient_miss", "cache_gradient"),
     "hazard": ("hazard_hit", "hazard_miss", "cache_hazard"),
+    "proxy": ("proxy_hit", "proxy_miss", "cache_proxy"),
     "virus_layout": (
         "virus_layout_hit",
         "virus_layout_miss",
@@ -48,11 +49,9 @@ PROFILE_SECTIONS = (
 REQUIRED_PHASE_KEYS = frozenset(
     {
         "setup_and_search_control",
-        "candidate_base_generate",
-        "candidate_virus_generate",
-        "candidate_merge_dedupe",
-        "candidate_gradient",
-        "candidate_proxy_score",
+        "candidate_shared_analysis",
+        "candidate_coarse_rank",
+        "candidate_geometric_refine",
         "candidate_overhead",
         "search_parent_utility",
         "search_split_movement_efficiency",
@@ -295,6 +294,150 @@ def ratio(numerator: int | float, denominator: int | float) -> float:
     return numerator / denominator if denominator else 0.0
 
 
+def percentile(values: list[float], quantile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * quantile
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+
+def summarize_runtime(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize hard compute headroom and observable search behaviour."""
+
+    elapsed = [
+        float(row["decision_elapsed_ms"])
+        for row in rows
+        if isinstance(row.get("decision_elapsed_ms"), (int, float))
+    ]
+    diagnostics = [
+        value
+        for row in rows
+        if isinstance((value := row.get("decision_diagnostics")), dict)
+    ]
+    hard_remaining = [
+        float(value["competition_compute_remaining_ms"])
+        for value in diagnostics
+        if isinstance(
+            value.get("competition_compute_remaining_ms"),
+            (int, float),
+        )
+    ]
+    hard_budgets = [
+        float(value["competition_compute_budget_ms"])
+        for value in diagnostics
+        if isinstance(value.get("competition_compute_budget_ms"), (int, float))
+    ]
+    candidate_counts = [
+        int(value.get("fallback_candidates") or value.get("root_actions_generated") or 0)
+        for value in diagnostics
+    ]
+    refined_counts = [
+        int(value.get("proxy_candidates_refined") or 0)
+        for value in diagnostics
+    ]
+    transitions = [
+        int(value.get("transitions_evaluated") or 0)
+        for value in diagnostics
+    ]
+    reasons = Counter(str(row.get("decision_reason") or "unknown") for row in rows)
+    split_turns = sum(bool(row.get("decision_split")) for row in rows)
+    direction_dots: list[float] = []
+    for previous, current in zip(rows, rows[1:]):
+        previous_direction = (
+            previous.get("decision_direction_x"),
+            previous.get("decision_direction_y"),
+        )
+        current_direction = (
+            current.get("decision_direction_x"),
+            current.get("decision_direction_y"),
+        )
+        if None in (*previous_direction, *current_direction):
+            continue
+        direction_dots.append(
+            _clamp(
+                float(previous_direction[0]) * float(current_direction[0])
+                + float(previous_direction[1]) * float(current_direction[1]),
+                -1.0,
+                1.0,
+            )
+        )
+
+    observed_round_gaps = 0
+    respawn_like_events = 0
+    previous_row: dict[str, Any] | None = None
+    for row in rows:
+        if previous_row is None:
+            previous_row = row
+            continue
+        previous_round = previous_row.get("round")
+        current_round = row.get("round")
+        gap = 0
+        if isinstance(previous_round, int) and isinstance(current_round, int):
+            gap = max(0, current_round - previous_round - 1)
+            observed_round_gaps += gap
+        previous_mass = previous_row.get("my_mass")
+        current_mass = row.get("my_mass")
+        collapsed = (
+            isinstance(previous_mass, (int, float))
+            and isinstance(current_mass, (int, float))
+            and previous_mass > 1.1
+            and current_mass <= 1.1
+            and current_mass < previous_mass * 0.55
+        )
+        if collapsed or (gap and isinstance(current_mass, (int, float)) and current_mass <= 1.1):
+            respawn_like_events += 1
+        previous_row = row
+
+    return {
+        "decision_count": len(elapsed),
+        "decision_total_ms": sum(elapsed),
+        "decision_avg_ms": ratio(sum(elapsed), len(elapsed)),
+        "decision_p50_ms": percentile(elapsed, 0.50),
+        "decision_p95_ms": percentile(elapsed, 0.95),
+        "decision_p99_ms": percentile(elapsed, 0.99),
+        "decision_max_ms": max(elapsed, default=0.0),
+        "competition_budget_ms": max(hard_budgets, default=0.0),
+        "competition_remaining_min_ms": min(hard_remaining, default=0.0),
+        "competition_remaining_last_ms": hard_remaining[-1] if hard_remaining else 0.0,
+        "competition_exhausted_samples": sum(value <= 0.0 for value in hard_remaining),
+        "proxy_only_turns": sum(bool(value.get("proxy_only")) for value in diagnostics),
+        "candidate_total": sum(candidate_counts),
+        "candidate_avg": ratio(sum(candidate_counts), len(candidate_counts)),
+        "refined_total": sum(refined_counts),
+        "refined_avg": ratio(sum(refined_counts), len(refined_counts)),
+        "exact_transitions": sum(transitions),
+        "split_turns": split_turns,
+        "prey_turns": sum(
+            count for reason, count in reasons.items() if "prey" in reason
+        ),
+        "virus_turns": sum(
+            count for reason, count in reasons.items() if "virus" in reason
+        ),
+        "escape_turns": sum(
+            count for reason, count in reasons.items() if "escape" in reason
+        ),
+        "resource_turns": sum(
+            ("food" in reason or "farm" in reason) * count
+            for reason, count in reasons.items()
+        ),
+        "direction_reversals": sum(dot < -0.25 for dot in direction_dots),
+        "direction_pairs": len(direction_dots),
+        "observed_round_gaps": observed_round_gaps,
+        "respawn_like_events": respawn_like_events,
+        "reasons": reasons,
+    }
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return min(max(value, lower), upper)
+
+
 def main() -> None:
     rows, samples, violations = read_metrics(parse_args().metrics)
     for sample in samples:
@@ -325,13 +468,53 @@ def main() -> None:
     depths = Counter(item.get("depth", 0) for item in diagnostics)
     generated = sum(item.get("root_actions_generated", 0) for item in diagnostics)
     evaluated = sum(item.get("root_actions_evaluated", 0) for item in diagnostics)
+    proxy_evaluated = sum(
+        item.get("root_actions_proxy_evaluated", 0) for item in diagnostics
+    )
+    runtime = summarize_runtime(rows)
 
     print(f"turns={len(rows)} profiled_turns={len(profiles)}")
+    print(
+        "compute_resource="
+        f"decision_total_ms:{runtime['decision_total_ms']:.3f} "
+        f"avg:{runtime['decision_avg_ms']:.3f} "
+        f"p50:{runtime['decision_p50_ms']:.3f} "
+        f"p95:{runtime['decision_p95_ms']:.3f} "
+        f"p99:{runtime['decision_p99_ms']:.3f} "
+        f"max:{runtime['decision_max_ms']:.3f} "
+        f"competition_budget_ms:{runtime['competition_budget_ms']:.3f} "
+        f"remaining_min_ms:{runtime['competition_remaining_min_ms']:.3f} "
+        f"remaining_last_ms:{runtime['competition_remaining_last_ms']:.3f} "
+        f"exhausted_samples:{runtime['competition_exhausted_samples']}"
+    )
+    print(
+        "search_work="
+        f"proxy_only_turns:{runtime['proxy_only_turns']} "
+        f"candidates_total:{runtime['candidate_total']} "
+        f"candidates_avg:{runtime['candidate_avg']:.3f} "
+        f"refined_total:{runtime['refined_total']} "
+        f"refined_avg:{runtime['refined_avg']:.3f} "
+        f"exact_transitions:{runtime['exact_transitions']}"
+    )
+    print(
+        "behaviour="
+        f"prey_turns:{runtime['prey_turns']} "
+        f"virus_turns:{runtime['virus_turns']} "
+        f"resource_turns:{runtime['resource_turns']} "
+        f"escape_turns:{runtime['escape_turns']} "
+        f"split_turns:{runtime['split_turns']} "
+        f"direction_reversals:{runtime['direction_reversals']}/"
+        f"{runtime['direction_pairs']} "
+        f"observed_round_gaps:{runtime['observed_round_gaps']} "
+        f"respawn_like_events:{runtime['respawn_like_events']}"
+    )
     print(f"depths={dict(sorted(depths.items()))}")
     print(f"stop_reasons={dict(sorted(stop_reasons.items()))}")
     print(
         "root_candidates="
-        f"generated:{generated} evaluated:{evaluated} "
+        f"generated:{generated} proxy_evaluated:{proxy_evaluated} "
+        f"proxy_rate:{ratio(proxy_evaluated, generated):.6f} "
+        f"exact_evaluated:{evaluated} "
         f"exact_rate:{ratio(evaluated, generated):.6f}"
     )
 

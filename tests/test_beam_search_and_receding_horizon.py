@@ -23,7 +23,7 @@ from lib.models.food_model import FoodModel  # noqa: E402
 from lib.models.virus_model import VirusModel  # noqa: E402
 from lib.models.blob_model import BlobModel, VisibleBlobModel  # noqa: E402
 from strategies.base import StrategyContext  # noqa: E402
-from strategies.features import can_eat_player_blob  # noqa: E402
+from strategies.features import can_eat_player_blob, player_speed  # noqa: E402
 
 
 def test_threat_aware_receding_horizon_split_matches_engine_geometry() -> None:
@@ -186,7 +186,10 @@ def test_replay_node_opportunities_are_computed_once_without_stale_reuse() -> No
             safety_weight=1.0,
         )
 
-    assert calls == {"prey": 1, "virus": 1, "gradient": 1, "utility": 1}
+    # Candidate ranking now uses the geometric proxy directly.  The old
+    # aggregate gradient is deliberately absent; exact opportunity and utility
+    # work remains cached once for the exact layer.
+    assert calls == {"prey": 1, "virus": 1, "gradient": 0, "utility": 1}
 
     first_expected_mass = strategy._prey_expected_mass(node, enemy, 60.0)
     nearer_node = replace(node, own_blobs=(replace(own, x=55.0),))
@@ -346,6 +349,186 @@ def test_replay_split_prey_is_a_continuous_ranked_candidate() -> None:
     assert opportunity.capture_probability > 0.0
     assert any(action.reason == "split_prey" for action in actions)
     assert toward > sideways
+
+
+def test_replay_proxy_prices_the_same_wall_movement_loss_as_exact_rollout() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=2, angular_samples=8)
+    own = OwnBlob(blob_id=0, x=5.0, y=5.0, radius=5.0)
+    outward = (-1.0, -1.0)
+    inward = (1.0, 1.0)
+    node = RecedingHorizonSearchNode(
+        own_blobs=(own,),
+        enemies=(),
+        score=0.0,
+        first_direction=outward,
+        first_split=False,
+        first_reason="keep",
+        last_direction=outward,
+    )
+
+    blocked_proxy = strategy._approximate_action_value(
+        node=node,
+        action=RecedingHorizonAction(outward, reason="keep"),
+        foods=(),
+        arena_size=60.0,
+        value_gradient=(0.0, 0.0),
+    )
+    inward_proxy = strategy._approximate_action_value(
+        node=node,
+        action=RecedingHorizonAction(inward, reason="center"),
+        foods=(),
+        arena_size=60.0,
+        value_gradient=(0.0, 0.0),
+    )
+    blocked_exact = strategy._step(
+        node=node,
+        action=RecedingHorizonAction(outward, reason="keep"),
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+        safety_weight=1.0,
+        aggression=1.0,
+    )
+    inward_exact = strategy._step(
+        node=node,
+        action=RecedingHorizonAction(inward, reason="center"),
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+        safety_weight=1.0,
+        aggression=1.0,
+    )
+
+    assert blocked_proxy < inward_proxy
+    assert blocked_exact.node.score < inward_exact.node.score
+
+
+def test_replay_proxy_multistep_motion_matches_repeated_monotone_moves() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=2, angular_samples=8)
+    own_blobs = (
+        OwnBlob(
+            blob_id=0,
+            x=20.0,
+            y=20.0,
+            radius=3.0,
+            eject_vx=0.7,
+            eject_vy=0.0,
+        ),
+        OwnBlob(
+            blob_id=1,
+            x=22.0,
+            y=24.0,
+            radius=1.5,
+            eject_vx=0.3,
+            eject_vy=0.0,
+        ),
+    )
+    node = RecedingHorizonSearchNode(
+        own_blobs=own_blobs,
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+    horizon = 4
+
+    proxy = strategy._proxy_movement_delta(
+        node,
+        (1.0, 0.0),
+        60.0,
+        horizon=horizon,
+    )
+    moved = list(own_blobs)
+    for _ in range(horizon):
+        moved = [
+            strategy._move_own(blob, (1.0, 0.0), 60.0)
+            for blob in moved
+        ]
+    total_mass = sum(blob.mass for blob in own_blobs)
+    expected_dx = sum(
+        (after.x - before.x) * before.mass
+        for before, after in zip(own_blobs, moved, strict=True)
+    ) / total_mass
+    expected_dy = sum(
+        (after.y - before.y) * before.mass
+        for before, after in zip(own_blobs, moved, strict=True)
+    ) / total_mass
+
+    assert math.isclose(proxy.displacement_x, expected_dx)
+    assert math.isclose(proxy.displacement_y, expected_dy)
+    assert math.isclose(proxy.efficiency, 1.0)
+
+
+def test_replay_proxy_multistep_motion_accumulates_wall_clamp_loss() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=2, angular_samples=8)
+    own = OwnBlob(blob_id=0, x=54.5, y=30.0, radius=5.0)
+    node = RecedingHorizonSearchNode(
+        own_blobs=(own,),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+    horizon = 4
+
+    proxy = strategy._proxy_movement_delta(
+        node,
+        (1.0, 0.0),
+        60.0,
+        horizon=horizon,
+    )
+    speed = player_speed(own.radius)
+
+    assert math.isclose(proxy.displacement_x, 0.5)
+    assert math.isclose(proxy.displacement_y, 0.0)
+    assert math.isclose(proxy.efficiency, 0.5 / (speed * horizon))
+
+
+def test_replay_primary_proxy_can_leave_a_blocked_corner_without_visible_resources() -> None:
+    blob = BlobModel(blob_id=0, pos=(5.0, 5.0), radius=5.0)
+    state = SimpleNamespace(
+        me=SimpleNamespace(player_id=0, x=5.0, y=5.0, blobs={0: blob}),
+        visible_blobs=[],
+        visible_food=[],
+        visible_viruses=[],
+        map=SimpleNamespace(size=60.0),
+        round=900,
+        max_rounds=1400,
+        rankings=[0, 1, 2, 3, 4, 5, 6, 7],
+        view_center=(10.0, 10.0),
+        vision_size=20.0,
+    )
+    context = StrategyContext(
+        game=SimpleNamespace(state=state),
+        query=SimpleNamespace(update={}),
+    )
+    strategy = ReplayDominanceStrategy(depth=1, width=2, angular_samples=8)
+    strategy.compute_budget_seconds = 0.0
+    strategy.previous_direction = (-1.0, -1.0)
+
+    decision = strategy.choose(context)
+    direction = (
+        decision.direction[0] / math.hypot(*decision.direction),
+        decision.direction[1] / math.hypot(*decision.direction),
+    )
+    moved = strategy._move_own(
+        OwnBlob(blob_id=0, x=5.0, y=5.0, radius=5.0),
+        direction,
+        60.0,
+    )
+
+    assert direction != (-math.sqrt(0.5), -math.sqrt(0.5))
+    assert math.dist(moved.pos, (5.0, 5.0)) > 0.05
+    assert decision.diagnostics["approximate_fallback"] is False
+    assert decision.diagnostics["primary_proxy"] is True
+    assert decision.diagnostics["search_stop_reason"] == "proxy_complete"
+    assert decision.diagnostics["fallback_candidates"] >= 8
 
 
 def test_threat_aware_receding_horizon_captures_safely_while_leading_late() -> None:

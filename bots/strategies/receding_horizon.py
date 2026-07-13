@@ -176,6 +176,131 @@ class OwnMovement:
 
 
 @dataclass(frozen=True)
+class ProxyMovement:
+    """Short-horizon kinematics shared by every approximate value term."""
+
+    displacement_x: float
+    displacement_y: float
+    efficiency: float
+    blobs: tuple[ProxyBlobMotion, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProxyBlobMotion:
+    """One cheap linearised own-blob trajectory."""
+
+    blob_id: int
+    source_blob_id: int
+    start_x: float
+    start_y: float
+    x: float
+    y: float
+    radius: float
+    speed: float
+
+    @property
+    def mass(self) -> float:
+        return self.radius * self.radius
+
+
+@dataclass(frozen=True)
+class ProxyEnemyMotion:
+    """One cheap adversarial enemy trajectory."""
+
+    enemy: EnemyBlob
+    x: float
+    y: float
+    direction: tuple[float, float]
+    speed: float
+
+
+@dataclass(frozen=True)
+class ProxyOwnSource:
+    blob: OwnBlob
+    speed: float
+    split_radius: float | None
+    split_speed: float | None
+
+
+@dataclass(frozen=True)
+class ProxyValue:
+    """Components of the same state value used by exact beam evaluation."""
+
+    safe_mass: float
+    continuation_probability: float
+    opportunity_mass: float
+    competitor_mass_debt: float
+    recovery_debt: float
+
+    @property
+    def total(self) -> float:
+        return 100.0 * (
+            self.safe_mass
+            + self.continuation_probability * self.opportunity_mass
+            - self.competitor_mass_debt
+            - self.recovery_debt
+        )
+
+
+@dataclass(frozen=True)
+class ProxyThreat:
+    source_blob_id: int
+    enemy: EnemyBlob
+
+
+@dataclass(frozen=True)
+class ProxyFoodTarget:
+    source_blob_id: int
+    food: FoodModel
+
+
+@dataclass(frozen=True)
+class ProxyVirusTarget:
+    source_blob_id: int
+    virus: VirusModel
+
+
+@dataclass(frozen=True)
+class ProxyPreyTarget:
+    source_blob_id: int
+    enemy: EnemyBlob
+
+
+@dataclass(frozen=True)
+class ProxyKinematics:
+    normal_speed: float
+    normal_eject_x: float
+    normal_eject_y: float
+    normal_radius: float
+    split_speed: float
+    split_static_eject_x: float
+    split_static_eject_y: float
+    split_directional_eject: float
+    split_placement: float
+    split_radius: float
+
+
+@dataclass(frozen=True)
+class ProxyAnalysis:
+    """Action-independent inputs for cheap differential rollouts."""
+
+    node: SearchNode
+    foods: tuple[ProxyFoodTarget, ...]
+    viruses: tuple[ProxyVirusTarget, ...]
+    prey: tuple[ProxyPreyTarget, ...]
+    threats: tuple[ProxyThreat, ...]
+    threats_by_source: dict[int, tuple[ProxyThreat, ...]]
+    motion_enemies: tuple[EnemyBlob, ...]
+    motion_index_by_key: dict[tuple[int, int], int]
+    own_sources: tuple[ProxyOwnSource, ...]
+    enemy_speeds: tuple[float, ...]
+    gradient: tuple[float, float]
+    kinematics: ProxyKinematics
+    split_state_delta: float
+    baseline: ProxyValue
+
+
+@dataclass(frozen=True)
 class NodeGeometry:
     """Action-independent mass geometry for one search node."""
 
@@ -682,6 +807,23 @@ class ThreatAwareRecedingHorizonStrategy:
             arena_size,
             viruses=viruses,
         )
+        center = _mass_center(own_blobs)
+        foods = tuple(
+            sorted(
+                state.visible_food,
+                key=lambda food: squared_distance(center, food.pos),
+            )[: self.max_food]
+        )
+        enemies = tuple(
+            sorted(
+                enemies,
+                key=lambda enemy: self._enemy_priority(
+                    enemy,
+                    own_blobs,
+                    center,
+                ),
+            )[: self.max_enemies]
+        )
         node = SearchNode(
             own_blobs=own_blobs,
             enemies=enemies,
@@ -691,29 +833,16 @@ class ThreatAwareRecedingHorizonStrategy:
             first_reason="keep",
             last_direction=self.previous_direction,
         )
-        foods = tuple(state.visible_food)
-        gradient = self._cached_value_gradient(
+        food_targets = tuple(self._food_targets(center, list(foods)))
+        actions = self._candidate_actions(
             node=node,
             foods=foods,
+            food_targets=food_targets,
             viruses=viruses,
             arena_size=arena_size,
+            first_step=True,
+            angle_offset=self._current_round,
         )
-
-        actions = [Action(self.previous_direction, reason="approx_keep")]
-        gradient_direction = normalise(gradient)
-        escape = self._escape_vector(node)
-        if escape != (0.0, 0.0):
-            actions.extend(
-                (
-                    Action(escape, reason="approx_escape"),
-                    Action(_rotate(escape, math.pi / 4), reason="approx_escape_tangent"),
-                    Action(_rotate(escape, -math.pi / 4), reason="approx_escape_tangent"),
-                )
-            )
-        # Preserve escape semantics when the value gradient points in the same
-        # direction. Emergency blending depends on the semantic reason.
-        if gradient_direction != (0.0, 0.0):
-            actions.append(Action(gradient_direction, reason="approx_value"))
         prey = [
             enemy
             for enemy in enemies
@@ -723,59 +852,30 @@ class ThreatAwareRecedingHorizonStrategy:
                 for own in own_blobs
             )
         ]
-        prey.sort(key=lambda enemy: self._prey_candidate_priority(node, enemy, arena_size))
-        for enemy in prey[:2]:
-            opportunity = self._prey_opportunity(node, enemy, arena_size)
-            actions.append(
-                Action(
-                    opportunity.direction,
-                    reason="approx_prey",
-                )
+        scored = self._root_proxy_scores
+        if not scored:
+            return StrategyDecision(
+                direction=self.previous_direction,
+                reason="proxy_no_candidate",
             )
-        node_geometry = self._node_geometry(node)
-        if foods:
-            nearest_food = min(
-                foods,
-                key=lambda food: squared_distance(node_geometry.center, food.pos),
-            )
-            actions.append(
-                Action(
-                    normalise(
-                        (
-                            nearest_food.pos[0] - node_geometry.center[0],
-                            nearest_food.pos[1] - node_geometry.center[1],
-                        )
-                    ),
-                    reason="approx_food",
-                )
-            )
-
-        actions = list(
-            self._dedupe_actions(actions, profile_prefix="fallback_candidate")
-        )
-        scored = self._rank_approximate_actions(
-            node=node,
-            actions=actions,
-            foods=foods,
-            arena_size=arena_size,
-            value_gradient=gradient,
-        )
         best, best_score = scored[0]
+        keep_key = self._action_key(Action(self.previous_direction))
         keep_score = next(
-            score for action, score in scored if action.reason == "approx_keep"
+            (
+                score
+                for action, score in scored
+                if self._action_key(action) == keep_key
+            ),
+            best_score,
         )
-        emergency = "escape" in best.reason
-        previous_direction = self.previous_direction
-        direction = self._blend_approximate_direction(
-            previous=previous_direction,
-            proposed=best.direction,
-            improvement=max(0.0, best_score - keep_score),
-            scale=abs(best_score) + abs(keep_score) + 1.0,
-            emergency=emergency,
-        )
+        # The proxy already prices turning.  Executing an interpolated heading
+        # would be a different, unevaluated action and previously kept the bot
+        # moving into threats or walls despite selecting a safe candidate.
+        direction = normalise(best.direction)
         self.previous_direction = direction
         return StrategyDecision(
             direction=direction,
+            split=best.split,
             target_kind=(
                 "escape"
                 if "escape" in best.reason
@@ -789,11 +889,51 @@ class ThreatAwareRecedingHorizonStrategy:
             score=best_score,
             diagnostics={
                 "approximate_fallback": True,
+                "proxy_only": True,
+                "transitions_evaluated": 0,
+                "transitions_by_depth": [],
                 "fallback_candidates": len(actions),
                 "fallback_prey": len(prey),
                 "fallback_improvement": best_score - keep_score,
+                "candidate_family_counts": dict(self._root_candidate_families),
+                "proxy_candidates_refined": self._root_proxy_refined,
+                "proxy_top_actions": [
+                    {
+                        "reason": action.reason,
+                        "split": action.split,
+                        "score": round(score, 6),
+                    }
+                    for action, score in scored[: self._root_proxy_refined]
+                ],
+                "proxy_top_two_gap": (
+                    scored[0][1] - scored[1][1]
+                    if len(scored) >= 2
+                    else None
+                ),
                 "compute_spent_ms": round(self.compute_spent_seconds * 1000.0, 3),
                 "compute_budget_ms": round(self.compute_budget_seconds * 1000.0, 3),
+                "compute_remaining_ms": round(
+                    max(
+                        0.0,
+                        self.compute_budget_seconds - self.compute_spent_seconds,
+                    )
+                    * 1000.0,
+                    3,
+                ),
+                "competition_compute_budget_ms": round(
+                    getattr(self, "competition_compute_budget_seconds", 8.0)
+                    * 1000.0,
+                    3,
+                ),
+                "competition_compute_remaining_ms": round(
+                    max(
+                        0.0,
+                        getattr(self, "competition_compute_budget_seconds", 8.0)
+                        - self.compute_spent_seconds,
+                    )
+                    * 1000.0,
+                    3,
+                ),
             },
         )
 
@@ -810,12 +950,11 @@ class ThreatAwareRecedingHorizonStrategy:
         proposed = normalise(proposed)
         confidence = _clamp(improvement / max(scale, EPSILON), 0.0, 1.0)
         alpha = 0.9 if emergency else 0.2 + 0.45 * confidence
-        return normalise(
-            (
-                previous[0] * (1.0 - alpha) + proposed[0] * alpha,
-                previous[1] * (1.0 - alpha) + proposed[1] * alpha,
-            )
-        ) or previous
+        previous_angle = math.atan2(previous[1], previous[0])
+        proposed_angle = math.atan2(proposed[1], proposed[0])
+        angle_delta = (proposed_angle - previous_angle + math.pi) % TAU - math.pi
+        blended_angle = previous_angle + angle_delta * alpha
+        return math.cos(blended_angle), math.sin(blended_angle)
 
     def _transition_budget(
         self,
@@ -2769,9 +2908,11 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         "_split_prey_opportunity_cache",
         "_virus_opportunity_cache",
         "_value_gradient_cache",
+        "_proxy_analysis_cache",
         "_hazard_summary_cache",
     )
     _AUDIT_CACHE_NAMES = (*_TURN_CACHE_NAMES, "_virus_fragment_layout_cache")
+    _MOVEMENT_INEFFICIENCY_PENALTY = 2.0
 
     def __init__(
         self,
@@ -2801,12 +2942,16 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             width=resolved_width,
             angular_samples=10 if angular_samples is None else angular_samples,
         )
-        # A three-millisecond per-turn cap is at most 4.2 seconds over 1,400
-        # rounds.  Use a slightly larger accounting bank so small deadline
-        # overruns do not switch the final third of a match to the simplistic
-        # fallback while remaining well below the engine's eight-second limit.
+        # The default policy compares every generated root action with the
+        # shared geometric proxy.  Exact engine rollouts remain available for
+        # offline audits and experiments, but spending the competition bank on
+        # a handful of exact branches gave both lower candidate coverage and
+        # cumulative timeouts.
         self.compute_budget_seconds = float(
-            os.environ.get("BOT_REPLAY_TOTAL_BUDGET_SECONDS", "3.0")
+            os.environ.get("BOT_REPLAY_TOTAL_BUDGET_SECONDS", "0.0")
+        )
+        self.competition_compute_budget_seconds = float(
+            os.environ.get("BOT_REPLAY_COMPETITION_BUDGET_SECONDS", "8.0")
         )
         self.survival_midpoint_base = float(
             os.environ.get(
@@ -2824,7 +2969,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             os.environ.get("BOT_REPLAY_SURVIVAL_TEMPERATURE", "2.0")
         )
         self.recovery_mass = float(
-            os.environ.get("BOT_REPLAY_RECOVERY_MASS", "3.0")
+            os.environ.get("BOT_REPLAY_RECOVERY_MASS", "6.0")
         )
         self._rival_values: dict[int, float] = {}
         self._utility_cache: dict[tuple[object, ...], float] = {}
@@ -2859,6 +3004,15 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 tuple[float, float],
             ],
         ] = {}
+        self._proxy_analysis_cache: dict[
+            tuple[int, int, int, float, float],
+            tuple[
+                SearchNode,
+                tuple[FoodModel, ...],
+                tuple[VirusModel, ...],
+                ProxyAnalysis,
+            ],
+        ] = {}
         self._hazard_summary_cache: dict[
             tuple[
                 tuple[OwnBlob, ...],
@@ -2875,6 +3029,42 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         self.transition_budget_scale = int(
             os.environ.get("BOT_REPLAY_TRANSITION_BUDGET_SCALE", "6")
         )
+        self.proxy_horizon = max(
+            1,
+            int(os.environ.get("BOT_REPLAY_PROXY_HORIZON", "8")),
+        )
+        self.proxy_discount = _clamp(
+            float(os.environ.get("BOT_REPLAY_PROXY_DISCOUNT", "0.82")),
+            0.0,
+            1.0,
+        )
+        self.proxy_food_limit = max(
+            1,
+            int(os.environ.get("BOT_REPLAY_PROXY_FOOD_LIMIT", "12")),
+        )
+        self.proxy_virus_limit = max(
+            1,
+            int(os.environ.get("BOT_REPLAY_PROXY_VIRUS_LIMIT", "4")),
+        )
+        self.proxy_refine_limit = max(
+            1,
+            int(os.environ.get("BOT_REPLAY_PROXY_REFINE_LIMIT", "64")),
+        )
+        self.proxy_threat_limit = max(
+            1,
+            int(os.environ.get("BOT_REPLAY_PROXY_THREAT_LIMIT", "4")),
+        )
+        self.proxy_observed_direction_weight = _clamp(
+            float(
+                os.environ.get(
+                    "BOT_REPLAY_PROXY_OBSERVED_DIRECTION_WEIGHT",
+                    "0.18",
+                )
+            ),
+            0.0,
+            1.0,
+        )
+        self._proxy_safety_weight = 1.3
         self.minimum_transition_budget = int(
             os.environ.get("BOT_REPLAY_MIN_TRANSITIONS", "2")
         )
@@ -2885,6 +3075,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         self.minimum_root_actions = 2
         self._root_proxy_scores: tuple[tuple[Action, float], ...] = ()
         self._root_candidate_families: dict[str, int] = {}
+        self._root_proxy_refined = 0
         self._audit_every_n = int(
             os.environ.get("BOT_REPLAY_AUDIT_EVERY_N", "0")
         )
@@ -2895,6 +3086,9 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         self._audit_last_fatal_count = 0
         self._audit_spent_seconds = 0.0
         self._pending_audit: RootAuditRequest | None = None
+        self._audit_last_exact_reason: str | None = None
+        self._audit_last_exact_split: bool | None = None
+        self._audit_last_exact_regret: float | None = None
         self._current_round = 0
         self._profile_every_n = int(
             os.environ.get("BOT_REPLAY_PROFILE_EVERY_N", "0")
@@ -2956,6 +3150,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         self._clear_turn_caches()
         self._root_proxy_scores = ()
         self._root_candidate_families = {}
+        self._root_proxy_refined = 0
         self._pending_audit = None
         self._own_player_id = int(state.me.player_id)
         rankings = tuple(int(player_id) for player_id in state.rankings)
@@ -2968,6 +3163,14 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             for other_index, player_id in enumerate(rankings)
             if other_index != rank_index
         }
+        progress = self._current_round / max(
+            1,
+            int(getattr(state, "max_rounds", 1400)),
+        )
+        self._proxy_safety_weight = self._safety_weight(
+            rank_index + 1,
+            progress,
+        )
         return profile_started
 
     def _emit_profile(self, decision: StrategyDecision) -> StrategyDecision:
@@ -2985,11 +3188,9 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         candidate_children = sum(
             seconds.get(name, 0.0)
             for name in (
-                "candidate_inherited",
-                "candidate_virus_actions",
-                "candidate_dedupe",
-                "gradient",
-                "candidate_proxy",
+                "proxy",
+                "proxy_coarse",
+                "proxy_refine",
             )
         )
         step_children = sum(
@@ -3002,19 +3203,19 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 "step_shaping",
             )
         )
+        candidate_total = seconds.get("candidate", 0.0)
+        step_total = seconds.get("step", 0.0)
+        audit_total = seconds.get("audit", 0.0)
+        choose_total = seconds.get("choose", 0.0)
+        fallback_total = seconds.get("fallback", 0.0)
         phase_seconds = {
             "setup_and_search_control": max(
                 0.0,
-                seconds.get("choose", 0.0)
-                - seconds.get("candidate", 0.0)
-                - seconds.get("step", 0.0)
-                - seconds.get("audit", 0.0),
+                choose_total - candidate_total - step_total - audit_total,
             ),
-            "candidate_base_generate": seconds.get("candidate_inherited", 0.0),
-            "candidate_virus_generate": seconds.get("candidate_virus_actions", 0.0),
-            "candidate_merge_dedupe": seconds.get("candidate_dedupe", 0.0),
-            "candidate_gradient": seconds.get("gradient", 0.0),
-            "candidate_proxy_score": seconds.get("candidate_proxy", 0.0),
+            "candidate_shared_analysis": seconds.get("proxy", 0.0),
+            "candidate_coarse_rank": seconds.get("proxy_coarse", 0.0),
+            "candidate_geometric_refine": seconds.get("proxy_refine", 0.0),
             "candidate_overhead": max(
                 0.0,
                 seconds.get("candidate", 0.0) - candidate_children,
@@ -3032,12 +3233,37 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 seconds.get("step", 0.0) - step_children,
             ),
             "audit_diagnostic": seconds.get("audit", 0.0),
-            "fallback": seconds.get("fallback", 0.0),
+            # The fallback operation includes its candidate generation.  Only
+            # its own control overhead belongs in this additive phase; the
+            # candidate phases above already account for the nested work.
+            "fallback": max(
+                0.0,
+                fallback_total - candidate_total - step_total - audit_total,
+            ),
         }
         profile = {
             "schema_version": 1,
             "round": self._current_round,
             "sample_every_n": self._profile_every_n,
+            "compute_resource_ms": {
+                "spent_before_turn": round(
+                    self.compute_spent_seconds * 1000.0,
+                    3,
+                ),
+                "competition_budget": round(
+                    self.competition_compute_budget_seconds * 1000.0,
+                    3,
+                ),
+                "competition_remaining_before_turn": round(
+                    max(
+                        0.0,
+                        self.competition_compute_budget_seconds
+                        - self.compute_spent_seconds,
+                    )
+                    * 1000.0,
+                    3,
+                ),
+            },
             "phase_ms": {
                 name: round(elapsed * 1000.0, 6)
                 for name, elapsed in phase_seconds.items()
@@ -3069,6 +3295,65 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
     def _uses_base_transition_score(self) -> bool:
         # This policy replaces the base score with a utility difference.
         return False
+
+    def choose(self, context: StrategyContext) -> StrategyDecision:
+        """Run the geometric proxy as the primary competition policy.
+
+        A positive exact-search bank is still supported for offline A/B and
+        audit runs.  With the production default of zero, entering the base
+        class's time-bank fallback would produce the same action but falsely
+        label every healthy turn as degraded execution.
+        """
+
+        if self.compute_budget_seconds > EPSILON:
+            return super().choose(context)
+
+        started_at = perf_counter()
+        try:
+            decision = self._proxy_decision(context)
+        finally:
+            self.compute_spent_seconds += perf_counter() - started_at
+        return replace(
+            decision,
+            diagnostics={
+                **decision.diagnostics,
+                "compute_spent_ms": round(
+                    self.compute_spent_seconds * 1000.0,
+                    3,
+                ),
+                "competition_compute_budget_ms": round(
+                    self.competition_compute_budget_seconds * 1000.0,
+                    3,
+                ),
+                "competition_compute_remaining_ms": round(
+                    max(
+                        0.0,
+                        self.competition_compute_budget_seconds
+                        - self.compute_spent_seconds,
+                    )
+                    * 1000.0,
+                    3,
+                ),
+            },
+        )
+
+    def _proxy_decision(self, context: StrategyContext) -> StrategyDecision:
+        profile_started = self._begin_replay_turn(context.game.state)
+        decision = super()._approximate_value_fallback(context)
+        diagnostics = dict(decision.diagnostics)
+        candidate_count = int(diagnostics.get("fallback_candidates") or 0)
+        diagnostics.update(
+            approximate_fallback=False,
+            primary_proxy=True,
+            search_stop_reason="proxy_complete",
+            root_actions_generated=candidate_count,
+            root_actions_proxy_evaluated=int(
+                diagnostics.get("proxy_candidates_refined") or 0
+            ),
+            root_actions_evaluated=0,
+        )
+        self._record_profile("choose", profile_started)
+        return self._emit_profile(replace(decision, diagnostics=diagnostics))
 
     def _time_budget_fallback(
         self,
@@ -3129,7 +3414,40 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             proxy_gap = self._root_proxy_scores[0][1] - self._root_proxy_scores[1][1]
         diagnostics = dict(decision.diagnostics)
         diagnostics.update(
+            proxy_only=False,
+            compute_remaining_ms=round(
+                max(
+                    0.0,
+                    self.compute_budget_seconds - self.compute_spent_seconds,
+                )
+                * 1000.0,
+                3,
+            ),
+            competition_compute_budget_ms=round(
+                self.competition_compute_budget_seconds * 1000.0,
+                3,
+            ),
+            competition_compute_remaining_ms=round(
+                max(
+                    0.0,
+                    self.competition_compute_budget_seconds
+                    - self.compute_spent_seconds,
+                )
+                * 1000.0,
+                3,
+            ),
             candidate_family_counts=dict(self._root_candidate_families),
+            proxy_candidates_refined=self._root_proxy_refined,
+            proxy_top_actions=[
+                {
+                    "reason": action.reason,
+                    "split": action.split,
+                    "score": round(score, 6),
+                }
+                for action, score in self._root_proxy_scores[
+                    : self._root_proxy_refined
+                ]
+            ],
             selected_proxy_rank=selected_proxy_rank,
             proxy_top_two_gap=(
                 round(proxy_gap, 6) if proxy_gap is not None else None
@@ -3144,6 +3462,13 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             exact_best_raw_proxy_rank=self._audit_last_raw_rank,
             audit_fatal_candidates=self._audit_last_fatal_count,
             audit_spent_ms=round(self._audit_spent_seconds * 1000.0, 3),
+            exact_best_reason=self._audit_last_exact_reason,
+            exact_best_split=self._audit_last_exact_split,
+            proxy_exact_regret=(
+                round(self._audit_last_exact_regret, 6)
+                if self._audit_last_exact_regret is not None
+                else None
+            ),
         )
         profiled_decision = replace(decision, diagnostics=diagnostics)
         self._record_profile("choose", profile_started)
@@ -3158,114 +3483,210 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         viruses,
         arena_size: float,
         first_step: bool,
+        allow_split: bool = True,
         angle_offset: int = 0,
     ):
         profile_started = self._profile_start()
-        inherited_started = self._profile_start()
-        inherited = list(
-            super()._raw_candidate_actions(
-                node=node,
-                foods=foods,
-                food_targets=food_targets,
-                viruses=viruses,
-                arena_size=arena_size,
-                first_step=first_step,
-                angle_offset=angle_offset,
-            )
-        )
-        self._record_profile_count("replay_base_raw", len(inherited))
-        self._record_profile("candidate_inherited", inherited_started)
-
-        virus_actions_started = self._profile_start()
-        virus_actions = self._virus_actions(
+        proxy_started = self._profile_start()
+        proxy_analysis = self._cached_proxy_analysis(
             node=node,
+            foods=foods,
             viruses=viruses,
+            arena_size=arena_size,
+        )
+        self._record_profile("proxy", proxy_started)
+        node_geometry = self._node_geometry(node)
+        own_by_id = {blob.blob_id: blob for blob in node.own_blobs}
+        actions: list[Action] = [
+            Action(
+                node.last_direction,
+                reason="keep" if first_step else "continue",
+            )
+        ]
+
+        escape = self._escape_vector(node)
+        if escape != (0.0, 0.0):
+            actions.extend(
+                (
+                    Action(escape, reason="escape"),
+                    Action(_rotate(escape, math.pi / 8), reason="escape_tangent"),
+                    Action(_rotate(escape, -math.pi / 8), reason="escape_tangent"),
+                    Action(_rotate(escape, math.pi / 2), reason="escape_wide_tangent"),
+                    Action(_rotate(escape, -math.pi / 2), reason="escape_wide_tangent"),
+                )
+            )
+        actions.extend(
+            Action(_rotate(node.last_direction, angle), reason="steer")
+            for angle in (-math.pi / 6, -math.pi / 12, math.pi / 12, math.pi / 6)
+        )
+
+        available_food = [
+            food
+            for food in foods
+            if food.food_id not in node.eaten_food_ids
+        ]
+        if available_food:
+            nearest_food = min(
+                available_food,
+                key=lambda food: squared_distance(node_geometry.center, food.pos),
+            )
+            actions.append(
+                Action(
+                    normalise(
+                        (
+                            nearest_food.pos[0] - node_geometry.center[0],
+                            nearest_food.pos[1] - node_geometry.center[1],
+                        )
+                    ),
+                    reason="nearest_food",
+                )
+            )
+        for target in food_targets[: 4 if first_step else 2]:
+            actions.append(
+                Action(
+                    normalise(
+                        (
+                            target[0] - node_geometry.center[0],
+                            target[1] - node_geometry.center[1],
+                        )
+                    ),
+                    reason="food_cluster",
+                )
+            )
+
+        virus_actions = self._proxy_virus_actions(
+            node=node,
+            viruses=tuple(target.virus for target in proxy_analysis.viruses),
             arena_size=arena_size,
             limit=3 if first_step else 1,
         )
-        prey_opportunities = sorted(
-            (
-                (enemy, self._prey_opportunity(node, enemy, arena_size))
-                for enemy in node.enemies
-                if not enemy.stale_rounds
-            ),
-            key=lambda item: (
-                -item[1].expected_mass,
-                item[0].player_id,
-                item[0].blob_id,
-            ),
-        )
-        prey_actions: list[Action] = []
-        for enemy, opportunity in prey_opportunities[: 3 if first_step else 2]:
-            if opportunity.origin is not None:
-                prey_actions.append(Action(opportunity.direction, reason="prey"))
-            split_opportunity = self._split_prey_opportunity(
-                node,
-                enemy,
-                arena_size,
-            )
-            if split_opportunity.origin is not None:
-                prey_actions.append(
+        actions.extend(virus_actions)
+        for target in proxy_analysis.prey[: 3 if first_step else 2]:
+            origin = own_by_id.get(target.source_blob_id)
+            if origin is not None:
+                actions.append(
                     Action(
-                        split_opportunity.direction,
-                        split=True,
-                        reason="split_prey",
+                        self._intercept_direction(origin, target.enemy),
+                        reason="prey",
                     )
                 )
-        self._record_profile(
-            "candidate_virus_actions",
-            virus_actions_started,
-        )
 
-        # A direct flee vector can point into the arena clamp when a predator
-        # approaches from the interior.  Wide tangents stay in the same search
-        # (they are not forced actions), but make the viable route around the
-        # predator available before an anytime root search reaches its limit.
-        escape = next(
+        wall = self._wall_vector(node_geometry.primary, arena_size)
+        if wall != (0.0, 0.0):
+            actions.append(Action(wall, reason="wall_escape"))
+        actions.append(
+            Action(
+                normalise(
+                    (
+                        arena_size / 2.0 - node_geometry.center[0],
+                        arena_size / 2.0 - node_geometry.center[1],
+                    )
+                ),
+                reason="center",
+            )
+        )
+        if first_step:
+            sample_count = max(8, self.angular_samples)
+            for index in range(sample_count):
+                angle = TAU * ((index + angle_offset) % sample_count) / sample_count
+                direction = (math.cos(angle), math.sin(angle))
+                reason = (
+                    "escape_angle"
+                    if escape != (0.0, 0.0)
+                    and direction[0] * escape[0] + direction[1] * escape[1] > 0.5
+                    else "angle"
+                )
+                actions.append(Action(direction, reason=reason))
+
+        # Equivalent physical actions receive one semantic label for telemetry.
+        # This ordering does not allocate search slots: every unique action is
+        # still ranked by the shared proxy below.  It only prevents a prey or
+        # virus route aligned with "keep" from being reported as passive play.
+        actions = list(
+            self._dedupe_actions(
+                sorted(actions, key=self._proxy_reason_priority)
+            )
+        )
+        if (
+            allow_split
+            and len(node.own_blobs) < MAX_BLOB_COUNT
+            and any(blob.mass >= SPLIT_MIN_MASS for blob in node.own_blobs)
+        ):
+            actions = list(
+                self._dedupe_actions(
+                    [
+                        *actions,
+                        *(
+                            Action(
+                                action.direction,
+                                split=True,
+                                reason=(
+                                    action.reason
+                                    if action.split
+                                    else f"split_{action.reason}"
+                                ),
+                            )
+                            for action in actions
+                        ),
+                    ]
+                )
+            )
+        refine_limit = (
+            self.proxy_refine_limit
+            if first_step
+            else max(2, self.proxy_refine_limit // 2)
+        )
+        if refine_limit >= len(actions):
+            refine_actions = tuple(actions)
+            coarse_remainder: tuple[tuple[Action, float], ...] = ()
+        else:
+            coarse_started = self._profile_start()
+            coarse_scored = tuple(
+                sorted(
+                    (
+                        (
+                            action,
+                            self._coarse_action_value(
+                                node=node,
+                                action=action,
+                                arena_size=arena_size,
+                                proxy_analysis=proxy_analysis,
+                                node_geometry=node_geometry,
+                            ),
+                        )
+                        for action in actions
+                    ),
+                    key=lambda item: (-item[1], self._action_key(item[0])),
+                )
+            )
+            self._record_profile("proxy_coarse", coarse_started)
+            refine_actions = tuple(
+                action
+                for action, _ in coarse_scored[:refine_limit]
+            )
+            coarse_remainder = coarse_scored[refine_limit:]
+        refine_count = len(refine_actions)
+        refine_started = self._profile_start()
+        refined = sorted(
             (
-                action.direction
-                for action in inherited
-                if action.reason == "escape"
+                (
+                    action,
+                    self._approximate_action_value(
+                        node=node,
+                        action=action,
+                        foods=foods,
+                        viruses=viruses,
+                        arena_size=arena_size,
+                        node_geometry=node_geometry,
+                        proxy_analysis=proxy_analysis,
+                    ),
+                )
+                for action in refine_actions
             ),
-            (0.0, 0.0),
+            key=lambda item: (-item[1], self._action_key(item[0])),
         )
-        wide_escape_actions = []
-        if escape != (0.0, 0.0):
-            wide_escape_actions = [
-                Action(_rotate(escape, math.pi / 2), reason="escape_wide_tangent"),
-                Action(_rotate(escape, -math.pi / 2), reason="escape_wide_tangent"),
-            ]
-
-        merged_actions = [
-            *wide_escape_actions,
-            *virus_actions,
-            *prey_actions,
-            *inherited,
-        ]
-        dedupe_started = self._profile_start()
-        actions = self._dedupe_actions(
-            merged_actions,
-            profile_prefix="replay_candidate",
-        )
-        self._record_profile("candidate_dedupe", dedupe_started)
-        gradient_started = self._profile_start()
-        value_gradient = self._cached_value_gradient(
-            node=node,
-            foods=foods,
-            viruses=viruses,
-            arena_size=arena_size,
-        )
-        self._record_profile("gradient", gradient_started)
-        proxy_started = self._profile_start()
-        scored = self._rank_approximate_actions(
-            node=node,
-            actions=actions,
-            foods=foods,
-            arena_size=arena_size,
-            value_gradient=value_gradient,
-        )
-        self._record_profile("candidate_proxy", proxy_started)
-        self._record_profile_count("candidate_proxy_actions", len(actions))
+        self._record_profile("proxy_refine", refine_started)
+        scored = tuple([*refined, *coarse_remainder])
         if first_step:
             family_counts: dict[str, int] = {}
             for action, _ in scored:
@@ -3273,6 +3694,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 family_counts[family] = family_counts.get(family, 0) + 1
             self._root_proxy_scores = scored
             self._root_candidate_families = family_counts
+            self._root_proxy_refined = refine_count
         result = tuple(action for action, _ in scored)
         self._record_profile("candidate", profile_started)
         return result
@@ -3293,6 +3715,23 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         if "wall" in reason or reason == "center":
             return "position"
         return "explore"
+
+    @staticmethod
+    def _proxy_reason_priority(action: Action) -> tuple[int, str]:
+        reason = action.reason.removeprefix("split_")
+        if "prey" in reason:
+            return (0, reason)
+        if "virus" in reason:
+            return (1, reason)
+        if "escape" in reason:
+            return (2, reason)
+        if "food" in reason or "farm" in reason:
+            return (3, reason)
+        if "wall" in reason or reason == "center":
+            return (4, reason)
+        if reason in {"keep", "continue"}:
+            return (5, reason)
+        return (6, reason)
 
     def _node_geometry(self, node: SearchNode) -> NodeGeometry:
         cached = self._node_geometry_cache.get(id(node))
@@ -3512,105 +3951,1380 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         node: SearchNode,
         action: Action,
         foods: tuple[FoodModel, ...],
+        viruses: tuple[VirusModel, ...] = (),
         arena_size: float,
-        value_gradient: tuple[float, float],
+        value_gradient: tuple[float, float] | None = None,
         node_geometry: NodeGeometry | None = None,
+        proxy_analysis: ProxyAnalysis | None = None,
     ) -> float:
-        """Project the shared state-value gradient through one cheap action."""
+        """Rank an action with cheap physics and the shared state value.
+
+        The old proxy multiplied one local gradient by a one-turn displacement.
+        That was fast, but it could not express a wall capture, a split speedup,
+        or a threat crossed halfway through a move.  This evaluator projects a
+        short linear trajectory, measures segment intersections, and compares
+        the same safe-mass/opportunity/rival value used by exact beam nodes.
+        """
 
         direction = normalise(action.direction)
         geometry = node_geometry or self._node_geometry(node)
-        total_mass = max(geometry.total_mass, EPSILON)
-        displacement_x = 0.0
-        displacement_y = 0.0
-        self._record_profile_count("proxy_own_blob_moves", len(node.own_blobs))
-        for own in node.own_blobs:
-            moved = self._move_own(own, direction, arena_size)
-            displacement_x += (moved.x - own.x) * own.mass / total_mass
-            displacement_y += (moved.y - own.y) * own.mass / total_mass
-
-        gradient_projection = (
-            value_gradient[0] * displacement_x
-            + value_gradient[1] * displacement_y
+        analysis = proxy_analysis or self._cached_proxy_analysis(
+            node=node,
+            foods=foods,
+            viruses=viruses,
+            arena_size=arena_size,
         )
-        turn_penalty = self._turn_cost(node.last_direction, direction) * 0.6
-        self._record_profile_value("proxy_gradient_projection", gradient_projection)
-        self._record_profile_value("proxy_turn_penalty", turn_penalty)
-        value = gradient_projection - turn_penalty
-        if not action.split:
-            return value
-
-        capture_bonus = 0.0
-        for enemy in node.enemies:
-            if enemy.stale_rounds:
-                continue
-            opportunity = self._split_prey_opportunity(
-                node,
-                enemy,
-                arena_size,
-            )
-            if opportunity.origin is None:
-                continue
-            alignment = max(
-                0.0,
-                direction[0] * opportunity.direction[0]
-                + direction[1] * opportunity.direction[1],
-            )
-            capture_bonus = max(
-                capture_bonus,
-                100.0 * opportunity.expected_mass * alignment**4,
-            )
-        food_bonus = 0.0
-        for food in foods:
-            if food.food_id in node.eaten_food_ids:
-                continue
-            rel = (food.pos[0] - node.primary.x, food.pos[1] - node.primary.y)
-            forward = rel[0] * direction[0] + rel[1] * direction[1]
-            lateral = abs(rel[0] * direction[1] - rel[1] * direction[0])
-            if 0.0 <= forward <= 9.0 and lateral <= node.primary.radius * 1.4:
-                food_bonus += 50.0 * FOOD_RADIUS * FOOD_RADIUS
-        new_fragments = min(
-            MAX_BLOB_COUNT - len(node.own_blobs),
-            sum(own.mass >= SPLIT_MIN_MASS for own in node.own_blobs),
+        self._record_profile_count("proxy_actions_evaluated")
+        movement = self._proxy_project_action(
+            node=node,
+            action=action,
+            arena_size=arena_size,
+            horizon=self.proxy_horizon,
+            node_geometry=geometry,
+            own_sources=analysis.own_sources,
         )
-        fragment_penalty = new_fragments * 2.0
-        self._record_profile_value("proxy_split_capture_bonus", capture_bonus)
-        self._record_profile_value("proxy_split_food_bonus", food_bonus)
-        self._record_profile_value("proxy_split_fragment_penalty", fragment_penalty)
-        return value + capture_bonus + food_bonus - fragment_penalty
+        self._record_profile_count("proxy_projected_blobs", len(movement.blobs))
+        enemy_motions = self._proxy_enemy_motions(
+            analysis.motion_enemies,
+            movement.blobs,
+            horizon=self.proxy_horizon,
+            arena_size=arena_size,
+            enemy_speeds=analysis.enemy_speeds,
+        )
+        self._record_profile_count("proxy_projected_enemies", len(enemy_motions))
+        projected = self._proxy_state_value(
+            node=node,
+            blobs=movement.blobs,
+            enemy_motions=enemy_motions,
+            foods=analysis.foods,
+            viruses=analysis.viruses,
+            prey=analysis.prey,
+            threats_by_source=analysis.threats_by_source,
+            motion_index_by_key=analysis.motion_index_by_key,
+            arena_size=arena_size,
+            horizon=self.proxy_horizon,
+        )
+        discount_sum = (
+            float(self.proxy_horizon)
+            if self.proxy_discount >= 1.0 - EPSILON
+            else (1.0 - self.proxy_discount**self.proxy_horizon)
+            / max(1.0 - self.proxy_discount, EPSILON)
+        )
+        future_weight = discount_sum / self.proxy_horizon
+        return (
+            (projected.total - analysis.baseline.total) * future_weight
+            - (1.0 - movement.efficiency)
+            * self._MOVEMENT_INEFFICIENCY_PENALTY
+            * discount_sum
+            - self._turn_cost(node.last_direction, direction) * 0.6
+        )
 
-    def _rank_approximate_actions(
+    def _coarse_action_value(
         self,
         *,
         node: SearchNode,
-        actions: tuple[Action, ...] | list[Action],
-        foods: tuple[FoodModel, ...],
+        action: Action,
         arena_size: float,
-        value_gradient: tuple[float, float],
-    ) -> tuple[tuple[Action, float], ...]:
-        """Rank search and fallback candidates with one proxy implementation."""
+        proxy_analysis: ProxyAnalysis,
+        node_geometry: NodeGeometry,
+    ) -> float:
+        """O(blob count) first-stage score for every generated action."""
 
-        node_geometry = self._node_geometry(node)
-        return tuple(
-            sorted(
-                (
-                    (
-                        action,
-                        self._approximate_action_value(
-                            node=node,
-                            action=action,
-                            foods=foods,
-                            arena_size=arena_size,
-                            value_gradient=value_gradient,
-                            node_geometry=node_geometry,
-                        ),
-                    )
-                    for action in actions
-                ),
-                key=lambda item: (-item[1], self._action_key(item[0])),
+        direction = normalise(action.direction)
+        displacement_x, displacement_y, efficiency = self._coarse_proxy_movement(
+            action=action,
+            arena_size=arena_size,
+            horizon=self.proxy_horizon,
+            geometry=node_geometry,
+            kinematics=proxy_analysis.kinematics,
+        )
+        discount_sum = (
+            float(self.proxy_horizon)
+            if self.proxy_discount >= 1.0 - EPSILON
+            else (1.0 - self.proxy_discount**self.proxy_horizon)
+            / max(1.0 - self.proxy_discount, EPSILON)
+        )
+        displacement_scale = discount_sum / self.proxy_horizon
+        gradient_x, gradient_y = proxy_analysis.gradient
+        return (
+            (
+                gradient_x * displacement_x
+                + gradient_y * displacement_y
             )
+            * displacement_scale
+            + (proxy_analysis.split_state_delta * displacement_scale if action.split else 0.0)
+            - (1.0 - efficiency)
+            * self._MOVEMENT_INEFFICIENCY_PENALTY
+            * discount_sum
+            - self._turn_cost(node.last_direction, direction) * 0.6
         )
 
+    def _proxy_kinematics(
+        self,
+        node: SearchNode,
+        geometry: NodeGeometry,
+        *,
+        own_sources: tuple[ProxyOwnSource, ...] | None = None,
+    ) -> ProxyKinematics:
+        """Pre-aggregate constant motion coefficients for O(1) ranking."""
+
+        total_mass = max(geometry.total_mass, EPSILON)
+        normal_speed = 0.0
+        normal_eject_x = 0.0
+        normal_eject_y = 0.0
+        split_speed = 0.0
+        split_static_eject_x = 0.0
+        split_static_eject_y = 0.0
+        split_directional_eject = 0.0
+        split_placement = 0.0
+        split_radius = 0.0
+        if own_sources is None:
+            remaining_slots = MAX_BLOB_COUNT - len(node.own_blobs)
+            generated: list[ProxyOwnSource] = []
+            for own in sorted(node.own_blobs, key=lambda blob: blob.blob_id):
+                if remaining_slots > 0 and own.mass >= SPLIT_MIN_MASS:
+                    source_split_radius = own.radius / SQRT2
+                    source_split_speed = player_speed(source_split_radius)
+                    remaining_slots -= 1
+                else:
+                    source_split_radius = None
+                    source_split_speed = None
+                generated.append(
+                    ProxyOwnSource(
+                        blob=own,
+                        speed=player_speed(own.radius),
+                        split_radius=source_split_radius,
+                        split_speed=source_split_speed,
+                    )
+                )
+            own_sources = tuple(generated)
+        for source in own_sources:
+            own = source.blob
+            normal_speed += own.mass * source.speed
+            normal_eject_x += own.mass * own.eject_vx
+            normal_eject_y += own.mass * own.eject_vy
+            if source.split_radius is not None:
+                child_radius = source.split_radius
+                assert source.split_speed is not None
+                child_mass = own.mass / 2.0
+                split_speed += own.mass * source.split_speed
+                split_static_eject_x += child_mass * own.eject_vx
+                split_static_eject_y += child_mass * own.eject_vy
+                split_directional_eject += child_mass * SPLIT_EJECT_SPEED
+                split_placement += child_mass * (
+                    2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON
+                )
+                split_radius = max(split_radius, child_radius)
+            else:
+                split_speed += own.mass * source.speed
+                split_static_eject_x += own.mass * own.eject_vx
+                split_static_eject_y += own.mass * own.eject_vy
+                split_radius = max(split_radius, own.radius)
+        return ProxyKinematics(
+            normal_speed=normal_speed / total_mass,
+            normal_eject_x=normal_eject_x / total_mass,
+            normal_eject_y=normal_eject_y / total_mass,
+            normal_radius=geometry.primary.radius,
+            split_speed=split_speed / total_mass,
+            split_static_eject_x=split_static_eject_x / total_mass,
+            split_static_eject_y=split_static_eject_y / total_mass,
+            split_directional_eject=split_directional_eject / total_mass,
+            split_placement=split_placement / total_mass,
+            split_radius=max(split_radius, EPSILON),
+        )
+
+    def _proxy_split_state_delta(
+        self,
+        *,
+        node: SearchNode,
+        threats: tuple[ProxyThreat, ...],
+        prey_rows: tuple[tuple[float, ProxyPreyTarget], ...],
+        viruses: tuple[ProxyVirusTarget, ...],
+        arena_size: float,
+    ) -> float:
+        """Approximate the action-independent value lost or gained by splitting."""
+
+        threats_by_source: dict[int, list[EnemyBlob]] = {}
+        for target in threats:
+            threats_by_source.setdefault(target.source_blob_id, []).append(target.enemy)
+        prey_by_source: dict[int, list[tuple[float, EnemyBlob]]] = {}
+        for expected_mass, target in prey_rows:
+            prey_by_source.setdefault(target.source_blob_id, []).append(
+                (expected_mass, target.enemy)
+            )
+        viruses_by_source: dict[int, list[VirusModel]] = {}
+        for target in viruses:
+            viruses_by_source.setdefault(target.source_blob_id, []).append(target.virus)
+
+        survival_midpoint = (
+            self.survival_midpoint_base
+            + self.survival_midpoint_scale * self._proxy_safety_weight
+        )
+        temperature = max(self.survival_temperature, 0.1)
+
+        def survival(own: OwnBlob, radius: float) -> float:
+            probability = 1.0
+            for enemy in threats_by_source.get(own.blob_id, ()):
+                if not can_eat_player_blob(enemy.radius, radius):
+                    continue
+                danger_radius = enemy.radius
+                if _can_split_eat(enemy.radius, radius):
+                    danger_radius = max(
+                        danger_radius,
+                        _split_attack_reach(enemy.radius),
+                    )
+                margin = (
+                    math.dist(own.pos, enemy.pos)
+                    - danger_radius
+                    - enemy.stale_rounds * 0.35
+                    - self._wall_trap_factor_at(
+                        own.x,
+                        own.y,
+                        radius,
+                        enemy,
+                        arena_size,
+                    )
+                    * 4.0
+                )
+                scaled = _clamp(
+                    (margin - survival_midpoint) / temperature,
+                    -40.0,
+                    40.0,
+                )
+                probability = min(
+                    probability,
+                    1.0 / (1.0 + math.exp(-scaled)),
+                )
+            return probability
+
+        safe_mass_delta = 0.0
+        opportunity_delta = 0.0
+        remaining_slots = MAX_BLOB_COUNT - len(node.own_blobs)
+        for own in sorted(node.own_blobs, key=lambda blob: blob.blob_id):
+            if remaining_slots <= 0 or own.mass < SPLIT_MIN_MASS:
+                continue
+            child_radius = own.radius / SQRT2
+            safe_mass_delta += own.mass * (
+                survival(own, child_radius) - survival(own, own.radius)
+            )
+            for expected_mass, enemy in prey_by_source.get(own.blob_id, ()):
+                if not can_eat_player_blob(child_radius, enemy.radius):
+                    opportunity_delta -= expected_mass
+            for virus in viruses_by_source.get(own.blob_id, ()):
+                if _can_consume_virus(child_radius, virus.radius):
+                    continue
+                gap = max(0.0, math.dist(own.pos, virus.pos) - own.radius)
+                opportunity_delta -= (
+                    virus.radius
+                    * virus.radius
+                    * math.exp(-gap / self._VIRUS_POTENTIAL_HORIZON)
+                )
+            remaining_slots -= 1
+        return 100.0 * (safe_mass_delta + opportunity_delta)
+
+    @staticmethod
+    def _coarse_proxy_movement(
+        *,
+        action: Action,
+        arena_size: float,
+        horizon: int,
+        geometry: NodeGeometry,
+        kinematics: ProxyKinematics,
+    ) -> tuple[float, float, float]:
+        direction = normalise(action.direction)
+        horizon = max(1, horizon)
+        drag_sum = (
+            float(horizon)
+            if SPLIT_EJECT_DRAG >= 1.0 - EPSILON
+            else (1.0 - SPLIT_EJECT_DRAG**horizon)
+            / max(1.0 - SPLIT_EJECT_DRAG, EPSILON)
+        )
+        if action.split:
+            speed = kinematics.split_speed
+            static_eject_x = kinematics.split_static_eject_x
+            static_eject_y = kinematics.split_static_eject_y
+            directional_distance = (
+                kinematics.split_placement
+                + kinematics.split_directional_eject * drag_sum
+            )
+            radius = kinematics.split_radius
+        else:
+            speed = kinematics.normal_speed
+            static_eject_x = kinematics.normal_eject_x
+            static_eject_y = kinematics.normal_eject_y
+            directional_distance = 0.0
+            radius = kinematics.normal_radius
+        intended_x = (
+            geometry.center[0]
+            + direction[0] * (speed * horizon + directional_distance)
+            + static_eject_x * drag_sum
+        )
+        intended_y = (
+            geometry.center[1]
+            + direction[1] * (speed * horizon + directional_distance)
+            + static_eject_y * drag_sum
+        )
+        projected_x = _clamp(intended_x, radius, arena_size - radius)
+        projected_y = _clamp(intended_y, radius, arena_size - radius)
+        displacement_x = projected_x - geometry.center[0]
+        displacement_y = projected_y - geometry.center[1]
+        expected_useful = speed * horizon
+        actual_useful = max(
+            0.0,
+            displacement_x * direction[0] + displacement_y * direction[1],
+        )
+        efficiency = (
+            1.0
+            if expected_useful <= EPSILON
+            else _clamp(actual_useful / expected_useful, 0.0, 1.0)
+        )
+        return displacement_x, displacement_y, efficiency
+
+    def _cached_proxy_analysis(
+        self,
+        *,
+        node: SearchNode,
+        foods: tuple[FoodModel, ...],
+        viruses: tuple[VirusModel, ...],
+        arena_size: float,
+    ) -> ProxyAnalysis:
+        cache_key = (
+            id(node),
+            id(foods),
+            id(viruses),
+            arena_size,
+            self._proxy_safety_weight,
+        )
+        cached = self._proxy_analysis_cache.get(cache_key)
+        if (
+            cached is not None
+            and cached[0] is node
+            and cached[1] is foods
+            and cached[2] is viruses
+        ):
+            self._record_cache_access("proxy", hit=True)
+            return cached[3]
+
+        geometry = self._node_geometry(node)
+        selected_food_models = tuple(
+            sorted(
+                (
+                    food
+                    for food in foods
+                    if food.food_id not in node.eaten_food_ids
+                ),
+                key=lambda food: squared_distance(geometry.center, food.pos),
+            )[: self.proxy_food_limit]
+        )
+        selected_virus_models = tuple(
+            sorted(
+                (
+                    virus
+                    for virus in viruses
+                    if virus.virus_id not in node.consumed_virus_ids
+                ),
+                key=lambda virus: squared_distance(geometry.center, virus.pos),
+            )[: self.proxy_virus_limit]
+        )
+        risk_enemies = self._risk_enemies(node.enemies)
+        food_targets: list[ProxyFoodTarget] = []
+        for food in selected_food_models:
+            source = min(
+                node.own_blobs,
+                key=lambda blob: max(
+                    0.0,
+                    math.dist(blob.pos, food.pos) - blob.radius,
+                ),
+            )
+            food_targets.append(ProxyFoodTarget(source.blob_id, food))
+
+        virus_targets: list[ProxyVirusTarget] = []
+        for virus in selected_virus_models:
+            origins = [
+                blob
+                for blob in node.own_blobs
+                if self._can_still_consume_virus_at_contact(blob, virus)
+            ]
+            if not origins:
+                continue
+            source = min(
+                origins,
+                key=lambda blob: max(
+                    0.0,
+                    math.dist(blob.pos, virus.pos) - blob.radius,
+                ),
+            )
+            virus_targets.append(ProxyVirusTarget(source.blob_id, virus))
+
+        prey_rows: list[tuple[float, ProxyPreyTarget]] = []
+        for enemy in node.enemies:
+            if enemy.stale_rounds:
+                continue
+            best_origin: OwnBlob | None = None
+            best_expected_mass = 0.0
+            for own in node.own_blobs:
+                if not can_eat_player_blob(own.radius, enemy.radius):
+                    continue
+                gap = max(0.0, math.dist(own.pos, enemy.pos) - own.radius)
+                flee = normalise((enemy.x - own.x, enemy.y - own.y))
+                enemy_speed = player_speed(enemy.radius)
+                unclamped_x = enemy.x + flee[0] * enemy_speed * self.proxy_horizon
+                unclamped_y = enemy.y + flee[1] * enemy_speed * self.proxy_horizon
+                clamped_x = _clamp(
+                    unclamped_x,
+                    enemy.radius,
+                    arena_size - enemy.radius,
+                )
+                clamped_y = _clamp(
+                    unclamped_y,
+                    enemy.radius,
+                    arena_size - enemy.radius,
+                )
+                escape_efficiency = _clamp(
+                    math.hypot(clamped_x - enemy.x, clamped_y - enemy.y)
+                    / max(enemy_speed * self.proxy_horizon, EPSILON),
+                    0.0,
+                    1.0,
+                )
+                closing_speed = max(
+                    0.05,
+                    player_speed(own.radius)
+                    - enemy_speed * escape_efficiency,
+                )
+                probability = math.exp(
+                    -gap / max(self._CAPTURE_HORIZON * closing_speed, EPSILON)
+                )
+                rival_value = self._rival_values.get(enemy.player_id, 0.0)
+                expected_mass = probability * enemy.mass * (1.0 + rival_value)
+                if best_origin is None or expected_mass > best_expected_mass:
+                    best_origin = own
+                    best_expected_mass = expected_mass
+            if best_origin is None:
+                continue
+            prey_rows.append(
+                (
+                    best_expected_mass,
+                    ProxyPreyTarget(best_origin.blob_id, enemy),
+                )
+            )
+        prey_rows.sort(
+            key=lambda row: (
+                -row[0],
+                row[1].enemy.player_id,
+                row[1].enemy.blob_id,
+            )
+        )
+        prey_targets = tuple(row[1] for row in prey_rows[:4])
+
+        threat_targets: list[ProxyThreat] = []
+        can_add_fragment = len(node.own_blobs) < MAX_BLOB_COUNT
+        for own in node.own_blobs:
+            exposed_radius = (
+                own.radius / SQRT2
+                if can_add_fragment and own.mass >= SPLIT_MIN_MASS
+                else own.radius
+            )
+            threats = [
+                enemy
+                for enemy in risk_enemies
+                if can_eat_player_blob(enemy.radius, exposed_radius)
+            ]
+            def threat_key(enemy: EnemyBlob) -> tuple[float, int, int]:
+                return (
+                    math.dist(own.pos, enemy.pos)
+                    - max(
+                        enemy.radius,
+                        _split_attack_reach(enemy.radius)
+                        if _can_split_eat(enemy.radius, exposed_radius)
+                        else enemy.radius,
+                    ),
+                    enemy.player_id,
+                    enemy.blob_id,
+                )
+
+            threats.sort(key=threat_key)
+            by_sector: dict[int, EnemyBlob] = {}
+            for enemy in threats:
+                angle = math.atan2(enemy.y - own.y, enemy.x - own.x)
+                sector = int(round(angle / TAU * 8.0)) % 8
+                by_sector.setdefault(sector, enemy)
+            selected_threats = sorted(by_sector.values(), key=threat_key)[
+                : self.proxy_threat_limit
+            ]
+            if len(selected_threats) < self.proxy_threat_limit:
+                selected_keys = {enemy.key for enemy in selected_threats}
+                selected_threats.extend(
+                    enemy
+                    for enemy in threats
+                    if enemy.key not in selected_keys
+                )
+                selected_threats = selected_threats[
+                    : self.proxy_threat_limit
+                ]
+            threat_targets.extend(
+                ProxyThreat(own.blob_id, enemy)
+                for enemy in selected_threats
+            )
+
+        motion_by_key: dict[tuple[int, int], EnemyBlob] = {}
+        for target in (*threat_targets, *prey_targets):
+            motion_by_key.setdefault(target.enemy.key, target.enemy)
+        motion_enemies = tuple(motion_by_key.values())
+        motion_index_by_key = {
+            enemy.key: index
+            for index, enemy in enumerate(motion_enemies)
+        }
+        self._record_profile_count("proxy_analysis_nodes")
+        self._record_profile_count("proxy_food_targets", len(food_targets))
+        self._record_profile_count("proxy_virus_targets", len(virus_targets))
+        self._record_profile_count("proxy_prey_targets", len(prey_targets))
+        self._record_profile_count("proxy_threat_targets", len(threat_targets))
+        self._record_profile_count("proxy_motion_enemies", len(motion_enemies))
+        enemy_speeds = tuple(player_speed(enemy.radius) for enemy in motion_enemies)
+        threat_lists: dict[int, list[ProxyThreat]] = {}
+        for target in threat_targets:
+            threat_lists.setdefault(target.source_blob_id, []).append(target)
+        threats_by_source = {
+            source_blob_id: tuple(targets)
+            for source_blob_id, targets in threat_lists.items()
+        }
+
+        own_sources_list: list[ProxyOwnSource] = []
+        remaining_slots = MAX_BLOB_COUNT - len(node.own_blobs)
+        for blob in sorted(node.own_blobs, key=lambda own: own.blob_id):
+            if remaining_slots > 0 and blob.mass >= SPLIT_MIN_MASS:
+                split_radius = blob.radius / SQRT2
+                split_speed = player_speed(split_radius)
+                remaining_slots -= 1
+            else:
+                split_radius = None
+                split_speed = None
+            own_sources_list.append(
+                ProxyOwnSource(
+                    blob=blob,
+                    speed=player_speed(blob.radius),
+                    split_radius=split_radius,
+                    split_speed=split_speed,
+                )
+            )
+        own_sources = tuple(own_sources_list)
+
+        own_by_id = {blob.blob_id: blob for blob in node.own_blobs}
+        gradient_x = 0.0
+        gradient_y = 0.0
+        for target in food_targets:
+            own = own_by_id[target.source_blob_id]
+            direction = normalise(
+                (target.food.pos[0] - own.x, target.food.pos[1] - own.y)
+            )
+            gap = max(0.0, math.dist(own.pos, target.food.pos) - own.radius)
+            weight = (
+                100.0
+                * FOOD_RADIUS
+                * FOOD_RADIUS
+                * math.exp(-gap / 6.0)
+                / 6.0
+            )
+            gradient_x += direction[0] * weight
+            gradient_y += direction[1] * weight
+        for target in virus_targets:
+            own = own_by_id[target.source_blob_id]
+            direction = normalise(
+                (target.virus.pos[0] - own.x, target.virus.pos[1] - own.y)
+            )
+            gap = max(0.0, math.dist(own.pos, target.virus.pos) - own.radius)
+            weight = (
+                100.0
+                * target.virus.radius
+                * target.virus.radius
+                * math.exp(-gap / self._VIRUS_POTENTIAL_HORIZON)
+                / self._VIRUS_POTENTIAL_HORIZON
+            )
+            gradient_x += direction[0] * weight
+            gradient_y += direction[1] * weight
+        for expected_mass, target in prey_rows[:4]:
+            own = own_by_id[target.source_blob_id]
+            direction = normalise(
+                (target.enemy.x - own.x, target.enemy.y - own.y)
+            )
+            weight = 100.0 * expected_mass / 6.0
+            gradient_x += direction[0] * weight
+            gradient_y += direction[1] * weight
+        for target in threat_targets:
+            own = own_by_id[target.source_blob_id]
+            away = normalise((own.x - target.enemy.x, own.y - target.enemy.y))
+            exposed_radius = (
+                own.radius / SQRT2
+                if can_add_fragment and own.mass >= SPLIT_MIN_MASS
+                else own.radius
+            )
+            danger_radius = max(
+                target.enemy.radius,
+                _split_attack_reach(target.enemy.radius)
+                if _can_split_eat(target.enemy.radius, exposed_radius)
+                else target.enemy.radius,
+            )
+            margin = math.dist(own.pos, target.enemy.pos) - danger_radius
+            pressure = math.exp(-max(0.0, margin) / 6.0)
+            weight = 100.0 * own.mass * (0.2 + pressure) / 6.0
+            gradient_x += away[0] * weight
+            gradient_y += away[1] * weight
+
+        current_blobs = tuple(
+            ProxyBlobMotion(
+                blob_id=source.blob.blob_id,
+                source_blob_id=source.blob.blob_id,
+                start_x=source.blob.x,
+                start_y=source.blob.y,
+                x=source.blob.x,
+                y=source.blob.y,
+                radius=source.blob.radius,
+                speed=source.speed,
+            )
+            for source in own_sources
+        )
+        current_enemies = self._proxy_enemy_motions(
+            motion_enemies,
+            current_blobs,
+            horizon=0,
+            arena_size=arena_size,
+            enemy_speeds=enemy_speeds,
+        )
+        baseline = self._proxy_state_value(
+            node=node,
+            blobs=current_blobs,
+            enemy_motions=current_enemies,
+            foods=tuple(food_targets),
+            viruses=tuple(virus_targets),
+            prey=prey_targets,
+            threats_by_source=threats_by_source,
+            motion_index_by_key=motion_index_by_key,
+            arena_size=arena_size,
+            horizon=0,
+        )
+        analysis = ProxyAnalysis(
+            node=node,
+            foods=tuple(food_targets),
+            viruses=tuple(virus_targets),
+            prey=prey_targets,
+            threats=tuple(threat_targets),
+            threats_by_source=threats_by_source,
+            motion_enemies=motion_enemies,
+            motion_index_by_key=motion_index_by_key,
+            own_sources=own_sources,
+            enemy_speeds=enemy_speeds,
+            gradient=(gradient_x, gradient_y),
+            kinematics=self._proxy_kinematics(
+                node,
+                geometry,
+                own_sources=own_sources,
+            ),
+            split_state_delta=self._proxy_split_state_delta(
+                node=node,
+                threats=tuple(threat_targets),
+                prey_rows=tuple(prey_rows[:4]),
+                viruses=tuple(virus_targets),
+                arena_size=arena_size,
+            ),
+            baseline=baseline,
+        )
+        self._proxy_analysis_cache[cache_key] = (
+            node,
+            foods,
+            viruses,
+            analysis,
+        )
+        self._record_cache_access("proxy", hit=False)
+        return analysis
+
+    def _proxy_state_value(
+        self,
+        *,
+        node: SearchNode,
+        blobs: tuple[ProxyBlobMotion, ...],
+        enemy_motions: tuple[ProxyEnemyMotion, ...],
+        foods: tuple[ProxyFoodTarget, ...],
+        viruses: tuple[ProxyVirusTarget, ...],
+        prey: tuple[ProxyPreyTarget, ...],
+        threats_by_source: dict[int, tuple[ProxyThreat, ...]],
+        motion_index_by_key: dict[tuple[int, int], int],
+        arena_size: float,
+        horizon: int,
+    ) -> ProxyValue:
+        """Evaluate only action-relevant sparse terms of the shared value."""
+
+        blobs_by_source: dict[int, list[ProxyBlobMotion]] = {}
+        for blob in blobs:
+            blobs_by_source.setdefault(blob.source_blob_id, []).append(blob)
+        captured_enemy_keys: set[tuple[int, int]] = set()
+        captured_enemy_mass = 0.0
+        for target in prey:
+            enemy = target.enemy
+            motion_index = motion_index_by_key.get(enemy.key)
+            if motion_index is None:
+                continue
+            motion = enemy_motions[motion_index]
+            if enemy.stale_rounds:
+                continue
+            for blob in blobs_by_source.get(target.source_blob_id, ()):
+                if not can_eat_player_blob(blob.radius, enemy.radius):
+                    continue
+                if self._relative_segment_distance(
+                    blob.start_x,
+                    blob.start_y,
+                    blob.x,
+                    blob.y,
+                    enemy.x,
+                    enemy.y,
+                    motion.x,
+                    motion.y,
+                ) <= blob.radius:
+                    captured_enemy_keys.add(enemy.key)
+                    captured_enemy_mass += enemy.mass
+                    break
+
+        survival_midpoint = (
+            self.survival_midpoint_base
+            + self.survival_midpoint_scale * self._proxy_safety_weight
+        )
+        temperature = max(self.survival_temperature, 0.1)
+        safe_mass = 0.0
+        survival_probabilities: list[float] = []
+        for blob in blobs:
+            survival = 1.0
+            for threat in threats_by_source.get(blob.source_blob_id, ()):
+                enemy = threat.enemy
+                if enemy.key in captured_enemy_keys:
+                    continue
+                motion_index = motion_index_by_key.get(enemy.key)
+                if motion_index is None:
+                    continue
+                motion = enemy_motions[motion_index]
+                if not can_eat_player_blob(enemy.radius, blob.radius):
+                    continue
+                danger_radius = enemy.radius
+                if _can_split_eat(enemy.radius, blob.radius):
+                    danger_radius = max(
+                        danger_radius,
+                        _split_attack_reach(enemy.radius),
+                    )
+                closest = self._relative_segment_distance(
+                    blob.start_x,
+                    blob.start_y,
+                    blob.x,
+                    blob.y,
+                    enemy.x,
+                    enemy.y,
+                    motion.x,
+                    motion.y,
+                )
+                margin = (
+                    closest
+                    - danger_radius
+                    - enemy.stale_rounds * 0.35
+                    - self._wall_trap_factor_at(
+                        blob.x,
+                        blob.y,
+                        blob.radius,
+                        enemy,
+                        arena_size,
+                    )
+                    * 4.0
+                )
+                scaled = _clamp(
+                    (margin - survival_midpoint) / temperature,
+                    -40.0,
+                    40.0,
+                )
+                survival = min(survival, 1.0 / (1.0 + math.exp(-scaled)))
+            survival_probabilities.append(survival)
+            safe_mass += blob.mass * survival
+        continuation_probability = max(survival_probabilities, default=0.0)
+
+        realised_mass = captured_enemy_mass
+        opportunities: list[float] = []
+        for target in foods:
+            food = target.food
+            if food.food_id in node.eaten_food_ids:
+                continue
+            source_blobs = blobs_by_source.get(target.source_blob_id, ())
+            if not source_blobs:
+                continue
+            captured = any(
+                self._point_segment_distance(
+                    food.pos[0],
+                    food.pos[1],
+                    blob.start_x,
+                    blob.start_y,
+                    blob.x,
+                    blob.y,
+                )
+                <= blob.radius
+                for blob in source_blobs
+            )
+            if captured:
+                realised_mass += FOOD_RADIUS * FOOD_RADIUS
+                continue
+            gap = min(
+                max(
+                    0.0,
+                    math.hypot(blob.x - food.pos[0], blob.y - food.pos[1])
+                    - blob.radius,
+                )
+                for blob in source_blobs
+            )
+            opportunities.append(
+                FOOD_RADIUS * FOOD_RADIUS * math.exp(-gap / 6.0)
+            )
+
+        for target in viruses:
+            virus = target.virus
+            if virus.virus_id in node.consumed_virus_ids:
+                continue
+            best_future = 0.0
+            best_capture_delta: float | None = None
+            source_blobs = blobs_by_source.get(target.source_blob_id, ())
+            threat_motions = tuple(
+                enemy_motions[motion_index]
+                for threat in threats_by_source.get(target.source_blob_id, ())
+                if (
+                    motion_index := motion_index_by_key.get(threat.enemy.key)
+                )
+                is not None
+            )
+            for blob in source_blobs:
+                if not _can_consume_virus(blob.radius, virus.radius):
+                    continue
+                path_distance = self._point_segment_distance(
+                    virus.pos[0],
+                    virus.pos[1],
+                    blob.start_x,
+                    blob.start_y,
+                    blob.x,
+                    blob.y,
+                )
+                retention = self._proxy_virus_retention(
+                    blob=blob,
+                    virus=virus,
+                    enemy_motions=threat_motions,
+                    own_blob_count=len(blobs),
+                    arena_size=arena_size,
+                )
+                if path_distance <= blob.radius:
+                    capture_delta = (
+                        (blob.mass + virus.radius * virus.radius) * retention
+                        - blob.mass
+                    )
+                    if (
+                        best_capture_delta is None
+                        or capture_delta > best_capture_delta
+                    ):
+                        best_capture_delta = capture_delta
+                    continue
+                gap = max(
+                    0.0,
+                    math.hypot(blob.x - virus.pos[0], blob.y - virus.pos[1])
+                    - blob.radius,
+                )
+                turns_to_contact = math.ceil(gap / blob.speed)
+                projected_mass = decayed_mass_after_turns(
+                    blob.mass,
+                    turns_to_contact,
+                    decay_rate=MASS_DECAY_RATE,
+                    minimum_radius=STARTING_RADIUS,
+                )
+                if not _can_consume_virus(math.sqrt(projected_mass), virus.radius):
+                    continue
+                best_future = max(
+                    best_future,
+                    virus.radius
+                    * virus.radius
+                    * retention
+                    * math.exp(-gap / self._VIRUS_POTENTIAL_HORIZON),
+                )
+            if best_capture_delta is not None:
+                realised_mass += best_capture_delta
+            elif best_future > 0.0:
+                opportunities.append(best_future)
+
+        for target in prey:
+            enemy = target.enemy
+            motion_index = motion_index_by_key.get(enemy.key)
+            if motion_index is None:
+                continue
+            motion = enemy_motions[motion_index]
+            if (
+                enemy.stale_rounds
+                or enemy.key in captured_enemy_keys
+            ):
+                continue
+            best_probability = 0.0
+            for blob in blobs_by_source.get(target.source_blob_id, ()):
+                if not can_eat_player_blob(blob.radius, enemy.radius):
+                    continue
+                best_probability = max(
+                    best_probability,
+                    self._proxy_prey_capture_probability(
+                        blob,
+                        motion,
+                        arena_size,
+                    ),
+                )
+            if best_probability > 0.0:
+                rival_value = self._rival_values.get(enemy.player_id, 0.0)
+                opportunities.append(
+                    best_probability * enemy.mass * (1.0 + rival_value)
+                )
+
+        safe_mass += realised_mass * continuation_probability
+        opportunities.sort(reverse=True)
+        opportunity_mass = sum(
+            value * weight
+            for value, weight in zip(
+                opportunities[:3],
+                (1.0, 0.25, 0.1),
+                strict=False,
+            )
+        )
+        competitor_mass_debt = sum(
+            self._rival_values.get(enemy.player_id, 0.0) * enemy.mass
+            for enemy in node.enemies
+            if enemy.key not in captured_enemy_keys
+        )
+        return ProxyValue(
+            safe_mass=safe_mass,
+            continuation_probability=continuation_probability,
+            opportunity_mass=opportunity_mass,
+            competitor_mass_debt=competitor_mass_debt,
+            recovery_debt=self.recovery_mass * (1.0 - continuation_probability),
+        )
+
+    def _proxy_virus_retention(
+        self,
+        *,
+        blob: ProxyBlobMotion,
+        virus: VirusModel,
+        enemy_motions: tuple[ProxyEnemyMotion, ...],
+        own_blob_count: int,
+        arena_size: float,
+    ) -> float:
+        """Cheap fragment-risk surrogate used only for candidate ranking."""
+
+        piece_count = max(1, MAX_BLOB_COUNT - own_blob_count + 1)
+        piece_radius = math.sqrt(
+            (blob.mass + virus.radius * virus.radius) / piece_count
+        )
+        retention = 1.0
+        temperature = max(self.survival_temperature, 0.1)
+        survival_midpoint = self.survival_midpoint_base + 1.3
+        for motion in enemy_motions:
+            enemy = motion.enemy
+            if not can_eat_player_blob(enemy.radius, piece_radius):
+                continue
+            danger_radius = enemy.radius
+            if _can_split_eat(enemy.radius, piece_radius):
+                danger_radius = max(
+                    danger_radius,
+                    _split_attack_reach(enemy.radius),
+                )
+            margin = (
+                math.hypot(blob.x - motion.x, blob.y - motion.y)
+                - danger_radius
+                - enemy.stale_rounds * 0.35
+                - self._wall_trap_factor_at(
+                    blob.x,
+                    blob.y,
+                    piece_radius,
+                    enemy,
+                    arena_size,
+                )
+                * 4.0
+            )
+            scaled = _clamp(
+                (margin - survival_midpoint) / temperature,
+                -40.0,
+                40.0,
+            )
+            retention = min(retention, 1.0 / (1.0 + math.exp(-scaled)))
+        return retention
+
+    def _proxy_prey_capture_probability(
+        self,
+        blob: ProxyBlobMotion,
+        motion: ProxyEnemyMotion,
+        arena_size: float,
+    ) -> float:
+        enemy = motion.enemy
+        delta_x = motion.x - blob.x
+        delta_y = motion.y - blob.y
+        distance = math.hypot(delta_x, delta_y)
+        gap = max(0.0, distance - blob.radius)
+        if gap <= EPSILON:
+            return 1.0
+        direction = (delta_x / distance, delta_y / distance)
+        own_x = _clamp(
+            blob.x + direction[0] * blob.speed,
+            blob.radius,
+            arena_size - blob.radius,
+        )
+        own_y = _clamp(
+            blob.y + direction[1] * blob.speed,
+            blob.radius,
+            arena_size - blob.radius,
+        )
+        flee = normalise((motion.x - blob.x, motion.y - blob.y))
+        flee_direction = normalise(
+            (
+                flee[0] * 0.62 + motion.direction[0] * 0.38,
+                flee[1] * 0.62 + motion.direction[1] * 0.38,
+            )
+        )
+        enemy_speed = motion.speed
+        enemy_x = _clamp(
+            motion.x + flee_direction[0] * enemy_speed,
+            enemy.radius,
+            arena_size - enemy.radius,
+        )
+        enemy_y = _clamp(
+            motion.y + flee_direction[1] * enemy_speed,
+            enemy.radius,
+            arena_size - enemy.radius,
+        )
+        next_gap = max(
+            0.0,
+            math.hypot(enemy_x - own_x, enemy_y - own_y) - blob.radius,
+        )
+        closing = gap - next_gap
+        temperature = self._CAPTURE_CLOSING_TEMPERATURE
+        scaled = _clamp(closing / temperature, -40.0, 40.0)
+        effective_closing = temperature * math.log1p(math.exp(scaled))
+        return math.exp(
+            -gap
+            / max(self._CAPTURE_HORIZON * effective_closing, EPSILON)
+        )
+
+    def _proxy_enemy_motions(
+        self,
+        enemies: tuple[EnemyBlob, ...],
+        own_blobs: tuple[ProxyBlobMotion, ...],
+        *,
+        horizon: int,
+        arena_size: float,
+        enemy_speeds: tuple[float, ...] | None = None,
+    ) -> tuple[ProxyEnemyMotion, ...]:
+        speeds = enemy_speeds or tuple(
+            player_speed(enemy.radius)
+            for enemy in enemies
+        )
+        if not own_blobs:
+            return tuple(
+                ProxyEnemyMotion(
+                    enemy,
+                    enemy.x,
+                    enemy.y,
+                    enemy.direction,
+                    speed,
+                )
+                for enemy, speed in zip(enemies, speeds, strict=True)
+            )
+        motions: list[ProxyEnemyMotion] = []
+        for enemy, base_speed in zip(enemies, speeds, strict=True):
+            observed = normalise(enemy.direction)
+            observed_weight = (
+                self.proxy_observed_direction_weight
+                if observed != (0.0, 0.0)
+                else 0.0
+            )
+            adversarial_weight = 1.0 - observed_weight
+            target = min(
+                own_blobs,
+                key=lambda blob: (enemy.x - blob.x) ** 2
+                + (enemy.y - blob.y) ** 2,
+            )
+            if can_eat_player_blob(enemy.radius, target.radius):
+                adversarial = normalise(
+                    (target.x - enemy.x, target.y - enemy.y)
+                )
+                direction = normalise(
+                    (
+                        adversarial[0] * adversarial_weight
+                        + observed[0] * observed_weight,
+                        adversarial[1] * adversarial_weight
+                        + observed[1] * observed_weight,
+                    )
+                )
+            else:
+                edible_by = [
+                    blob
+                    for blob in own_blobs
+                    if can_eat_player_blob(blob.radius, enemy.radius)
+                ]
+                if edible_by:
+                    hunter = min(
+                        edible_by,
+                        key=lambda blob: (enemy.x - blob.x) ** 2
+                        + (enemy.y - blob.y) ** 2,
+                    )
+                    flee = normalise((enemy.x - hunter.x, enemy.y - hunter.y))
+                    direction = normalise(
+                        (
+                            flee[0] * 0.62 + observed[0] * 0.38,
+                            flee[1] * 0.62 + observed[1] * 0.38,
+                        )
+                    )
+                else:
+                    direction = observed
+            distance = base_speed * max(0, horizon)
+            motions.append(
+                ProxyEnemyMotion(
+                    enemy=enemy,
+                    x=_clamp(
+                        enemy.x + direction[0] * distance,
+                        enemy.radius,
+                        arena_size - enemy.radius,
+                    ),
+                    y=_clamp(
+                        enemy.y + direction[1] * distance,
+                        enemy.radius,
+                        arena_size - enemy.radius,
+                    ),
+                    direction=direction,
+                    speed=base_speed,
+                )
+            )
+        return tuple(motions)
+
+    @staticmethod
+    def _point_segment_distance(
+        point_x: float,
+        point_y: float,
+        start_x: float,
+        start_y: float,
+        end_x: float,
+        end_y: float,
+    ) -> float:
+        delta_x = end_x - start_x
+        delta_y = end_y - start_y
+        length_sq = delta_x * delta_x + delta_y * delta_y
+        if length_sq <= EPSILON:
+            return math.hypot(point_x - start_x, point_y - start_y)
+        fraction = _clamp(
+            ((point_x - start_x) * delta_x + (point_y - start_y) * delta_y)
+            / length_sq,
+            0.0,
+            1.0,
+        )
+        return math.hypot(
+            point_x - (start_x + delta_x * fraction),
+            point_y - (start_y + delta_y * fraction),
+        )
+
+    @classmethod
+    def _relative_segment_distance(
+        cls,
+        own_start_x: float,
+        own_start_y: float,
+        own_end_x: float,
+        own_end_y: float,
+        enemy_start_x: float,
+        enemy_start_y: float,
+        enemy_end_x: float,
+        enemy_end_y: float,
+    ) -> float:
+        return cls._point_segment_distance(
+            0.0,
+            0.0,
+            own_start_x - enemy_start_x,
+            own_start_y - enemy_start_y,
+            own_end_x - enemy_end_x,
+            own_end_y - enemy_end_y,
+        )
+
+    def _proxy_project_action(
+        self,
+        *,
+        node: SearchNode,
+        action: Action,
+        arena_size: float,
+        horizon: int,
+        node_geometry: NodeGeometry | None = None,
+        own_sources: tuple[ProxyOwnSource, ...] | None = None,
+    ) -> ProxyMovement:
+        """Project split placement and repeated movement in O(blob count)."""
+
+        unit = normalise(action.direction)
+        horizon = max(1, horizon)
+        geometry = node_geometry or self._node_geometry(node)
+        total_mass = max(geometry.total_mass, EPSILON)
+        drag_sum = (
+            float(horizon)
+            if SPLIT_EJECT_DRAG >= 1.0 - EPSILON
+            else (1.0 - SPLIT_EJECT_DRAG**horizon)
+            / max(1.0 - SPLIT_EJECT_DRAG, EPSILON)
+        )
+        sources: list[
+            tuple[int, int, float, float, float, float, float, float]
+        ] = []
+        if own_sources is None:
+            generated_sources: list[ProxyOwnSource] = []
+            remaining_slots = MAX_BLOB_COUNT - len(node.own_blobs)
+            for blob in sorted(node.own_blobs, key=lambda own: own.blob_id):
+                if remaining_slots > 0 and blob.mass >= SPLIT_MIN_MASS:
+                    split_radius = blob.radius / SQRT2
+                    split_speed = player_speed(split_radius)
+                    remaining_slots -= 1
+                else:
+                    split_radius = None
+                    split_speed = None
+                generated_sources.append(
+                    ProxyOwnSource(
+                        blob=blob,
+                        speed=player_speed(blob.radius),
+                        split_radius=split_radius,
+                        split_speed=split_speed,
+                    )
+                )
+            own_sources = tuple(generated_sources)
+        next_proxy_id = max((blob.blob_id for blob in node.own_blobs), default=-1) + 1
+        for source in own_sources:
+            own = source.blob
+            if action.split and source.split_radius is not None:
+                child_radius = source.split_radius
+                assert source.split_speed is not None
+                sources.append(
+                    (
+                        own.blob_id,
+                        own.blob_id,
+                        own.x,
+                        own.y,
+                        child_radius,
+                        source.split_speed,
+                        own.eject_vx,
+                        own.eject_vy,
+                    )
+                )
+                child_x = _clamp(
+                    own.x
+                    + unit[0]
+                    * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
+                    child_radius,
+                    arena_size - child_radius,
+                )
+                child_y = _clamp(
+                    own.y
+                    + unit[1]
+                    * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
+                    child_radius,
+                    arena_size - child_radius,
+                )
+                sources.append(
+                    (
+                        next_proxy_id,
+                        own.blob_id,
+                        child_x,
+                        child_y,
+                        child_radius,
+                        source.split_speed,
+                        unit[0] * SPLIT_EJECT_SPEED,
+                        unit[1] * SPLIT_EJECT_SPEED,
+                    )
+                )
+                next_proxy_id += 1
+            else:
+                sources.append(
+                    (
+                        own.blob_id,
+                        own.blob_id,
+                        own.x,
+                        own.y,
+                        own.radius,
+                        source.speed,
+                        own.eject_vx,
+                        own.eject_vy,
+                    )
+                )
+
+        motions: list[ProxyBlobMotion] = []
+        expected_useful = 0.0
+        actual_useful = 0.0
+        projected_center_x = 0.0
+        projected_center_y = 0.0
+        for (
+            blob_id,
+            source_blob_id,
+            start_x,
+            start_y,
+            radius,
+            speed,
+            eject_vx,
+            eject_vy,
+        ) in sources:
+            projected_x = _clamp(
+                start_x + unit[0] * speed * horizon + eject_vx * drag_sum,
+                radius,
+                arena_size - radius,
+            )
+            projected_y = _clamp(
+                start_y + unit[1] * speed * horizon + eject_vy * drag_sum,
+                radius,
+                arena_size - radius,
+            )
+            motion = ProxyBlobMotion(
+                blob_id=blob_id,
+                source_blob_id=source_blob_id,
+                start_x=start_x,
+                start_y=start_y,
+                x=projected_x,
+                y=projected_y,
+                radius=radius,
+                speed=speed,
+            )
+            motions.append(motion)
+            projected_center_x += projected_x * motion.mass / total_mass
+            projected_center_y += projected_y * motion.mass / total_mass
+            expected_useful += motion.mass * speed * horizon
+            actual_useful += motion.mass * max(
+                0.0,
+                (projected_x - start_x) * unit[0]
+                + (projected_y - start_y) * unit[1],
+            )
+        efficiency = (
+            1.0
+            if expected_useful <= EPSILON
+            else _clamp(actual_useful / expected_useful, 0.0, 1.0)
+        )
+        return ProxyMovement(
+            displacement_x=projected_center_x - geometry.center[0],
+            displacement_y=projected_center_y - geometry.center[1],
+            efficiency=efficiency,
+            blobs=tuple(motions),
+        )
+
+    def _proxy_movement_delta(
+        self,
+        node: SearchNode,
+        direction: tuple[float, float],
+        arena_size: float,
+        *,
+        horizon: int,
+        node_geometry: NodeGeometry | None = None,
+    ) -> ProxyMovement:
+        """Project repeated movement in O(blob count), without physical copies.
+
+        Radius and command direction are constant over this cheap rollout.  The
+        split-eject velocity has a geometric closed form, and arena clamping is
+        applied to the final coordinate.  This is exact for the common monotone
+        trajectory and remains a deliberately conservative ranking proxy when
+        an opposing eject velocity reverses inside the short horizon.
+        """
+
+        return self._proxy_project_action(
+            node=node,
+            action=Action(direction),
+            arena_size=arena_size,
+            horizon=horizon,
+            node_geometry=node_geometry,
+        )
     def _step(
         self,
         *,
@@ -3670,7 +5384,10 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         direction = normalise(action.direction)
         utility_delta = after - before
         movement_efficiency = result.movement_efficiency
-        movement_penalty = (1.0 - movement_efficiency) * 2.0
+        movement_penalty = (
+            (1.0 - movement_efficiency)
+            * self._MOVEMENT_INEFFICIENCY_PENALTY
+        )
         turn_penalty = self._turn_cost(node.last_direction, direction) * 0.6
         self._record_profile_value("step_utility_delta", utility_delta)
         self._record_profile_value("step_movement_penalty", movement_penalty)
@@ -3925,6 +5642,14 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             )
             self._audit_last_exact_rank = exact_best_rank
             self._audit_last_raw_rank = raw_best_rank
+            if exact_best_rank is not None:
+                exact_best_index = exact_best_rank - 1
+                exact_best_action = request.actions[exact_best_index]
+                self._audit_last_exact_reason = exact_best_action.reason
+                self._audit_last_exact_split = exact_best_action.split
+                self._audit_last_exact_regret = (
+                    exact_scores[exact_best_index] - exact_scores[0]
+                )
         self._audit_last_fatal_count = sum(result.fatal for result in results)
         elapsed = perf_counter() - audit_started
         self._audit_spent_seconds += elapsed
@@ -4466,6 +6191,58 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             )
         scored.sort(key=lambda item: (item[0], item[1], item[2]))
         return [action for _, _, _, action in scored[:limit]]
+
+    def _proxy_virus_actions(
+        self,
+        *,
+        node: SearchNode,
+        viruses: tuple[VirusModel, ...],
+        arena_size: float,
+        limit: int,
+    ) -> list[Action]:
+        """Generate virus routes without the expensive fragment survival scan.
+
+        Safety is evaluated once the route becomes a proxy action.  Candidate
+        enumeration only needs an eligible origin and a direction, so running
+        the full 16-fragment retention model here duplicated work and made the
+        supposedly cheap layer slower than some exact transitions.
+        """
+
+        scored: list[tuple[float, int, Action]] = []
+        for virus in viruses:
+            origins = [
+                blob
+                for blob in node.own_blobs
+                if self._can_still_consume_virus_at_contact(blob, virus)
+            ]
+            if not origins:
+                continue
+            origin = min(
+                origins,
+                key=lambda blob: (
+                    max(0.0, math.dist(blob.pos, virus.pos) - blob.radius),
+                    -blob.radius,
+                    blob.blob_id,
+                ),
+            )
+            gap = max(0.0, math.dist(origin.pos, virus.pos) - origin.radius)
+            scored.append(
+                (
+                    gap,
+                    virus.virus_id,
+                    Action(
+                        normalise(
+                            (
+                                virus.pos[0] - origin.x,
+                                virus.pos[1] - origin.y,
+                            )
+                        ),
+                        reason="virus_harvest",
+                    ),
+                )
+            )
+        scored.sort(key=lambda item: (item[0], item[1]))
+        return [action for _, _, action in scored[:limit]]
 
     def _can_still_consume_virus_at_contact(self, blob, virus) -> bool:
         self._record_profile_count("virus_consumability_calls")

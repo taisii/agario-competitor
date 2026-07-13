@@ -51,6 +51,39 @@ class MetricsLogger:
 
         features = extract_visible_features(game)
         own_blob_radii = [blob.radius for blob in features.own_blobs]
+        own_mass = sum(blob.radius * blob.radius for blob in features.own_blobs)
+        own_center = (
+            (
+                sum(
+                    blob.pos[0] * blob.radius * blob.radius
+                    for blob in features.own_blobs
+                )
+                / own_mass,
+                sum(
+                    blob.pos[1] * blob.radius * blob.radius
+                    for blob in features.own_blobs
+                )
+                / own_mass,
+            )
+            if own_mass > 0.0
+            else (None, None)
+        )
+        arena_size = float(getattr(game.state.map, "size", 0.0) or 0.0)
+        min_wall_clearance = (
+            min(
+                min(
+                    blob.pos[0] - blob.radius,
+                    arena_size - blob.radius - blob.pos[0],
+                    blob.pos[1] - blob.radius,
+                    arena_size - blob.radius - blob.pos[1],
+                )
+                for blob in features.own_blobs
+            )
+            if features.own_blobs and arena_size > 0.0
+            else None
+        )
+        nearest_predator = features.nearest_predator
+        nearest_prey = features.nearest_prey
         rankings = list(getattr(game.state, "rankings", []))
         player_id = game.state.me.player_id
 
@@ -68,6 +101,9 @@ class MetricsLogger:
             "my_mass": game.state.me.radius * game.state.me.radius,
             "my_blob_count": len(own_blob_radii),
             "largest_my_blob_radius": max(own_blob_radii) if own_blob_radii else None,
+            "my_center_x": own_center[0],
+            "my_center_y": own_center[1],
+            "my_min_wall_clearance": min_wall_clearance,
             "visible_food_count": len(game.state.visible_food),
             "visible_blob_count": len(game.state.visible_blobs),
             "visible_virus_count": len(game.state.visible_viruses),
@@ -75,14 +111,51 @@ class MetricsLogger:
             "prey_count": len(features.prey),
             "neutral_count": len(features.neutral),
             "nearest_food_distance": features.nearest_food_distance,
-            "nearest_predator_distance": features.nearest_predator.distance
-            if features.nearest_predator
+            "nearest_predator_distance": nearest_predator.distance
+            if nearest_predator
             else None,
-            "nearest_predator_margin": features.nearest_predator.danger_margin
-            if features.nearest_predator
+            "nearest_predator_margin": nearest_predator.danger_margin
+            if nearest_predator
             else None,
-            "nearest_prey_distance": features.nearest_prey.distance
-            if features.nearest_prey
+            "nearest_predator_player_id": nearest_predator.blob.player_id
+            if nearest_predator
+            else None,
+            "nearest_predator_blob_id": nearest_predator.blob.blob_id
+            if nearest_predator
+            else None,
+            "nearest_predator_x": nearest_predator.blob.pos[0]
+            if nearest_predator
+            else None,
+            "nearest_predator_y": nearest_predator.blob.pos[1]
+            if nearest_predator
+            else None,
+            "nearest_predator_radius": nearest_predator.blob.radius
+            if nearest_predator
+            else None,
+            "predator_target_my_blob_id": nearest_predator.nearest_own_blob.blob_id
+            if nearest_predator
+            else None,
+            "predator_target_my_blob_x": nearest_predator.nearest_own_blob.pos[0]
+            if nearest_predator
+            else None,
+            "predator_target_my_blob_y": nearest_predator.nearest_own_blob.pos[1]
+            if nearest_predator
+            else None,
+            "predator_target_my_blob_radius": nearest_predator.nearest_own_blob.radius
+            if nearest_predator
+            else None,
+            "nearest_prey_distance": nearest_prey.distance if nearest_prey else None,
+            "nearest_prey_player_id": nearest_prey.blob.player_id
+            if nearest_prey
+            else None,
+            "nearest_prey_blob_id": nearest_prey.blob.blob_id
+            if nearest_prey
+            else None,
+            "nearest_prey_x": nearest_prey.blob.pos[0] if nearest_prey else None,
+            "nearest_prey_y": nearest_prey.blob.pos[1] if nearest_prey else None,
+            "nearest_prey_radius": nearest_prey.blob.radius if nearest_prey else None,
+            "prey_pursuer_my_blob_id": nearest_prey.nearest_own_blob.blob_id
+            if nearest_prey
             else None,
             "nearest_virus_distance": features.nearest_virus_distance,
             "decision_direction_x": decision.direction[0],

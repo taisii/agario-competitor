@@ -159,3 +159,57 @@ def test_validate_profile_rejects_unscheduled_round(tmp_path) -> None:
         "round=99 is not sampled by sample_every_n=100" in item
         for item in analyze_replay_profile.validate_profile(sample)
     )
+
+
+def test_summarize_runtime_reports_hard_headroom_and_search_work() -> None:
+    rows = [
+        {
+            "round": 0,
+            "my_mass": 4.0,
+            "decision_elapsed_ms": 1.0,
+            "decision_direction_x": 1.0,
+            "decision_direction_y": 0.0,
+            "decision_reason": "prey",
+            "decision_split": True,
+            "decision_diagnostics": {
+                "proxy_only": True,
+                "fallback_candidates": 20,
+                "proxy_candidates_refined": 20,
+                "transitions_evaluated": 0,
+                "competition_compute_budget_ms": 8000.0,
+                "competition_compute_remaining_ms": 7999.0,
+            },
+        },
+        {
+            "round": 3,
+            "my_mass": 0.81,
+            "decision_elapsed_ms": 3.0,
+            "decision_direction_x": -1.0,
+            "decision_direction_y": 0.0,
+            "decision_reason": "escape_angle",
+            "decision_split": False,
+            "decision_diagnostics": {
+                "proxy_only": True,
+                "fallback_candidates": 18,
+                "proxy_candidates_refined": 18,
+                "transitions_evaluated": 0,
+                "competition_compute_budget_ms": 8000.0,
+                "competition_compute_remaining_ms": 7996.0,
+            },
+        },
+    ]
+
+    summary = analyze_replay_profile.summarize_runtime(rows)
+
+    assert summary["decision_total_ms"] == 4.0
+    assert summary["decision_avg_ms"] == 2.0
+    assert summary["competition_remaining_last_ms"] == 7996.0
+    assert summary["competition_exhausted_samples"] == 0
+    assert summary["candidate_total"] == 38
+    assert summary["refined_total"] == 38
+    assert summary["exact_transitions"] == 0
+    assert summary["prey_turns"] == 1
+    assert summary["split_turns"] == 1
+    assert summary["direction_reversals"] == 1
+    assert summary["observed_round_gaps"] == 2
+    assert summary["respawn_like_events"] == 1
