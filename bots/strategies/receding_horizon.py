@@ -3999,6 +3999,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             action=action,
             arena_size=arena_size,
             horizon=self.proxy_horizon,
+            unit=direction,
             own_sources=analysis.own_sources,
             motion_templates=(
                 analysis.split_motion_templates
@@ -5656,16 +5657,18 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                     direction = observed
             distance = base_speed * max(0, horizon)
             motion_index = len(motions)
-            projected_x = _clamp(
-                enemy.x + direction[0] * distance,
-                enemy.radius,
-                arena_size - enemy.radius,
-            )
-            projected_y = _clamp(
-                enemy.y + direction[1] * distance,
-                enemy.radius,
-                arena_size - enemy.radius,
-            )
+            lower = enemy.radius
+            upper = arena_size - lower
+            projected_x = enemy.x + direction[0] * distance
+            if projected_x < lower:
+                projected_x = lower
+            elif projected_x > upper:
+                projected_x = upper
+            projected_y = enemy.y + direction[1] * distance
+            if projected_y < lower:
+                projected_y = lower
+            elif projected_y > upper:
+                projected_y = upper
             if motion_index < len(scratch):
                 motion = scratch[motion_index]
                 motion.enemy = enemy
@@ -5857,12 +5860,14 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         action: Action,
         arena_size: float,
         horizon: int,
+        unit: tuple[float, float] | None = None,
         own_sources: tuple[ProxyOwnSource, ...] | None = None,
         motion_templates: tuple[ProxyMotionTemplate, ...] | None = None,
     ) -> ProxyMovement:
         """Project split placement and repeated movement in O(blob count)."""
 
-        unit = normalise(action.direction)
+        if unit is None:
+            unit = normalise(action.direction)
         horizon = max(1, horizon)
         if motion_templates is None:
             if own_sources is None:
@@ -5899,34 +5904,39 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         scratch = self._proxy_blob_motion_scratch
         for template in motion_templates:
             radius = template.radius
+            upper = arena_size - radius
             if template.directional_start > 0.0:
-                start_x = _clamp(
-                    template.base_start_x + unit[0] * template.directional_start,
-                    radius,
-                    arena_size - radius,
-                )
-                start_y = _clamp(
-                    template.base_start_y + unit[1] * template.directional_start,
-                    radius,
-                    arena_size - radius,
-                )
+                start_x = template.base_start_x + unit[0] * template.directional_start
+                if start_x < radius:
+                    start_x = radius
+                elif start_x > upper:
+                    start_x = upper
+                start_y = template.base_start_y + unit[1] * template.directional_start
+                if start_y < radius:
+                    start_y = radius
+                elif start_y > upper:
+                    start_y = upper
             else:
                 start_x = template.base_start_x
                 start_y = template.base_start_y
-            projected_x = _clamp(
+            projected_x = (
                 start_x
                 + unit[0] * template.directional_travel
-                + template.static_eject_x,
-                radius,
-                arena_size - radius,
+                + template.static_eject_x
             )
-            projected_y = _clamp(
+            if projected_x < radius:
+                projected_x = radius
+            elif projected_x > upper:
+                projected_x = upper
+            projected_y = (
                 start_y
                 + unit[1] * template.directional_travel
-                + template.static_eject_y,
-                radius,
-                arena_size - radius,
+                + template.static_eject_y
             )
+            if projected_y < radius:
+                projected_y = radius
+            elif projected_y > upper:
+                projected_y = upper
             motion_index = len(motions)
             if motion_index < len(scratch):
                 motion = scratch[motion_index]
@@ -5951,8 +5961,9 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 )
                 scratch.append(motion)
             motions.append(motion)
-            expected_useful += motion.mass * template.speed * horizon
-            actual_useful += motion.mass * max(
+            mass = radius * radius
+            expected_useful += mass * template.speed * horizon
+            actual_useful += mass * max(
                 0.0,
                 (projected_x - start_x) * unit[0] + (projected_y - start_y) * unit[1],
             )
