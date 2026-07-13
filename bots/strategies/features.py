@@ -41,7 +41,6 @@ class VisibleFeatures:
     nearest_food_distance: float | None
     nearest_predator: BlobRelation | None
     nearest_prey: BlobRelation | None
-    nearest_virus: VirusModel | None
     nearest_virus_distance: float | None
 
 
@@ -181,6 +180,20 @@ def _relation_for_blob(
     )
 
 
+def extract_predator_relations(game: Game) -> tuple[BlobRelation, ...]:
+    """Extract only predator relations for cheap emergency decisions."""
+
+    own_blobs = _own_blobs(game)
+    if not own_blobs:
+        return ()
+    predators: list[BlobRelation] = []
+    for visible_blob in game.state.visible_blobs:
+        relation = _relation_for_blob(own_blobs, visible_blob)
+        if relation.can_eat_us:
+            predators.append(relation)
+    return tuple(predators)
+
+
 def extract_visible_features(game: Game) -> VisibleFeatures:
     own_blobs = _own_blobs(game)
     if not own_blobs:
@@ -193,7 +206,6 @@ def extract_visible_features(game: Game) -> VisibleFeatures:
             nearest_food_distance=None,
             nearest_predator=None,
             nearest_prey=None,
-            nearest_virus=None,
             nearest_virus_distance=None,
         )
 
@@ -219,7 +231,7 @@ def extract_visible_features(game: Game) -> VisibleFeatures:
         own_blobs,
         game.state.visible_food,
     )
-    nearest_virus, nearest_virus_distance = nearest_to_any_blob(
+    _, nearest_virus_distance = nearest_to_any_blob(
         own_blobs,
         game.state.visible_viruses,
     )
@@ -235,6 +247,5 @@ def extract_visible_features(game: Game) -> VisibleFeatures:
         if predators
         else None,
         nearest_prey=min(prey, key=lambda relation: relation.distance) if prey else None,
-        nearest_virus=nearest_virus if isinstance(nearest_virus, VirusModel) else None,
         nearest_virus_distance=nearest_virus_distance,
     )

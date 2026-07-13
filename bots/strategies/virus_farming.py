@@ -24,7 +24,7 @@ from simulation.rules import (
     movement_speed,
     virus_replacement_positions,
 )
-from strategies.base import StrategyContext, StrategyDecision
+from strategies.base import Strategy, StrategyContext, StrategyDecision
 from strategies.receding_horizon import ThreatAwareRecedingHorizonStrategy
 from strategies.features import (
     can_eat_player_blob,
@@ -103,16 +103,24 @@ class VirusHunterStrategy:
         danger_margin: float = 3.0,
         *,
         use_receding_horizon_growth: bool = True,
+        growth_strategy: Strategy | None = None,
     ) -> None:
         self._survival = SurvivalGreedyStrategy(danger_margin=danger_margin)
         # The paired benchmark showed that rank/progress multipliers reduced
         # mass without improving wins.  Virus-specific preservation below is
         # the safety mechanism; ordinary growth keeps one consistent value
         # function throughout the match.
-        self._growth = ThreatAwareRecedingHorizonStrategy(
-            endgame_adaptation=False
-        )
-        self._use_receding_horizon_growth = use_receding_horizon_growth
+        if growth_strategy is not None:
+            self._growth: Strategy = growth_strategy
+            self._growth_uses_receding_horizon = False
+        elif use_receding_horizon_growth:
+            self._growth = ThreatAwareRecedingHorizonStrategy(
+                endgame_adaptation=False
+            )
+            self._growth_uses_receding_horizon = True
+        else:
+            self._growth = self._survival
+            self._growth_uses_receding_horizon = False
         self._last_direction = (1.0, 0.0)
         self._mass_target_reached = False
         self._mass_preservation_reason: str | None = None
@@ -149,7 +157,7 @@ class VirusHunterStrategy:
         # A nearby predator remains an emergency override. Search virus safety
         # first even in that state: an escape line can otherwise cross a virus
         # that turns the currently safe large blob into edible fragments.
-        fallback = self._survival.choose(context)
+        emergency_fallback = self._survival.emergency_decision(context)
         projected_consumers = self._projected_consumers(own_blobs)
         arena_size = float(state.map.size or 60.0)
 
@@ -161,9 +169,9 @@ class VirusHunterStrategy:
             preserve_mass=self._mass_target_reached,
         )
         search_diagnostics = self._search_diagnostics(search)
-        if fallback.reason == "predator_near":
+        if emergency_fallback is not None:
             emergency = self._with_mode(
-                fallback,
+                emergency_fallback,
                 "emergency_escape",
                 search_diagnostics,
             )
@@ -208,7 +216,9 @@ class VirusHunterStrategy:
         # Small fragments cannot consume a virus. Grow them using the existing
         # safe prey/food policy until at least one fragment can reach a virus.
         growth = self._with_mode(
-            self._suppress_preservation_split(self._growth_decision(context)),
+            self._suppress_preservation_split(
+                self._growth_decision(context)
+            ),
             "grow_for_virus",
             search_diagnostics,
         )
@@ -555,15 +565,22 @@ class VirusHunterStrategy:
             "minimum_required_radius": search.minimum_required_radius,
         }
 
-    def _growth_decision(self, context: StrategyContext) -> StrategyDecision:
+    def _growth_decision(
+        self,
+        context: StrategyContext,
+    ) -> StrategyDecision:
         state = context.game.state
-        if not self._use_receding_horizon_growth or not (
+        if self._growth is self._survival:
+            return self._survival.choose(context)
+        if self._growth_uses_receding_horizon and not (
             hasattr(context.query, "update")
             and hasattr(state, "view_center")
             and hasattr(state, "vision_size")
         ):
             return self._survival.choose(context)
-        self._growth.previous_direction = self._last_direction
+        if self._growth_uses_receding_horizon:
+            assert isinstance(self._growth, ThreatAwareRecedingHorizonStrategy)
+            self._growth.previous_direction = self._last_direction
         return self._growth.choose(context)
 
     def _suppress_preservation_split(
@@ -734,14 +751,13 @@ class PotentialFieldVirusFarmerStrategy:
     name = "potential_field_virus_farmer"
 
     def __init__(self, danger_margin: float = 3.0) -> None:
-        # This wrapper supplies its own growth action. Disable VirusHunter's
-        # heavier receding-horizon fallback so the discarded result does not consume
-        # the engine's cumulative response budget.
+        self._growth_policy = PotentialFieldHunterStrategy()
+        # Inject the growth policy so VirusHunter can select it once and still
+        # retain ownership of emergency escape and virus-safety decisions.
         self._virus_policy = VirusHunterStrategy(
             danger_margin=danger_margin,
-            use_receding_horizon_growth=False,
+            growth_strategy=self._growth_policy,
         )
-        self._growth_policy = PotentialFieldHunterStrategy()
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         state = context.game.state
@@ -761,7 +777,7 @@ class PotentialFieldVirusFarmerStrategy:
         if virus_mode != "grow_for_virus":
             return self._with_mode(virus_decision, virus_mode)
 
-        growth = self._growth_policy.choose(context)
+        growth = virus_decision
         total_mass = sum(blob.radius * blob.radius for blob in own_blobs)
         unavailable_reason = virus_decision.diagnostics.get(
             "virus_unavailable_reason"
@@ -791,7 +807,6 @@ class PotentialFieldVirusFarmerStrategy:
             reason=growth.reason,
             score=growth.score,
             diagnostics={
-                **growth.diagnostics,
                 **virus_decision.diagnostics,
                 "potential_field_virus_farmer_mode": "potential_growth",
                 "growth_reason": growth.reason,
