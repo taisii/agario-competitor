@@ -195,6 +195,9 @@ class ProxyBlobMotion:
     y: float
     radius: float
     speed: float
+    delta_x: float = 0.0
+    delta_y: float = 0.0
+    length_sq: float = 0.0
 
     @property
     def mass(self) -> float:
@@ -5297,9 +5300,9 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 start_y = blob.start_y
                 end_x = blob.x
                 end_y = blob.y
-                delta_x = end_x - start_x
-                delta_y = end_y - start_y
-                length_sq = delta_x * delta_x + delta_y * delta_y
+                delta_x = blob.delta_x
+                delta_y = blob.delta_y
+                length_sq = blob.length_sq
                 if length_sq <= EPSILON:
                     closest_x = food_x - start_x
                     closest_y = food_y - start_y
@@ -5947,7 +5950,14 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 motion.y = projected_y
                 motion.radius = radius
                 motion.speed = template.speed
+                motion.delta_x = projected_x - start_x
+                motion.delta_y = projected_y - start_y
+                motion.length_sq = (
+                    motion.delta_x * motion.delta_x + motion.delta_y * motion.delta_y
+                )
             else:
+                delta_x = projected_x - start_x
+                delta_y = projected_y - start_y
                 motion = ProxyBlobMotion(
                     blob_id=template.blob_id,
                     source_blob_id=template.source_blob_id,
@@ -5957,6 +5967,9 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                     y=projected_y,
                     radius=radius,
                     speed=template.speed,
+                    delta_x=delta_x,
+                    delta_y=delta_y,
+                    length_sq=delta_x * delta_x + delta_y * delta_y,
                 )
                 scratch.append(motion)
             motions.append(motion)

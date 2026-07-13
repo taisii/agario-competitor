@@ -474,6 +474,32 @@ def test_replay_candidate_analysis_builds_one_shared_proxy() -> None:
     assert counts["virus_consumability_calls"] == 1
 
 
+def test_proxy_projection_caches_each_segment_delta_once() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    node = SearchNode(
+        own_blobs=(OwnBlob(blob_id=0, x=20.0, y=20.0, radius=3.0),),
+        enemies=(),
+        score=0.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(1.0, 0.0),
+    )
+
+    movement = strategy._proxy_project_action(
+        node=node,
+        action=Action((0.6, 0.8), split=True, reason="split_probe"),
+        arena_size=60.0,
+        horizon=8,
+    )
+
+    assert len(movement.blobs) == 2
+    for blob in movement.blobs:
+        assert blob.delta_x == blob.x - blob.start_x
+        assert blob.delta_y == blob.y - blob.start_y
+        assert blob.length_sq == blob.delta_x**2 + blob.delta_y**2
+
+
 def test_disabled_replay_profile_does_not_read_inner_timers(monkeypatch) -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
     strategy._profile_every_n = 0
