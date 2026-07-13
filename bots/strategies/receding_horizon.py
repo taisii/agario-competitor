@@ -4071,13 +4071,41 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         """O(blob count) first-stage score for every generated action."""
 
         direction = normalise(action.direction)
-        displacement_x, displacement_y, efficiency = self._coarse_proxy_movement(
-            action=action,
-            arena_size=arena_size,
-            horizon=self.proxy_horizon,
-            geometry=node_geometry,
-            kinematics=proxy_analysis.kinematics,
+        threats_by_blob = (
+            proxy_analysis.split_threats_by_blob
+            if action.split
+            else proxy_analysis.normal_threats_by_blob
         )
+        if len(node.own_blobs) >= 8 and any(threats_by_blob):
+            (
+                displacement_x,
+                displacement_y,
+                efficiency,
+                projected_safe_mass,
+            ) = self._coarse_projected_safety(
+                node=node,
+                action=action,
+                arena_size=arena_size,
+                horizon=self.proxy_horizon,
+                analysis=proxy_analysis,
+                geometry=node_geometry,
+            )
+            safety_delta = 100.0 * (
+                projected_safe_mass - proxy_analysis.baseline.safe_mass
+            )
+        else:
+            displacement_x, displacement_y, efficiency = self._coarse_proxy_movement(
+                action=action,
+                arena_size=arena_size,
+                horizon=self.proxy_horizon,
+                geometry=node_geometry,
+                kinematics=proxy_analysis.kinematics,
+            )
+            safety_gradient_x, safety_gradient_y = proxy_analysis.safety_gradient
+            safety_delta = (
+                safety_gradient_x * displacement_x
+                + safety_gradient_y * displacement_y
+            )
         displacement_scale = proxy_analysis.future_weight
         projected_opportunity_values = [
             max(
@@ -4104,10 +4132,8 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 strict=False,
             )
         )
-        safety_gradient_x, safety_gradient_y = proxy_analysis.safety_gradient
         coarse_value_delta = (
-            safety_gradient_x * displacement_x
-            + safety_gradient_y * displacement_y
+            safety_delta
             + projected_opportunity
             - proxy_analysis.coarse_opportunity_baseline
         )
@@ -4122,6 +4148,135 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             * self._MOVEMENT_INEFFICIENCY_PENALTY
             * proxy_analysis.discount_sum
             - self._turn_cost(node.last_direction, direction) * 0.6
+        )
+
+    def _coarse_projected_safety(
+        self,
+        *,
+        node: SearchNode,
+        action: Action,
+        arena_size: float,
+        horizon: int,
+        analysis: ProxyAnalysis,
+        geometry: NodeGeometry,
+    ) -> tuple[float, float, float, float]:
+        """Project per-fragment safety without the full opportunity rollout.
+
+        A center-only gradient cannot rank fragmented states near a wall: two
+        directions with the same center displacement may save entirely
+        different fragments.  This middle stage projects every own fragment
+        and its small, preselected threat set.  Enemy motion is approximated
+        directly per threatened fragment, avoiding the full enemy/prey/food/
+        virus state evaluation while preserving the important nonlinear loss.
+        """
+
+        movement = self._proxy_project_action(
+            node=node,
+            action=action,
+            arena_size=arena_size,
+            horizon=horizon,
+            unit=normalise(action.direction),
+            own_sources=analysis.own_sources,
+            motion_templates=(
+                analysis.split_motion_templates
+                if action.split
+                else analysis.normal_motion_templates
+            ),
+        )
+        blobs = movement.blobs
+        total_mass = sum(blob.mass for blob in blobs)
+        if total_mass <= EPSILON:
+            return (0.0, 0.0, movement.efficiency, 0.0)
+        projected_center_x = sum(blob.x * blob.mass for blob in blobs) / total_mass
+        projected_center_y = sum(blob.y * blob.mass for blob in blobs) / total_mass
+        threats_by_blob = (
+            analysis.split_threats_by_blob
+            if action.split
+            else analysis.normal_threats_by_blob
+        )
+        survival_midpoint = (
+            self.survival_midpoint_base
+            + self.survival_midpoint_scale * self._proxy_safety_weight
+        )
+        temperature = max(self.survival_temperature, 0.1)
+        safe_mass = 0.0
+        for blob_index, blob in enumerate(blobs):
+            threats = threats_by_blob[blob_index]
+            if not threats:
+                safe_mass += blob.mass
+                continue
+            worst_margin = math.inf
+            for threat in threats:
+                enemy = threat.enemy
+                motion_index = threat.motion_index
+                observed = analysis.observed_enemy_directions[motion_index]
+                observed_weight = analysis.observed_enemy_weights[motion_index]
+                chase = normalise((blob.x - enemy.x, blob.y - enemy.y))
+                direction = normalise(
+                    (
+                        chase[0] * (1.0 - observed_weight)
+                        + observed[0] * observed_weight,
+                        chase[1] * (1.0 - observed_weight)
+                        + observed[1] * observed_weight,
+                    )
+                )
+                enemy_distance = analysis.enemy_speeds[motion_index] * max(0, horizon)
+                enemy_x = _clamp(
+                    enemy.x + direction[0] * enemy_distance,
+                    enemy.radius,
+                    arena_size - enemy.radius,
+                )
+                enemy_y = _clamp(
+                    enemy.y + direction[1] * enemy_distance,
+                    enemy.radius,
+                    arena_size - enemy.radius,
+                )
+                danger_radius = (
+                    threat.split_danger_radius
+                    if blob.radius < threat.source_radius - EPSILON
+                    else threat.normal_danger_radius
+                )
+                if danger_radius is None:
+                    continue
+                closest = self._relative_segment_distance(
+                    blob.start_x,
+                    blob.start_y,
+                    blob.x,
+                    blob.y,
+                    enemy.x,
+                    enemy.y,
+                    enemy_x,
+                    enemy_y,
+                )
+                margin = (
+                    closest
+                    - danger_radius
+                    - enemy.stale_rounds * 0.35
+                    - self._wall_trap_factor_at(
+                        blob.x,
+                        blob.y,
+                        blob.radius,
+                        enemy,
+                        arena_size,
+                    )
+                    * 4.0
+                )
+                worst_margin = min(worst_margin, margin)
+            if worst_margin == math.inf:
+                survival = 1.0
+            else:
+                scaled = _clamp(
+                    (worst_margin - survival_midpoint) / temperature,
+                    -40.0,
+                    40.0,
+                )
+                survival = 1.0 / (1.0 + math.exp(-scaled))
+            safe_mass += blob.mass * survival
+        return (
+            projected_center_x - geometry.center[0],
+            projected_center_y - geometry.center[1],
+            movement.efficiency,
+            safe_mass,
         )
 
     def _coarse_prey_opportunity_values(
@@ -5191,6 +5346,11 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         safe_mass = 0.0
         continuation_probability = 0.0
         for blob_index, blob in enumerate(blobs):
+            threats = threats_by_blob[blob_index]
+            if not threats:
+                continuation_probability = 1.0
+                safe_mass += blob.mass
+                continue
             worst_margin = math.inf
             wall_horizon = 10.0
             left_block = max(
@@ -5209,7 +5369,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 0.0,
                 1.0 - max(0.0, arena_size - blob.radius - blob.y) / wall_horizon,
             )
-            for threat in threats_by_blob[blob_index]:
+            for threat in threats:
                 enemy = threat.enemy
                 if captured_enemy_mask & (1 << threat.motion_index):
                     continue

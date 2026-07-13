@@ -813,6 +813,54 @@ def test_replay_proxy_prices_wall_continuation_before_exact_search() -> None:
     assert strategy._safety_weight(rank_position=7, progress=0.0) == 1.3
 
 
+def test_replay_coarse_rank_projects_each_fragment_when_threatened() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    own_blobs = tuple(
+        OwnBlob(blob_id=index, x=48.0, y=23.0 + index * 2.0, radius=1.0)
+        for index in range(8)
+    )
+    predator = EnemyBlob(
+        player_id=1,
+        blob_id=0,
+        x=53.0,
+        y=30.0,
+        radius=2.5,
+    )
+    node = SearchNode(
+        own_blobs=own_blobs,
+        enemies=(predator,),
+        score=0.0,
+        first_direction=(0.0, 1.0),
+        first_split=False,
+        first_reason="keep",
+        last_direction=(0.0, 1.0),
+    )
+    analysis = strategy._proxy_analysis(
+        node=node,
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+    )
+    geometry = strategy._node_geometry(node)
+
+    away = strategy._coarse_action_value(
+        node=node,
+        action=Action((-1.0, 0.0), reason="away"),
+        arena_size=60.0,
+        proxy_analysis=analysis,
+        node_geometry=geometry,
+    )
+    toward = strategy._coarse_action_value(
+        node=node,
+        action=Action((1.0, 0.0), reason="toward"),
+        arena_size=60.0,
+        proxy_analysis=analysis,
+        node_geometry=geometry,
+    )
+
+    assert away > toward
+
+
 def test_replay_dominance_proxy_promotes_high_value_prey_without_family_slot() -> None:
     strategy = ReplayDominanceStrategy(depth=1, width=2, angular_samples=8)
     strategy._rival_values = {1: 1.0}
