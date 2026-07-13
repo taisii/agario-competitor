@@ -165,7 +165,7 @@ def test_receding_virus_collision_does_not_split_self_when_enemy_is_larger() -> 
     virus = VirusModel(virus_id=7, pos=corner, radius=1.5)
     consumed: set[int] = set()
 
-    own_after, enemies_after, score, penalty = strategy._resolve_own_viruses(
+    own_after, enemies_after, penalty = strategy._resolve_own_viruses(
         own_blobs=[own],
         enemies=(enemy,),
         viruses=(virus,),
@@ -199,5 +199,4 @@ def test_receding_virus_collision_does_not_split_self_when_enemy_is_larger() -> 
         assert math.isclose(actual.y, wanted.y, abs_tol=1e-12)
         assert math.isclose(actual.radius, wanted.radius, abs_tol=1e-12)
     assert consumed == {7}
-    assert score == 0.0
     assert penalty == 0.0

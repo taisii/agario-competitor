@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -8,6 +9,18 @@ from pathlib import Path
 from helper.game import Game
 from strategies.base import StrategyDecision
 from strategies.features import extract_visible_features
+
+
+def _json_safe(value):
+    """Replace non-standard floating-point sentinels before JSON encoding."""
+
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 class MetricsLogger:
@@ -82,7 +95,14 @@ class MetricsLogger:
             "decision_diagnostics": decision.diagnostics,
             "decision_elapsed_ms": elapsed_ms,
         }
-        self._handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
+        self._handle.write(
+            json.dumps(
+                _json_safe(payload),
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            + "\n"
+        )
 
     def close(self) -> None:
         if self._handle is not None:

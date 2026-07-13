@@ -11,6 +11,13 @@ sys.path.insert(0, str(ROOT / "bots"))
 from lib.interface.queries.query_move import QueryMovePlayer  # noqa: E402
 import runtime  # noqa: E402
 from runtime import run_bot  # noqa: E402
+from telemetry import _json_safe  # noqa: E402
+
+
+def test_metrics_json_replaces_non_finite_diagnostics() -> None:
+    assert _json_safe(
+        {"margin": float("inf"), "nested": [float("-inf"), float("nan"), 1.0]}
+    ) == {"margin": None, "nested": [None, None, 1.0]}
 
 
 class _Decision:
