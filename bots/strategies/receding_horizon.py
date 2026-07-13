@@ -3157,7 +3157,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         )
         self.proxy_refine_blob_work = max(
             1,
-            int(os.environ.get("BOT_REPLAY_PROXY_REFINE_BLOB_WORK", "192")),
+            int(os.environ.get("BOT_REPLAY_PROXY_REFINE_BLOB_WORK", "128")),
         )
         self.proxy_min_refine = max(
             1,
