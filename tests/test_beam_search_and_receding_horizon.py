@@ -142,10 +142,9 @@ def test_replay_node_opportunities_are_computed_once_without_stale_reuse() -> No
     )
     foods = (FoodModel(food_id=1, pos=(52.0, 31.0)),)
     viruses = (VirusModel(virus_id=1, pos=(47.0, 30.0), radius=1.5),)
-    calls = {"prey": 0, "virus": 0, "gradient": 0, "utility": 0}
+    calls = {"prey": 0, "virus": 0, "utility": 0}
     original_prey = strategy._prey_capture_probability
     original_virus = strategy._post_virus_retained_mass_fraction
-    original_gradient = strategy._approximate_value_gradient
     original_utility = strategy._search_utility
 
     def counted_prey(*args, **kwargs):
@@ -156,17 +155,12 @@ def test_replay_node_opportunities_are_computed_once_without_stale_reuse() -> No
         calls["virus"] += 1
         return original_virus(*args, **kwargs)
 
-    def counted_gradient(*args, **kwargs):
-        calls["gradient"] += 1
-        return original_gradient(*args, **kwargs)
-
     def counted_utility(*args, **kwargs):
         calls["utility"] += 1
         return original_utility(*args, **kwargs)
 
     strategy._prey_capture_probability = counted_prey  # type: ignore[method-assign]
     strategy._post_virus_retained_mass_fraction = counted_virus  # type: ignore[method-assign]
-    strategy._approximate_value_gradient = counted_gradient  # type: ignore[method-assign]
     strategy._search_utility = counted_utility  # type: ignore[method-assign]
 
     for _ in range(2):
@@ -186,10 +180,9 @@ def test_replay_node_opportunities_are_computed_once_without_stale_reuse() -> No
             safety_weight=1.0,
         )
 
-    # Candidate ranking now uses the geometric proxy directly.  The old
-    # aggregate gradient is deliberately absent; exact opportunity and utility
-    # work remains cached once for the exact layer.
-    assert calls == {"prey": 1, "virus": 1, "gradient": 0, "utility": 1}
+    # Candidate ranking uses one shared geometric analysis; exact opportunity
+    # and utility work remains cached once for the exact layer.
+    assert calls == {"prey": 1, "virus": 1, "utility": 1}
 
     first_expected_mass = strategy._prey_expected_mass(node, enemy, 60.0)
     nearer_node = replace(node, own_blobs=(replace(own, x=55.0),))
@@ -276,7 +269,12 @@ def test_replay_prey_route_uses_the_blob_that_can_actually_close() -> None:
         last_direction=(0.0, 1.0),
     )
 
-    opportunity = strategy._prey_opportunity(node, enemy, 60.0)
+    target = strategy._proxy_analysis(
+        node=node,
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+    ).prey[0]
     actions = strategy._candidate_actions(
         node=node,
         foods=(),
@@ -286,9 +284,9 @@ def test_replay_prey_route_uses_the_blob_that_can_actually_close() -> None:
         first_step=True,
     )
 
-    assert opportunity.origin is near_fragment
+    assert target.source_blob_id == near_fragment.blob_id
     assert any(
-        action.reason == "prey" and action.direction == opportunity.direction
+        action.reason == "prey" and action.direction == target.direction
         for action in actions
     )
 
@@ -313,7 +311,6 @@ def test_replay_split_prey_is_a_continuous_ranked_candidate() -> None:
         first_reason="keep",
         last_direction=(0.0, 1.0),
     )
-    opportunity = strategy._split_prey_opportunity(node, enemy, 60.0)
     actions = strategy._candidate_actions(
         node=node,
         foods=(),
@@ -322,16 +319,12 @@ def test_replay_split_prey_is_a_continuous_ranked_candidate() -> None:
         arena_size=60.0,
         first_step=True,
     )
+    split_action = next(action for action in actions if action.reason == "split_prey")
     toward = strategy._approximate_action_value(
         node=node,
-        action=RecedingHorizonAction(
-            opportunity.direction,
-            split=True,
-            reason="split_prey",
-        ),
+        action=split_action,
         foods=(),
         arena_size=60.0,
-        value_gradient=(0.0, 0.0),
     )
     sideways = strategy._approximate_action_value(
         node=node,
@@ -342,12 +335,8 @@ def test_replay_split_prey_is_a_continuous_ranked_candidate() -> None:
         ),
         foods=(),
         arena_size=60.0,
-        value_gradient=(0.0, 0.0),
     )
 
-    assert opportunity.origin is own
-    assert opportunity.capture_probability > 0.0
-    assert any(action.reason == "split_prey" for action in actions)
     assert toward > sideways
 
 
@@ -371,14 +360,12 @@ def test_replay_proxy_prices_the_same_wall_movement_loss_as_exact_rollout() -> N
         action=RecedingHorizonAction(outward, reason="keep"),
         foods=(),
         arena_size=60.0,
-        value_gradient=(0.0, 0.0),
     )
     inward_proxy = strategy._approximate_action_value(
         node=node,
         action=RecedingHorizonAction(inward, reason="center"),
         foods=(),
         arena_size=60.0,
-        value_gradient=(0.0, 0.0),
     )
     blocked_exact = strategy._step(
         node=node,
@@ -436,10 +423,10 @@ def test_replay_proxy_multistep_motion_matches_repeated_monotone_moves() -> None
     )
     horizon = 4
 
-    proxy = strategy._proxy_movement_delta(
-        node,
-        (1.0, 0.0),
-        60.0,
+    proxy = strategy._proxy_project_action(
+        node=node,
+        action=RecedingHorizonAction((1.0, 0.0)),
+        arena_size=60.0,
         horizon=horizon,
     )
     moved = list(own_blobs)
@@ -448,18 +435,9 @@ def test_replay_proxy_multistep_motion_matches_repeated_monotone_moves() -> None
             strategy._move_own(blob, (1.0, 0.0), 60.0)
             for blob in moved
         ]
-    total_mass = sum(blob.mass for blob in own_blobs)
-    expected_dx = sum(
-        (after.x - before.x) * before.mass
-        for before, after in zip(own_blobs, moved, strict=True)
-    ) / total_mass
-    expected_dy = sum(
-        (after.y - before.y) * before.mass
-        for before, after in zip(own_blobs, moved, strict=True)
-    ) / total_mass
-
-    assert math.isclose(proxy.displacement_x, expected_dx)
-    assert math.isclose(proxy.displacement_y, expected_dy)
+    for projected, expected in zip(proxy.blobs, moved, strict=True):
+        assert math.isclose(projected.x, expected.x)
+        assert math.isclose(projected.y, expected.y)
     assert math.isclose(proxy.efficiency, 1.0)
 
 
@@ -477,16 +455,16 @@ def test_replay_proxy_multistep_motion_accumulates_wall_clamp_loss() -> None:
     )
     horizon = 4
 
-    proxy = strategy._proxy_movement_delta(
-        node,
-        (1.0, 0.0),
-        60.0,
+    proxy = strategy._proxy_project_action(
+        node=node,
+        action=RecedingHorizonAction((1.0, 0.0)),
+        arena_size=60.0,
         horizon=horizon,
     )
     speed = player_speed(own.radius)
 
-    assert math.isclose(proxy.displacement_x, 0.5)
-    assert math.isclose(proxy.displacement_y, 0.0)
+    assert math.isclose(proxy.blobs[0].x - own.x, 0.5)
+    assert math.isclose(proxy.blobs[0].y - own.y, 0.0)
     assert math.isclose(proxy.efficiency, 0.5 / (speed * horizon))
 
 

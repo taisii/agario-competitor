@@ -23,15 +23,8 @@ CACHE_SPECS = {
     ),
     "node": ("node_hit", "node_miss", "cache_node"),
     "prey": ("prey_hit", "prey_miss", "cache_prey"),
-    "split_prey": (
-        "split_prey_hit",
-        "split_prey_miss",
-        "cache_split_prey",
-    ),
     "virus": ("virus_hit", "virus_miss", "cache_virus"),
-    "gradient": ("gradient_hit", "gradient_miss", "cache_gradient"),
     "hazard": ("hazard_hit", "hazard_miss", "cache_hazard"),
-    "proxy": ("proxy_hit", "proxy_miss", "cache_proxy"),
     "virus_layout": (
         "virus_layout_hit",
         "virus_layout_miss",

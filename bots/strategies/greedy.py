@@ -5,6 +5,7 @@ from __future__ import annotations
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.features import (
     BlobRelation,
+    extract_predator_relations,
     extract_visible_features,
     normalise,
     vector_from_to,
@@ -36,6 +37,7 @@ class FoodGreedyStrategy:
 
         return StrategyDecision(direction=(1.0, 0.0), reason="fallback_east")
 
+
 class SurvivalGreedyStrategy:
     name = "survival_greedy"
 
@@ -45,19 +47,12 @@ class SurvivalGreedyStrategy:
     def choose(self, context: StrategyContext) -> StrategyDecision:
         features = extract_visible_features(context.game)
 
-        escape = self._escape_vector(features.predators)
-        if escape is not None:
-            return StrategyDecision(
-                direction=escape,
-                target_kind="escape",
-                target_id=self._blob_id(features.nearest_predator),
-                reason="predator_near",
-                diagnostics={
-                    "nearest_predator_margin": features.nearest_predator.danger_margin
-                    if features.nearest_predator
-                    else None,
-                },
-            )
+        emergency = self._emergency_decision(
+            features.predators,
+            features.nearest_predator,
+        )
+        if emergency is not None:
+            return emergency
 
         if features.nearest_prey is not None:
             return StrategyDecision(
@@ -88,6 +83,40 @@ class SurvivalGreedyStrategy:
             )
 
         return StrategyDecision(direction=(1.0, 0.0), reason="fallback_east")
+
+    def emergency_decision(
+        self,
+        context: StrategyContext,
+    ) -> StrategyDecision | None:
+        """Return only the predator override, without scanning resources."""
+
+        predators = extract_predator_relations(context.game)
+        nearest = (
+            min(predators, key=lambda relation: relation.danger_margin)
+            if predators
+            else None
+        )
+        return self._emergency_decision(predators, nearest)
+
+    def _emergency_decision(
+        self,
+        predators: tuple[BlobRelation, ...],
+        nearest_predator: BlobRelation | None,
+    ) -> StrategyDecision | None:
+        escape = self._escape_vector(predators)
+        if escape is None:
+            return None
+        return StrategyDecision(
+            direction=escape,
+            target_kind="escape",
+            target_id=self._blob_id(nearest_predator),
+            reason="predator_near",
+            diagnostics={
+                "nearest_predator_margin": nearest_predator.danger_margin
+                if nearest_predator
+                else None,
+            },
+        )
 
     def _escape_vector(
         self,

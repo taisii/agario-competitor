@@ -128,6 +128,31 @@ def test_potential_field_virus_farmer_does_not_use_aggregate_radius_as_eating_po
     )
 
 
+def test_potential_field_virus_farmer_skips_discarded_survival_policy(
+    monkeypatch,
+) -> None:
+    strategy = PotentialFieldVirusFarmerStrategy()
+    own = BlobModel(blob_id=0, pos=(10.0, 10.0), radius=1.0)
+    calls = {"survival": 0, "growth": 0}
+    original_survival = strategy._virus_policy._survival.choose
+    original_growth = strategy._growth_policy.choose
+
+    def counted_survival(context):
+        calls["survival"] += 1
+        return original_survival(context)
+
+    def counted_growth(context):
+        calls["growth"] += 1
+        return original_growth(context)
+
+    monkeypatch.setattr(strategy._virus_policy._survival, "choose", counted_survival)
+    monkeypatch.setattr(strategy._growth_policy, "choose", counted_growth)
+
+    strategy.choose(_context(_game((own,))))
+
+    assert calls == {"survival": 0, "growth": 1}
+
+
 def test_potential_field_virus_farmer_merge_cooldown_does_not_delay_virus_contact() -> None:
     # Since 2026.1.13 the virus center, not its edge, must enter the blob.
     virus = VirusModel(virus_id=7, pos=(12.5, 10.0), radius=1.5)

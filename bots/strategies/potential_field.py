@@ -68,8 +68,15 @@ class PotentialFieldHunterStrategy:
             viruses=viruses,
             threatened=threatened,
         )
-        food_x, food_y, food_count = self._food_vector(primary_pos, tuple(state.visible_food))
+        food_x, food_y, food_count = self._food_vector(
+            primary_pos,
+            tuple(state.visible_food),
+        )
         rival_x, rival_y, rival_count = self._rival_vector(primary, enemies)
+        wall_direction = normalise((wall_x, wall_y))
+        virus_direction = normalise((virus_x, virus_y))
+        food_direction = normalise((food_x, food_y))
+        rival_direction = normalise((rival_x, rival_y))
         prey_plan = self._best_prey(
             primary=primary,
             own_blob_count=len(own_blobs),
@@ -102,15 +109,15 @@ class PotentialFieldHunterStrategy:
         elif threatened:
             direction = (
                 threat_x
-                + _lerp(0.45, 2.2, wall_proximity) * normalise((wall_x, wall_y))[0]
-                + (1.1 if primary_mass >= 4.0 else 0.55) * normalise((virus_x, virus_y))[0]
+                + _lerp(0.45, 2.2, wall_proximity) * wall_direction[0]
+                + (1.1 if primary_mass >= 4.0 else 0.55) * virus_direction[0]
                 + 0.7 * shelter_x
-                + 0.15 * normalise((food_x, food_y))[0],
+                + 0.15 * food_direction[0],
                 threat_y
-                + _lerp(0.45, 2.2, wall_proximity) * normalise((wall_x, wall_y))[1]
-                + (1.1 if primary_mass >= 4.0 else 0.55) * normalise((virus_x, virus_y))[1]
+                + _lerp(0.45, 2.2, wall_proximity) * wall_direction[1]
+                + (1.1 if primary_mass >= 4.0 else 0.55) * virus_direction[1]
                 + 0.7 * shelter_y
-                + 0.15 * normalise((food_x, food_y))[1],
+                + 0.15 * food_direction[1],
             )
             reason = "flee_threat"
         else:
@@ -127,15 +134,15 @@ class PotentialFieldHunterStrategy:
 
             direction = (
                 prey_weight * prey_x
-                + food_weight * normalise((food_x, food_y))[0]
-                + _lerp(0.55, 1.7, wall_proximity) * normalise((wall_x, wall_y))[0]
-                + (2.0 if primary_mass >= 4.0 else 0.9) * normalise((virus_x, virus_y))[0]
-                + rival_weight * normalise((rival_x, rival_y))[0],
+                + food_weight * food_direction[0]
+                + _lerp(0.55, 1.7, wall_proximity) * wall_direction[0]
+                + (2.0 if primary_mass >= 4.0 else 0.9) * virus_direction[0]
+                + rival_weight * rival_direction[0],
                 prey_weight * prey_y
-                + food_weight * normalise((food_x, food_y))[1]
-                + _lerp(0.55, 1.7, wall_proximity) * normalise((wall_x, wall_y))[1]
-                + (2.0 if primary_mass >= 4.0 else 0.9) * normalise((virus_x, virus_y))[1]
-                + rival_weight * normalise((rival_x, rival_y))[1],
+                + food_weight * food_direction[1]
+                + _lerp(0.55, 1.7, wall_proximity) * wall_direction[1]
+                + (2.0 if primary_mass >= 4.0 else 0.9) * virus_direction[1]
+                + rival_weight * rival_direction[1],
             )
             reason = "potential_mix"
 
@@ -178,16 +185,25 @@ class PotentialFieldHunterStrategy:
         y = 0.0
         count = 0
         max_level = 0.0
+        enemy_rows = tuple(
+            (
+                enemy,
+                _mass(enemy.radius) >= SPLIT_MIN_MASS,
+                enemy.radius + _speed(enemy.radius) * 4.0 + 1.2,
+            )
+            for enemy in enemies
+        )
         for own in own_blobs:
-            for enemy in enemies:
+            own_mass = _mass(own.radius)
+            for enemy, can_split, walking_reach in enemy_rows:
                 if not can_eat_player_blob(enemy.radius, own.radius):
                     continue
                 distance = math.dist(own.pos, enemy.pos)
                 split_capable = (
-                    _mass(enemy.radius) >= SPLIT_MIN_MASS
+                    can_split
                     and can_eat_player_blob(enemy.radius / SQRT2, own.radius)
                 )
-                reach = enemy.radius + _speed(enemy.radius) * 4.0 + 1.2
+                reach = walking_reach
                 if split_capable:
                     reach += 6.5
                 if distance >= reach:
@@ -196,7 +212,7 @@ class PotentialFieldHunterStrategy:
                 if split_capable:
                     level *= 1.5
                 away = normalise((own.pos[0] - enemy.pos[0], own.pos[1] - enemy.pos[1]))
-                weight = level * _mass(own.radius)
+                weight = level * own_mass
                 x += away[0] * weight
                 y += away[1] * weight
                 count += 1
