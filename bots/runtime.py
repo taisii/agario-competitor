@@ -14,6 +14,7 @@ from time import perf_counter
 from helper.game import Game
 from lib.interface.queries.query_move import QueryMovePlayer
 from strategies.base import Strategy, StrategyContext
+from strategies.replay_opponents import create_replay_candidate, create_replay_opponent
 from strategies.registry import create_strategy
 from telemetry import MetricsLogger
 
@@ -94,3 +95,15 @@ def run_configured_strategy(
         os.environ.get("BOT_STRATEGY", default_strategy_name),
         environment_defaults=environment_defaults,
     )
+
+
+def run_replay_opponent(team_id: int) -> None:
+    """Run one official replay-derived opponent by team ID."""
+
+    run_bot(lambda: create_replay_opponent(team_id))
+
+
+def run_replay_candidate(team_id: int) -> None:
+    """Run an archived replay clone for offline strength evaluation."""
+
+    run_bot(lambda: create_replay_candidate(team_id))

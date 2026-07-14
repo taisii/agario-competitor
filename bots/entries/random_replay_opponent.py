@@ -10,7 +10,7 @@ BOTS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BOTS_DIR))
 
 from runtime import run_bot  # noqa: E402
-from strategies.registry import create_random_replay_opponent_strategy  # noqa: E402
+from strategies.replay_opponents import create_random_replay_opponent  # noqa: E402
 
 
 def _log_selection(strategy_name: str) -> None:
@@ -23,7 +23,7 @@ def _log_selection(strategy_name: str) -> None:
 
 def main() -> None:
     run_bot(
-        lambda: create_random_replay_opponent_strategy(
+        lambda: create_random_replay_opponent(
             on_selected=_log_selection,
         )
     )

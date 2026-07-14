@@ -30,7 +30,7 @@ from strategies.replay_imitation import (  # noqa: E402
     split_feature_values,
     stable_unit_interval,
 )
-from strategies.registry import REPLAY_TEAM_IDS  # noqa: E402
+from strategies.replay_opponents import REPLAY_TEAM_IDS  # noqa: E402
 
 
 USER_TEAM_ID = 73
@@ -914,7 +914,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--existing-strategies-only",
         action="store_true",
-        help="Generate profiles only for replay teams in the strategy catalog",
+        help="Generate profiles only for replay teams in the opponent catalog",
     )
     parser.add_argument(
         "--report-out",

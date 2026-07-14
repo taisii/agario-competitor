@@ -91,16 +91,25 @@ randomly selected official-replay clone strategies, run:
 uv run simulation 1:bots/entries/replay_dominance.py 7:bots/entries/random_replay_opponent.py --headless
 ```
 
-To screen it against every saved strategy, with individual matches sharing one
+To screen it against every active replay opponent, with individual matches sharing one
 global parallel-job limit, run:
 
 ```bash
-uv run python scripts/benchmark_all_strategies.py --trials 2 --jobs 1
+uv run python scripts/benchmark_replay_opponents.py --trials 2 --jobs 1
 ```
 
 The matrix uses the no-recording fast runner by default. Add `--official` for a
 final process-layout and recording check after narrowing the candidates; it is
 substantially slower and is not intended for the exhaustive screen.
+
+The active replay panel contains only empirically strong, tactically active
+opponents. Re-evaluate it after importing new official replays:
+
+```bash
+uv run python scripts/rank_replay_opponents.py \
+  --replay-dir .agario/replays/official/submission-4 \
+  --replay-dir .agario/replays/official/submission-4-extra
+```
 
 ## Building the official submission
 
@@ -153,7 +162,11 @@ Strategy implementations are grouped by their fundamental algorithm:
 - `bots/strategies/potential_field.py`: weighted potential-field movement.
 - `bots/strategies/receding_horizon.py`: predictive receding-horizon strategies.
 - `bots/strategies/virus_farming.py`: safe virus pursuit and potential-field farming.
-- `bots/strategies/replay_imitation.py`: replay-fitted imitation policy; it needs a validated profile before it can be registered or ranked.
+- `bots/strategies/replay_opponents.py`: dedicated catalog for replay-derived
+  benchmark opponents. These are intentionally separate from candidate bot
+  strategies.
+- `bots/strategies/replay_imitation.py`: replay-fitted opponent behavior; it
+  needs a validated profile before it can be registered in the opponent catalog.
 
 Available local strategy entry points:
 
@@ -185,6 +198,8 @@ selecting a different policy.
 - Add or change decision policy code under `bots/strategies/`.
 - Register public policies in `bots/strategies/registry.py`; the runtime loads
   implementations lazily from that catalog.
+- Register official replay clones in `bots/strategies/replay_opponents.py`.
+  They are benchmark opponents, not selectable candidate strategies.
 - Keep engine transition rules out of policies. Shared movement, collision,
   visibility, food, and virus rules belong under `bots/simulation/`.
 - Keep process I/O and telemetry in `bots/runtime.py`. Entry files should only
