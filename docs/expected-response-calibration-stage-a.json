@@ -1,0 +1,4056 @@
+{
+  "config": {
+    "classification_order": "split_match_then_minimum_angle_error",
+    "engine_versions": [
+      "2026.1.13"
+    ],
+    "identity_caveat": "2026.1.13 replay blob IDs are not used for round-to-round tracking; classification uses snapshot geometry and one command per player.",
+    "match_count": 50,
+    "replay_dirs": [
+      "/Users/macbookair/.codex/worktrees/6dd0/agario-competitor/.agario/replays/official/submission-4",
+      "/Users/macbookair/.codex/worktrees/6dd0/agario-competitor/.agario/replays/official/submission-4-extra",
+      "/Users/macbookair/Projects/agario-competitor/.agario/replays/official/latest-20"
+    ],
+    "scenario_labels": [
+      "observed",
+      "intercept_chase",
+      "flee",
+      "lateral_positive",
+      "lateral_negative",
+      "adaptive"
+    ],
+    "team_id": 73
+  },
+  "leave_one_match_out": {
+    "11646": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.92257070011955,
+          "median": 1.2555997625317454,
+          "p75": 13.14263374362265,
+          "p95": 32.11871325495433
+        },
+        "sample_count": 1220,
+        "scenario_counts": {
+          "adaptive": 181,
+          "flee": 128,
+          "intercept_chase": 86,
+          "lateral_negative": 66,
+          "lateral_positive": 91,
+          "observed": 668
+        },
+        "scenario_weights": {
+          "adaptive": 0.1483606557377049,
+          "flee": 0.10491803278688525,
+          "intercept_chase": 0.07049180327868852,
+          "lateral_negative": 0.054098360655737705,
+          "lateral_positive": 0.07459016393442623,
+          "observed": 0.5475409836065573
+        },
+        "split_accuracy": 0.9975409836065574
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.197783252159704,
+          "median": 1.458957224202109,
+          "p75": 10.623733263617016,
+          "p95": 33.70179832005938
+        },
+        "sample_count": 48651,
+        "scenario_counts": {
+          "adaptive": 5727,
+          "flee": 5184,
+          "intercept_chase": 4606,
+          "lateral_negative": 2691,
+          "lateral_positive": 2857,
+          "observed": 27586
+        },
+        "scenario_weights": {
+          "adaptive": 0.11771597706110871,
+          "flee": 0.10655484984892397,
+          "intercept_chase": 0.0946743129637623,
+          "lateral_negative": 0.055312326570882406,
+          "lateral_positive": 0.0587243838770015,
+          "observed": 0.5670181496783211
+        },
+        "split_accuracy": 0.9921892664076792
+      }
+    },
+    "11654": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.953465316996571,
+          "median": 2.002819303200348,
+          "p75": 9.297225368896592,
+          "p95": 30.408368408672093
+        },
+        "sample_count": 1264,
+        "scenario_counts": {
+          "adaptive": 131,
+          "flee": 97,
+          "intercept_chase": 113,
+          "lateral_negative": 69,
+          "lateral_positive": 71,
+          "observed": 783
+        },
+        "scenario_weights": {
+          "adaptive": 0.10363924050632911,
+          "flee": 0.07674050632911393,
+          "intercept_chase": 0.0893987341772152,
+          "lateral_negative": 0.05458860759493671,
+          "lateral_positive": 0.05617088607594937,
+          "observed": 0.6194620253164557
+        },
+        "split_accuracy": 0.9897151898734177
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.223233466255559,
+          "median": 1.4446207911574644,
+          "p75": 10.763121715704031,
+          "p95": 33.74999999999999
+        },
+        "sample_count": 48607,
+        "scenario_counts": {
+          "adaptive": 5777,
+          "flee": 5215,
+          "intercept_chase": 4579,
+          "lateral_negative": 2688,
+          "lateral_positive": 2877,
+          "observed": 27471
+        },
+        "scenario_weights": {
+          "adaptive": 0.11885119427242989,
+          "flee": 0.10728907359022363,
+          "intercept_chase": 0.0942045384409653,
+          "lateral_negative": 0.055300676857242784,
+          "lateral_positive": 0.059189005698767665,
+          "observed": 0.5651655111403707
+        },
+        "split_accuracy": 0.9923879276647396
+      }
+    },
+    "11667": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.356269547373232,
+          "median": 1.1312840407441054,
+          "p75": 8.080238431114456,
+          "p95": 29.559980950994575
+        },
+        "sample_count": 1322,
+        "scenario_counts": {
+          "adaptive": 122,
+          "flee": 67,
+          "intercept_chase": 276,
+          "lateral_negative": 80,
+          "lateral_positive": 67,
+          "observed": 710
+        },
+        "scenario_weights": {
+          "adaptive": 0.09228441754916793,
+          "flee": 0.05068078668683813,
+          "intercept_chase": 0.2087745839636914,
+          "lateral_negative": 0.060514372163388806,
+          "lateral_positive": 0.05068078668683813,
+          "observed": 0.5370650529500757
+        },
+        "split_accuracy": 0.9992435703479576
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.241012192080994,
+          "median": 1.4684514071640329,
+          "p75": 10.798806822675708,
+          "p95": 33.74999999999998
+        },
+        "sample_count": 48549,
+        "scenario_counts": {
+          "adaptive": 5786,
+          "flee": 5245,
+          "intercept_chase": 4416,
+          "lateral_negative": 2677,
+          "lateral_positive": 2881,
+          "observed": 27544
+        },
+        "scenario_weights": {
+          "adaptive": 0.11917856186533193,
+          "flee": 0.10803518095120394,
+          "intercept_chase": 0.09095964901439782,
+          "lateral_negative": 0.05514016766565738,
+          "lateral_positive": 0.05934210797338771,
+          "observed": 0.5673443325300213
+        },
+        "split_accuracy": 0.9921316607963089
+      }
+    },
+    "11673": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 8.843185015104364,
+          "median": 3.5083721500797163,
+          "p75": 14.406017966015648,
+          "p95": 32.91551467820571
+        },
+        "sample_count": 966,
+        "scenario_counts": {
+          "adaptive": 93,
+          "flee": 120,
+          "intercept_chase": 110,
+          "lateral_negative": 73,
+          "lateral_positive": 67,
+          "observed": 503
+        },
+        "scenario_weights": {
+          "adaptive": 0.09627329192546584,
+          "flee": 0.12422360248447205,
+          "intercept_chase": 0.11387163561076605,
+          "lateral_negative": 0.07556935817805382,
+          "lateral_positive": 0.06935817805383022,
+          "observed": 0.520703933747412
+        },
+        "split_accuracy": 0.9989648033126294
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.178169359582391,
+          "median": 1.4195491658231705,
+          "p75": 10.635501869077297,
+          "p95": 33.68282750316892
+        },
+        "sample_count": 48905,
+        "scenario_counts": {
+          "adaptive": 5815,
+          "flee": 5192,
+          "intercept_chase": 4582,
+          "lateral_negative": 2684,
+          "lateral_positive": 2881,
+          "observed": 27751
+        },
+        "scenario_weights": {
+          "adaptive": 0.11890399754626316,
+          "flee": 0.10616501380226971,
+          "intercept_chase": 0.09369185154892137,
+          "lateral_negative": 0.05488191391473265,
+          "lateral_positive": 0.05891013188835498,
+          "observed": 0.5674470912994581
+        },
+        "split_accuracy": 0.9921889377364278
+      }
+    },
+    "11679": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 5.486329087234904,
+          "median": 0.44907137461880325,
+          "p75": 6.167567188709323,
+          "p95": 29.71259491052964
+        },
+        "sample_count": 1203,
+        "scenario_counts": {
+          "adaptive": 188,
+          "flee": 124,
+          "intercept_chase": 131,
+          "lateral_negative": 48,
+          "lateral_positive": 42,
+          "observed": 670
+        },
+        "scenario_weights": {
+          "adaptive": 0.15627597672485452,
+          "flee": 0.10307564422277639,
+          "intercept_chase": 0.10889443059019119,
+          "lateral_negative": 0.0399002493765586,
+          "lateral_positive": 0.034912718204488775,
+          "observed": 0.5569409808811305
+        },
+        "split_accuracy": 0.999168744804655
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.257907359312567,
+          "median": 1.4833168969615838,
+          "p75": 10.853726667969383,
+          "p95": 33.74999999999999
+        },
+        "sample_count": 48668,
+        "scenario_counts": {
+          "adaptive": 5720,
+          "flee": 5188,
+          "intercept_chase": 4561,
+          "lateral_negative": 2709,
+          "lateral_positive": 2906,
+          "observed": 27584
+        },
+        "scenario_weights": {
+          "adaptive": 0.11753102654721788,
+          "flee": 0.10659981918303608,
+          "intercept_chase": 0.09371661050382181,
+          "lateral_negative": 0.055662858551820495,
+          "lateral_positive": 0.059710692857729925,
+          "observed": 0.5667789923563737
+        },
+        "split_accuracy": 0.9921508999753431
+      }
+    },
+    "11681": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 11.591969144245937,
+          "median": 4.5539978337691895,
+          "p75": 18.95349519602025,
+          "p95": 36.2412584730642
+        },
+        "sample_count": 1363,
+        "scenario_counts": {
+          "adaptive": 100,
+          "flee": 209,
+          "intercept_chase": 270,
+          "lateral_negative": 74,
+          "lateral_positive": 85,
+          "observed": 625
+        },
+        "scenario_weights": {
+          "adaptive": 0.07336757153338225,
+          "flee": 0.1533382245047689,
+          "intercept_chase": 0.19809244314013205,
+          "lateral_negative": 0.05429200293470286,
+          "lateral_positive": 0.06236243580337491,
+          "observed": 0.458547322083639
+        },
+        "split_accuracy": 0.9985326485693323
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.095490131758893,
+          "median": 1.4043882253605184,
+          "p75": 10.489071350508798,
+          "p95": 33.477555992325286
+        },
+        "sample_count": 48508,
+        "scenario_counts": {
+          "adaptive": 5808,
+          "flee": 5103,
+          "intercept_chase": 4422,
+          "lateral_negative": 2683,
+          "lateral_positive": 2863,
+          "observed": 27629
+        },
+        "scenario_weights": {
+          "adaptive": 0.11973282757483301,
+          "flee": 0.10519914240949946,
+          "intercept_chase": 0.09116022099447514,
+          "lateral_negative": 0.05531046425331904,
+          "lateral_positive": 0.05902119238063824,
+          "observed": 0.5695761523872351
+        },
+        "split_accuracy": 0.992145625463841
+      }
+    },
+    "11694": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.206242523156881,
+          "median": 0.28672622084558946,
+          "p75": 10.451213451738568,
+          "p95": 34.60332854061906
+        },
+        "sample_count": 898,
+        "scenario_counts": {
+          "adaptive": 71,
+          "flee": 107,
+          "intercept_chase": 62,
+          "lateral_negative": 54,
+          "lateral_positive": 61,
+          "observed": 543
+        },
+        "scenario_weights": {
+          "adaptive": 0.07906458797327394,
+          "flee": 0.11915367483296214,
+          "intercept_chase": 0.06904231625835189,
+          "lateral_negative": 0.060133630289532294,
+          "lateral_positive": 0.06792873051224944,
+          "observed": 0.6046770601336303
+        },
+        "split_accuracy": 0.9977728285077951
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.209108763383348,
+          "median": 1.4790711996603332,
+          "p75": 10.735518871527603,
+          "p95": 33.6152286149514
+        },
+        "sample_count": 48973,
+        "scenario_counts": {
+          "adaptive": 5837,
+          "flee": 5205,
+          "intercept_chase": 4630,
+          "lateral_negative": 2703,
+          "lateral_positive": 2887,
+          "observed": 27711
+        },
+        "scenario_weights": {
+          "adaptive": 0.1191881240683642,
+          "flee": 0.10628305392767444,
+          "intercept_chase": 0.0945418904294203,
+          "lateral_negative": 0.055193678149184244,
+          "lateral_positive": 0.05895085046862557,
+          "observed": 0.5658424029567313
+        },
+        "split_accuracy": 0.992220202968983
+      }
+    },
+    "11697": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 18.823740041003656,
+          "median": 8.537736462515939e-07,
+          "p75": 7.221263964956084,
+          "p95": 180.0
+        },
+        "sample_count": 1055,
+        "scenario_counts": {
+          "adaptive": 194,
+          "flee": 49,
+          "intercept_chase": 115,
+          "lateral_negative": 30,
+          "lateral_positive": 40,
+          "observed": 627
+        },
+        "scenario_weights": {
+          "adaptive": 0.18388625592417063,
+          "flee": 0.046445497630331754,
+          "intercept_chase": 0.10900473933649289,
+          "lateral_negative": 0.02843601895734597,
+          "lateral_positive": 0.037914691943127965,
+          "observed": 0.5943127962085308
+        },
+        "split_accuracy": 0.9990521327014218
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 7.961259495077614,
+          "median": 1.5061797673442785,
+          "p75": 10.76803964147893,
+          "p95": 33.397259723028846
+        },
+        "sample_count": 48816,
+        "scenario_counts": {
+          "adaptive": 5714,
+          "flee": 5263,
+          "intercept_chase": 4577,
+          "lateral_negative": 2727,
+          "lateral_positive": 2908,
+          "observed": 27627
+        },
+        "scenario_weights": {
+          "adaptive": 0.11705178629957391,
+          "flee": 0.10781301212717143,
+          "intercept_chase": 0.09376024254342838,
+          "lateral_negative": 0.055862831858407076,
+          "lateral_positive": 0.059570632579482134,
+          "observed": 0.5659414945919371
+        },
+        "split_accuracy": 0.9921746968207146
+      }
+    },
+    "11698": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.687794168549593,
+          "median": 2.762393992016916,
+          "p75": 10.103723063883251,
+          "p95": 35.597624571601465
+        },
+        "sample_count": 1120,
+        "scenario_counts": {
+          "adaptive": 80,
+          "flee": 163,
+          "intercept_chase": 184,
+          "lateral_negative": 87,
+          "lateral_positive": 47,
+          "observed": 559
+        },
+        "scenario_weights": {
+          "adaptive": 0.07142857142857142,
+          "flee": 0.1455357142857143,
+          "intercept_chase": 0.16428571428571428,
+          "lateral_negative": 0.07767857142857143,
+          "lateral_positive": 0.04196428571428571,
+          "observed": 0.49910714285714286
+        },
+        "split_accuracy": 0.9973214285714286
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.202612454845893,
+          "median": 1.4229014935382558,
+          "p75": 10.755456733794473,
+          "p95": 33.54674924150689
+        },
+        "sample_count": 48751,
+        "scenario_counts": {
+          "adaptive": 5828,
+          "flee": 5149,
+          "intercept_chase": 4508,
+          "lateral_negative": 2670,
+          "lateral_positive": 2901,
+          "observed": 27695
+        },
+        "scenario_weights": {
+          "adaptive": 0.1195462657176263,
+          "flee": 0.10561834629033251,
+          "intercept_chase": 0.09246989805337326,
+          "lateral_negative": 0.05476810732087547,
+          "lateral_positive": 0.05950647166211975,
+          "observed": 0.5680909109556727
+        },
+        "split_accuracy": 0.9922052880966544
+      }
+    },
+    "11710": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 9.720567512836938,
+          "median": 6.6688273340039625,
+          "p75": 16.229196945476495,
+          "p95": 31.458475732918416
+        },
+        "sample_count": 1112,
+        "scenario_counts": {
+          "adaptive": 62,
+          "flee": 181,
+          "intercept_chase": 95,
+          "lateral_negative": 96,
+          "lateral_positive": 125,
+          "observed": 553
+        },
+        "scenario_weights": {
+          "adaptive": 0.05575539568345324,
+          "flee": 0.16276978417266186,
+          "intercept_chase": 0.08543165467625899,
+          "lateral_negative": 0.08633093525179857,
+          "lateral_positive": 0.11241007194244604,
+          "observed": 0.4973021582733813
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.156168464913,
+          "median": 1.3925270346040035,
+          "p75": 10.50646424497041,
+          "p95": 33.68191250557194
+        },
+        "sample_count": 48759,
+        "scenario_counts": {
+          "adaptive": 5846,
+          "flee": 5131,
+          "intercept_chase": 4597,
+          "lateral_negative": 2661,
+          "lateral_positive": 2823,
+          "observed": 27701
+        },
+        "scenario_weights": {
+          "adaptive": 0.11989581410611375,
+          "flee": 0.10523185463196538,
+          "intercept_chase": 0.09428003035337065,
+          "lateral_negative": 0.0545745400849074,
+          "lateral_positive": 0.05789700363009906,
+          "observed": 0.5681207571935437
+        },
+        "split_accuracy": 0.9921450398900715
+      }
+    },
+    "11716": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 5.923642291202147,
+          "median": 0.12853199651071937,
+          "p75": 7.676294318829401,
+          "p95": 30.697518696114543
+        },
+        "sample_count": 1030,
+        "scenario_counts": {
+          "adaptive": 150,
+          "flee": 74,
+          "intercept_chase": 71,
+          "lateral_negative": 60,
+          "lateral_positive": 42,
+          "observed": 633
+        },
+        "scenario_weights": {
+          "adaptive": 0.14563106796116504,
+          "flee": 0.07184466019417475,
+          "intercept_chase": 0.06893203883495146,
+          "lateral_negative": 0.05825242718446602,
+          "lateral_positive": 0.040776699029126215,
+          "observed": 0.6145631067961165
+        },
+        "split_accuracy": 0.996116504854369
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.238867707357127,
+          "median": 1.4960855079214992,
+          "p75": 10.806820342077657,
+          "p95": 33.72086787799
+        },
+        "sample_count": 48841,
+        "scenario_counts": {
+          "adaptive": 5758,
+          "flee": 5238,
+          "intercept_chase": 4621,
+          "lateral_negative": 2697,
+          "lateral_positive": 2906,
+          "observed": 27621
+        },
+        "scenario_weights": {
+          "adaptive": 0.1178927540386151,
+          "flee": 0.10724596138490203,
+          "intercept_chase": 0.09461313240924633,
+          "lateral_negative": 0.055219999590507975,
+          "lateral_positive": 0.059499191253250344,
+          "observed": 0.5655289613234782
+        },
+        "split_accuracy": 0.9922401261235437
+      }
+    },
+    "11719": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.8601752359111785,
+          "median": 0.18640244717415147,
+          "p75": 7.596752955390786,
+          "p95": 34.695399169707706
+        },
+        "sample_count": 999,
+        "scenario_counts": {
+          "adaptive": 168,
+          "flee": 88,
+          "intercept_chase": 66,
+          "lateral_negative": 59,
+          "lateral_positive": 73,
+          "observed": 545
+        },
+        "scenario_weights": {
+          "adaptive": 0.16816816816816818,
+          "flee": 0.08808808808808809,
+          "intercept_chase": 0.06606606606606606,
+          "lateral_negative": 0.05905905905905906,
+          "lateral_positive": 0.07307307307307308,
+          "observed": 0.5455455455455456
+        },
+        "split_accuracy": 0.994994994994995
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.218255323995178,
+          "median": 1.4874465296775186,
+          "p75": 10.758777318282286,
+          "p95": 33.6134810188837
+        },
+        "sample_count": 48872,
+        "scenario_counts": {
+          "adaptive": 5740,
+          "flee": 5224,
+          "intercept_chase": 4626,
+          "lateral_negative": 2698,
+          "lateral_positive": 2875,
+          "observed": 27709
+        },
+        "scenario_weights": {
+          "adaptive": 0.1174496644295302,
+          "flee": 0.10689147159927975,
+          "intercept_chase": 0.094655426420036,
+          "lateral_negative": 0.055205434604681615,
+          "lateral_positive": 0.05882714028482567,
+          "observed": 0.5669708626616468
+        },
+        "split_accuracy": 0.9922655099034212
+      }
+    },
+    "11724": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 5.044199336238204,
+          "median": 0.0,
+          "p75": 4.245809990785708,
+          "p95": 32.36722728184348
+        },
+        "sample_count": 970,
+        "scenario_counts": {
+          "adaptive": 137,
+          "flee": 58,
+          "intercept_chase": 131,
+          "lateral_negative": 49,
+          "lateral_positive": 43,
+          "observed": 552
+        },
+        "scenario_weights": {
+          "adaptive": 0.14123711340206185,
+          "flee": 0.05979381443298969,
+          "intercept_chase": 0.13505154639175257,
+          "lateral_negative": 0.050515463917525774,
+          "lateral_positive": 0.0443298969072165,
+          "observed": 0.5690721649484536
+        },
+        "split_accuracy": 0.9948453608247423
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.253471624277962,
+          "median": 1.523015369385294,
+          "p75": 10.813898855311637,
+          "p95": 33.68666973891929
+        },
+        "sample_count": 48901,
+        "scenario_counts": {
+          "adaptive": 5771,
+          "flee": 5254,
+          "intercept_chase": 4561,
+          "lateral_negative": 2708,
+          "lateral_positive": 2905,
+          "observed": 27702
+        },
+        "scenario_weights": {
+          "adaptive": 0.11801394654506042,
+          "flee": 0.10744156561215518,
+          "intercept_chase": 0.09327007627655876,
+          "lateral_negative": 0.05537719065049795,
+          "lateral_positive": 0.05940573812396475,
+          "observed": 0.566491482791763
+        },
+        "split_accuracy": 0.9922700967260383
+      }
+    },
+    "11725": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 8.863592054967455,
+          "median": 3.915405900408098,
+          "p75": 14.99999999999997,
+          "p95": 32.96451163220658
+        },
+        "sample_count": 817,
+        "scenario_counts": {
+          "adaptive": 74,
+          "flee": 117,
+          "intercept_chase": 33,
+          "lateral_negative": 68,
+          "lateral_positive": 53,
+          "observed": 472
+        },
+        "scenario_weights": {
+          "adaptive": 0.09057527539779682,
+          "flee": 0.14320685434516525,
+          "intercept_chase": 0.04039167686658507,
+          "lateral_negative": 0.0832313341493268,
+          "lateral_positive": 0.06487148102815178,
+          "observed": 0.5777233782129743
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.17984944237084,
+          "median": 1.4296351685831796,
+          "p75": 10.6300503698376,
+          "p95": 33.68666973891929
+        },
+        "sample_count": 49054,
+        "scenario_counts": {
+          "adaptive": 5834,
+          "flee": 5195,
+          "intercept_chase": 4659,
+          "lateral_negative": 2689,
+          "lateral_positive": 2895,
+          "observed": 27782
+        },
+        "scenario_weights": {
+          "adaptive": 0.11893015860072573,
+          "flee": 0.1059036979655074,
+          "intercept_chase": 0.09497696416194398,
+          "lateral_negative": 0.054817140294369474,
+          "lateral_positive": 0.05901659395767929,
+          "observed": 0.5663554450197741
+        },
+        "split_accuracy": 0.9921922778978269
+      }
+    },
+    "11739": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.388397525391855,
+          "median": 0.960776894659364,
+          "p75": 11.415612959519375,
+          "p95": 33.366007527797954
+        },
+        "sample_count": 759,
+        "scenario_counts": {
+          "adaptive": 66,
+          "flee": 65,
+          "intercept_chase": 56,
+          "lateral_negative": 60,
+          "lateral_positive": 44,
+          "observed": 468
+        },
+        "scenario_weights": {
+          "adaptive": 0.08695652173913043,
+          "flee": 0.08563899868247694,
+          "intercept_chase": 0.07378129117259552,
+          "lateral_negative": 0.07905138339920949,
+          "lateral_positive": 0.057971014492753624,
+          "observed": 0.616600790513834
+        },
+        "split_accuracy": 0.994729907773386
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.203455276372276,
+          "median": 1.4684978431245164,
+          "p75": 10.715858190700944,
+          "p95": 33.65725910358898
+        },
+        "sample_count": 49112,
+        "scenario_counts": {
+          "adaptive": 5842,
+          "flee": 5247,
+          "intercept_chase": 4636,
+          "lateral_negative": 2697,
+          "lateral_positive": 2904,
+          "observed": 27786
+        },
+        "scenario_weights": {
+          "adaptive": 0.11895259814302003,
+          "flee": 0.10683743280664604,
+          "intercept_chase": 0.09439648151164685,
+          "lateral_negative": 0.05491529565075745,
+          "lateral_positive": 0.05913015149047076,
+          "observed": 0.5657680403974589
+        },
+        "split_accuracy": 0.992282945105066
+      }
+    },
+    "11745": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 9.034250089655675,
+          "median": 3.5234451566643807,
+          "p75": 14.807922443914622,
+          "p95": 33.484414108776335
+        },
+        "sample_count": 991,
+        "scenario_counts": {
+          "adaptive": 174,
+          "flee": 111,
+          "intercept_chase": 89,
+          "lateral_negative": 76,
+          "lateral_positive": 91,
+          "observed": 450
+        },
+        "scenario_weights": {
+          "adaptive": 0.17558022199798184,
+          "flee": 0.11200807265388496,
+          "intercept_chase": 0.08980827447023208,
+          "lateral_negative": 0.07669021190716448,
+          "lateral_positive": 0.09182643794147326,
+          "observed": 0.45408678102926336
+        },
+        "split_accuracy": 0.9959636730575177
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.173955552702923,
+          "median": 1.426783773934189,
+          "p75": 10.623733263617016,
+          "p95": 33.65008220196403
+        },
+        "sample_count": 48880,
+        "scenario_counts": {
+          "adaptive": 5734,
+          "flee": 5201,
+          "intercept_chase": 4603,
+          "lateral_negative": 2681,
+          "lateral_positive": 2857,
+          "observed": 27804
+        },
+        "scenario_weights": {
+          "adaptive": 0.11730769230769231,
+          "flee": 0.10640343698854338,
+          "intercept_chase": 0.09416939443535188,
+          "lateral_negative": 0.05484860883797054,
+          "lateral_positive": 0.05844926350245499,
+          "observed": 0.5688216039279869
+        },
+        "split_accuracy": 0.992246317512275
+      }
+    },
+    "11752": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.609773936919964,
+          "median": 0.42266363338211665,
+          "p75": 6.940984474526818,
+          "p95": 33.57197168870563
+        },
+        "sample_count": 1052,
+        "scenario_counts": {
+          "adaptive": 151,
+          "flee": 94,
+          "intercept_chase": 82,
+          "lateral_negative": 55,
+          "lateral_positive": 65,
+          "observed": 605
+        },
+        "scenario_weights": {
+          "adaptive": 0.1435361216730038,
+          "flee": 0.08935361216730038,
+          "intercept_chase": 0.0779467680608365,
+          "lateral_negative": 0.05228136882129278,
+          "lateral_positive": 0.06178707224334601,
+          "observed": 0.5750950570342205
+        },
+        "split_accuracy": 0.9933460076045627
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.22512560833544,
+          "median": 1.4924601123220245,
+          "p75": 10.798806822675708,
+          "p95": 33.65008220196403
+        },
+        "sample_count": 48819,
+        "scenario_counts": {
+          "adaptive": 5757,
+          "flee": 5218,
+          "intercept_chase": 4610,
+          "lateral_negative": 2702,
+          "lateral_positive": 2883,
+          "observed": 27649
+        },
+        "scenario_weights": {
+          "adaptive": 0.11792539789835925,
+          "flee": 0.10688461459677584,
+          "intercept_chase": 0.09443044716196562,
+          "lateral_negative": 0.05534730330404146,
+          "lateral_positive": 0.05905487617525963,
+          "observed": 0.5663573608635982
+        },
+        "split_accuracy": 0.9922980806653148
+      }
+    },
+    "11753": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 9.008547477410545,
+          "median": 1.679812828145224,
+          "p75": 10.976137409022693,
+          "p95": 36.95731308291932
+        },
+        "sample_count": 1133,
+        "scenario_counts": {
+          "adaptive": 174,
+          "flee": 78,
+          "intercept_chase": 172,
+          "lateral_negative": 64,
+          "lateral_positive": 68,
+          "observed": 577
+        },
+        "scenario_weights": {
+          "adaptive": 0.15357458075904679,
+          "flee": 0.06884377758164166,
+          "intercept_chase": 0.15180935569285084,
+          "lateral_negative": 0.05648720211827008,
+          "lateral_positive": 0.06001765225066196,
+          "observed": 0.5092674315975286
+        },
+        "split_accuracy": 0.9761694616063548
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.172046554291548,
+          "median": 1.4518378517825408,
+          "p75": 10.7220446007695,
+          "p95": 33.59313932824951
+        },
+        "sample_count": 48738,
+        "scenario_counts": {
+          "adaptive": 5734,
+          "flee": 5234,
+          "intercept_chase": 4520,
+          "lateral_negative": 2693,
+          "lateral_positive": 2880,
+          "observed": 27677
+        },
+        "scenario_weights": {
+          "adaptive": 0.11764947269071362,
+          "flee": 0.1073905371578645,
+          "intercept_chase": 0.09274077721695596,
+          "lateral_negative": 0.05525462677992531,
+          "lateral_positive": 0.05909146866921088,
+          "observed": 0.5678731174853298
+        },
+        "split_accuracy": 0.9926956379006114
+      }
+    },
+    "11756": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.696983408640298,
+          "median": 1.531501226305517,
+          "p75": 10.100850085120843,
+          "p95": 30.680888830776702
+        },
+        "sample_count": 813,
+        "scenario_counts": {
+          "adaptive": 124,
+          "flee": 99,
+          "intercept_chase": 58,
+          "lateral_negative": 48,
+          "lateral_positive": 42,
+          "observed": 442
+        },
+        "scenario_weights": {
+          "adaptive": 0.15252152521525214,
+          "flee": 0.12177121771217712,
+          "intercept_chase": 0.07134071340713408,
+          "lateral_negative": 0.05904059040590406,
+          "lateral_positive": 0.05166051660516605,
+          "observed": 0.5436654366543665
+        },
+        "split_accuracy": 0.991389913899139
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.215810708625364,
+          "median": 1.4544979893671552,
+          "p75": 10.7443219076542,
+          "p95": 33.694526180044974
+        },
+        "sample_count": 49058,
+        "scenario_counts": {
+          "adaptive": 5784,
+          "flee": 5213,
+          "intercept_chase": 4634,
+          "lateral_negative": 2709,
+          "lateral_positive": 2906,
+          "observed": 27812
+        },
+        "scenario_weights": {
+          "adaptive": 0.11790125973337683,
+          "flee": 0.10626197562069387,
+          "intercept_chase": 0.09445961922622202,
+          "lateral_negative": 0.055220351420767255,
+          "lateral_positive": 0.05923600635981899,
+          "observed": 0.566920787639121
+        },
+        "split_accuracy": 0.9923356027559216
+      }
+    },
+    "11757": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 4.671477825777917,
+          "median": 0.0,
+          "p75": 5.12007570155211,
+          "p95": 24.69414138093857
+        },
+        "sample_count": 1249,
+        "scenario_counts": {
+          "adaptive": 164,
+          "flee": 129,
+          "intercept_chase": 62,
+          "lateral_negative": 35,
+          "lateral_positive": 55,
+          "observed": 804
+        },
+        "scenario_weights": {
+          "adaptive": 0.1313050440352282,
+          "flee": 0.10328262610088071,
+          "intercept_chase": 0.049639711769415534,
+          "lateral_negative": 0.02802241793434748,
+          "lateral_positive": 0.044035228182546036,
+          "observed": 0.6437149719775821
+        },
+        "split_accuracy": 0.9975980784627703
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.2814613436422,
+          "median": 1.5491759042754127,
+          "p75": 10.822844231541557,
+          "p95": 33.8142241262588
+        },
+        "sample_count": 48622,
+        "scenario_counts": {
+          "adaptive": 5744,
+          "flee": 5183,
+          "intercept_chase": 4630,
+          "lateral_negative": 2722,
+          "lateral_positive": 2893,
+          "observed": 27450
+        },
+        "scenario_weights": {
+          "adaptive": 0.11813582328986878,
+          "flee": 0.10659783637036732,
+          "intercept_chase": 0.09522438402369297,
+          "lateral_negative": 0.05598288840442598,
+          "lateral_positive": 0.05949981489860557,
+          "observed": 0.5645592530130393
+        },
+        "split_accuracy": 0.992184607790712
+      }
+    },
+    "13931": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.269662192201664,
+          "median": 0.0034872497901425326,
+          "p75": 8.552710519500675,
+          "p95": 35.09225331369963
+        },
+        "sample_count": 964,
+        "scenario_counts": {
+          "adaptive": 92,
+          "flee": 103,
+          "intercept_chase": 95,
+          "lateral_negative": 61,
+          "lateral_positive": 49,
+          "observed": 564
+        },
+        "scenario_weights": {
+          "adaptive": 0.0954356846473029,
+          "flee": 0.10684647302904564,
+          "intercept_chase": 0.09854771784232365,
+          "lateral_negative": 0.06327800829875518,
+          "lateral_positive": 0.0508298755186722,
+          "observed": 0.5850622406639004
+        },
+        "split_accuracy": 0.946058091286307
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.209212073970704,
+          "median": 1.4988972100455746,
+          "p75": 10.745769641430293,
+          "p95": 33.61782584881465
+        },
+        "sample_count": 48907,
+        "scenario_counts": {
+          "adaptive": 5816,
+          "flee": 5209,
+          "intercept_chase": 4597,
+          "lateral_negative": 2696,
+          "lateral_positive": 2899,
+          "observed": 27690
+        },
+        "scenario_weights": {
+          "adaptive": 0.11891958206391723,
+          "flee": 0.10650827079968103,
+          "intercept_chase": 0.09399472468153842,
+          "lateral_negative": 0.055125033226327516,
+          "lateral_positive": 0.0592757682949271,
+          "observed": 0.5661766209336087
+        },
+        "split_accuracy": 0.9932320526713967
+      }
+    },
+    "13932": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 5.887318208484327,
+          "median": 0.9513143451505987,
+          "p75": 6.364685427518477,
+          "p95": 31.142866001429514
+        },
+        "sample_count": 1249,
+        "scenario_counts": {
+          "adaptive": 157,
+          "flee": 82,
+          "intercept_chase": 159,
+          "lateral_negative": 52,
+          "lateral_positive": 54,
+          "observed": 745
+        },
+        "scenario_weights": {
+          "adaptive": 0.1257005604483587,
+          "flee": 0.0656525220176141,
+          "intercept_chase": 0.12730184147317855,
+          "lateral_negative": 0.041633306645316254,
+          "lateral_positive": 0.04323458767013611,
+          "observed": 0.5964771817453963
+        },
+        "split_accuracy": 0.9991993594875901
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.2502288843028,
+          "median": 1.4689760790678508,
+          "p75": 10.822412836612619,
+          "p95": 33.70955051421032
+        },
+        "sample_count": 48622,
+        "scenario_counts": {
+          "adaptive": 5751,
+          "flee": 5230,
+          "intercept_chase": 4533,
+          "lateral_negative": 2705,
+          "lateral_positive": 2894,
+          "observed": 27509
+        },
+        "scenario_weights": {
+          "adaptive": 0.11827979104109251,
+          "flee": 0.10756447698572663,
+          "intercept_chase": 0.09322940232816421,
+          "lateral_negative": 0.05563325243716836,
+          "lateral_positive": 0.05952038172020896,
+          "observed": 0.5657726954876393
+        },
+        "split_accuracy": 0.9921434741475053
+      }
+    },
+    "13933": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 8.853648178637068,
+          "median": 3.729616920920104,
+          "p75": 12.85008626707996,
+          "p95": 35.24570234160496
+        },
+        "sample_count": 788,
+        "scenario_counts": {
+          "adaptive": 55,
+          "flee": 118,
+          "intercept_chase": 119,
+          "lateral_negative": 52,
+          "lateral_positive": 54,
+          "observed": 390
+        },
+        "scenario_weights": {
+          "adaptive": 0.06979695431472081,
+          "flee": 0.14974619289340102,
+          "intercept_chase": 0.15101522842639595,
+          "lateral_negative": 0.06598984771573604,
+          "lateral_positive": 0.06852791878172589,
+          "observed": 0.4949238578680203
+        },
+        "split_accuracy": 0.9974619289340102
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.180413065423906,
+          "median": 1.426747379661991,
+          "p75": 10.661246511105267,
+          "p95": 33.603641816012825
+        },
+        "sample_count": 49083,
+        "scenario_counts": {
+          "adaptive": 5853,
+          "flee": 5194,
+          "intercept_chase": 4573,
+          "lateral_negative": 2705,
+          "lateral_positive": 2894,
+          "observed": 27864
+        },
+        "scenario_weights": {
+          "adaptive": 0.11924698979279995,
+          "flee": 0.10582075260273414,
+          "intercept_chase": 0.09316871421877228,
+          "lateral_negative": 0.05511073080292565,
+          "lateral_positive": 0.05896135118065318,
+          "observed": 0.5676914614021148
+        },
+        "split_accuracy": 0.9922376382861683
+      }
+    },
+    "13934": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 5.787823838529012,
+          "median": 1.4567634213019867,
+          "p75": 6.689818354785478,
+          "p95": 26.389906238978682
+        },
+        "sample_count": 663,
+        "scenario_counts": {
+          "adaptive": 42,
+          "flee": 74,
+          "intercept_chase": 63,
+          "lateral_negative": 42,
+          "lateral_positive": 28,
+          "observed": 414
+        },
+        "scenario_weights": {
+          "adaptive": 0.06334841628959276,
+          "flee": 0.11161387631975868,
+          "intercept_chase": 0.09502262443438914,
+          "lateral_negative": 0.06334841628959276,
+          "lateral_positive": 0.042232277526395176,
+          "observed": 0.6244343891402715
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.223430378191003,
+          "median": 1.4560894190501257,
+          "p75": 10.775079697744728,
+          "p95": 33.71646187693414
+        },
+        "sample_count": 49208,
+        "scenario_counts": {
+          "adaptive": 5866,
+          "flee": 5238,
+          "intercept_chase": 4629,
+          "lateral_negative": 2715,
+          "lateral_positive": 2920,
+          "observed": 27840
+        },
+        "scenario_weights": {
+          "adaptive": 0.11920825881970411,
+          "flee": 0.10644610632417494,
+          "intercept_chase": 0.09407006990733215,
+          "lateral_negative": 0.05517395545439766,
+          "lateral_positive": 0.05933994472443505,
+          "observed": 0.5657616647699562
+        },
+        "split_accuracy": 0.9922167127296374
+      }
+    },
+    "13935": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.808257355313212,
+          "median": 2.04264832808654,
+          "p75": 12.050119411043918,
+          "p95": 32.40147525013263
+        },
+        "sample_count": 713,
+        "scenario_counts": {
+          "adaptive": 101,
+          "flee": 80,
+          "intercept_chase": 35,
+          "lateral_negative": 56,
+          "lateral_positive": 51,
+          "observed": 390
+        },
+        "scenario_weights": {
+          "adaptive": 0.14165497896213183,
+          "flee": 0.11220196353436185,
+          "intercept_chase": 0.04908835904628331,
+          "lateral_negative": 0.0785413744740533,
+          "lateral_positive": 0.07152875175315568,
+          "observed": 0.5469845722300141
+        },
+        "split_accuracy": 0.9831697054698457
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.196602826816171,
+          "median": 1.450199423706683,
+          "p75": 10.719198281141491,
+          "p95": 33.68666973891929
+        },
+        "sample_count": 49158,
+        "scenario_counts": {
+          "adaptive": 5807,
+          "flee": 5232,
+          "intercept_chase": 4657,
+          "lateral_negative": 2701,
+          "lateral_positive": 2897,
+          "observed": 27864
+        },
+        "scenario_weights": {
+          "adaptive": 0.1181292973676716,
+          "flee": 0.10643232027340413,
+          "intercept_chase": 0.09473534317913666,
+          "lateral_negative": 0.054945278489767685,
+          "lateral_positive": 0.05893242198624842,
+          "observed": 0.5668253387037715
+        },
+        "split_accuracy": 0.9924529069530901
+      }
+    },
+    "13936": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 5.799874877786066,
+          "median": 0.7795132214844278,
+          "p75": 6.207217079546803,
+          "p95": 28.860094559422034
+        },
+        "sample_count": 1048,
+        "scenario_counts": {
+          "adaptive": 163,
+          "flee": 106,
+          "intercept_chase": 52,
+          "lateral_negative": 39,
+          "lateral_positive": 42,
+          "observed": 646
+        },
+        "scenario_weights": {
+          "adaptive": 0.15553435114503816,
+          "flee": 0.10114503816793893,
+          "intercept_chase": 0.04961832061068702,
+          "lateral_negative": 0.03721374045801527,
+          "lateral_positive": 0.04007633587786259,
+          "observed": 0.6164122137404581
+        },
+        "split_accuracy": 0.9952290076335878
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.242377985438171,
+          "median": 1.4788833935520762,
+          "p75": 10.825941075920147,
+          "p95": 33.74999999999999
+        },
+        "sample_count": 48823,
+        "scenario_counts": {
+          "adaptive": 5745,
+          "flee": 5206,
+          "intercept_chase": 4640,
+          "lateral_negative": 2718,
+          "lateral_positive": 2906,
+          "observed": 27608
+        },
+        "scenario_weights": {
+          "adaptive": 0.11766995063801897,
+          "flee": 0.10663007189234582,
+          "intercept_chase": 0.0950371751018987,
+          "lateral_negative": 0.05567048317391393,
+          "lateral_positive": 0.05952112733752535,
+          "observed": 0.5654711918562972
+        },
+        "split_accuracy": 0.9922577473731643
+      }
+    },
+    "13937": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.48017554479814,
+          "median": 3.0443757920968775,
+          "p75": 11.023454492735427,
+          "p95": 31.15440148580779
+        },
+        "sample_count": 602,
+        "scenario_counts": {
+          "adaptive": 92,
+          "flee": 42,
+          "intercept_chase": 32,
+          "lateral_negative": 29,
+          "lateral_positive": 41,
+          "observed": 366
+        },
+        "scenario_weights": {
+          "adaptive": 0.15282392026578073,
+          "flee": 0.06976744186046512,
+          "intercept_chase": 0.053156146179401995,
+          "lateral_negative": 0.04817275747508306,
+          "lateral_positive": 0.0681063122923588,
+          "observed": 0.6079734219269103
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.199736620938097,
+          "median": 1.4433567600297674,
+          "p75": 10.72781123875254,
+          "p95": 33.69057808251708
+        },
+        "sample_count": 49269,
+        "scenario_counts": {
+          "adaptive": 5816,
+          "flee": 5270,
+          "intercept_chase": 4660,
+          "lateral_negative": 2728,
+          "lateral_positive": 2907,
+          "observed": 27888
+        },
+        "scenario_weights": {
+          "adaptive": 0.11804583003511336,
+          "flee": 0.10696381091558586,
+          "intercept_chase": 0.09458280054395259,
+          "lateral_negative": 0.055369502121009155,
+          "lateral_positive": 0.059002618279242525,
+          "observed": 0.5660354381050965
+        },
+        "split_accuracy": 0.9922263492256794
+      }
+    },
+    "13938": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.976575075205417,
+          "median": 2.0159188884873593,
+          "p75": 11.249999999999941,
+          "p95": 29.06842626877985
+        },
+        "sample_count": 1139,
+        "scenario_counts": {
+          "adaptive": 185,
+          "flee": 83,
+          "intercept_chase": 89,
+          "lateral_negative": 59,
+          "lateral_positive": 72,
+          "observed": 651
+        },
+        "scenario_weights": {
+          "adaptive": 0.16242317822651448,
+          "flee": 0.07287093942054433,
+          "intercept_chase": 0.0781387181738367,
+          "lateral_negative": 0.05179982440737489,
+          "lateral_positive": 0.06321334503950835,
+          "observed": 0.5715539947322212
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.21943630970017,
+          "median": 1.4467766530765112,
+          "p75": 10.721881952670902,
+          "p95": 33.74999999999999
+        },
+        "sample_count": 48732,
+        "scenario_counts": {
+          "adaptive": 5723,
+          "flee": 5229,
+          "intercept_chase": 4603,
+          "lateral_negative": 2698,
+          "lateral_positive": 2876,
+          "observed": 27603
+        },
+        "scenario_weights": {
+          "adaptive": 0.11743823360420258,
+          "flee": 0.10730115735040631,
+          "intercept_chase": 0.09445538865632438,
+          "lateral_negative": 0.05536403184765657,
+          "lateral_positive": 0.05901666256258721,
+          "observed": 0.566424525978823
+        },
+        "split_accuracy": 0.9921406878437167
+      }
+    },
+    "13939": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 9.93053214298531,
+          "median": 3.4019119420417754,
+          "p75": 16.643583713220565,
+          "p95": 40.18734453664095
+        },
+        "sample_count": 956,
+        "scenario_counts": {
+          "adaptive": 84,
+          "flee": 134,
+          "intercept_chase": 104,
+          "lateral_negative": 59,
+          "lateral_positive": 77,
+          "observed": 498
+        },
+        "scenario_weights": {
+          "adaptive": 0.08786610878661087,
+          "flee": 0.1401673640167364,
+          "intercept_chase": 0.1087866108786611,
+          "lateral_negative": 0.06171548117154812,
+          "lateral_positive": 0.08054393305439331,
+          "observed": 0.5209205020920502
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.157054084151563,
+          "median": 1.4307668986622664,
+          "p75": 10.581877433911352,
+          "p95": 33.52642066430528
+        },
+        "sample_count": 48915,
+        "scenario_counts": {
+          "adaptive": 5824,
+          "flee": 5178,
+          "intercept_chase": 4588,
+          "lateral_negative": 2698,
+          "lateral_positive": 2871,
+          "observed": 27756
+        },
+        "scenario_weights": {
+          "adaptive": 0.11906368189716855,
+          "flee": 0.10585709904937136,
+          "intercept_chase": 0.09379535929673924,
+          "lateral_negative": 0.05515690483491771,
+          "lateral_positive": 0.058693652253909843,
+          "observed": 0.5674333026678933
+        },
+        "split_accuracy": 0.9921700909741388
+      }
+    },
+    "13940": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.687281167705835,
+          "median": 0.7775803834698946,
+          "p75": 8.060320055620386,
+          "p95": 32.031598516372604
+        },
+        "sample_count": 1101,
+        "scenario_counts": {
+          "adaptive": 107,
+          "flee": 175,
+          "intercept_chase": 98,
+          "lateral_negative": 65,
+          "lateral_positive": 65,
+          "observed": 591
+        },
+        "scenario_weights": {
+          "adaptive": 0.0971843778383288,
+          "flee": 0.1589464123524069,
+          "intercept_chase": 0.08900999091734786,
+          "lateral_negative": 0.05903723887375113,
+          "lateral_positive": 0.05903723887375113,
+          "observed": 0.5367847411444142
+        },
+        "split_accuracy": 0.9990917347865577
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.224998824878481,
+          "median": 1.479338689369913,
+          "p75": 10.770344701062907,
+          "p95": 33.68191250557194
+        },
+        "sample_count": 48770,
+        "scenario_counts": {
+          "adaptive": 5801,
+          "flee": 5137,
+          "intercept_chase": 4594,
+          "lateral_negative": 2692,
+          "lateral_positive": 2883,
+          "observed": 27663
+        },
+        "scenario_weights": {
+          "adaptive": 0.11894607340578224,
+          "flee": 0.10533114619643223,
+          "intercept_chase": 0.09419725240926799,
+          "lateral_negative": 0.05519786754152143,
+          "lateral_positive": 0.05911420955505434,
+          "observed": 0.5672134508919418
+        },
+        "split_accuracy": 0.9921673159729342
+      }
+    },
+    "13941": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 8.308901751598292,
+          "median": 4.085386019008967,
+          "p75": 12.808815004106968,
+          "p95": 32.30743077111148
+        },
+        "sample_count": 1096,
+        "scenario_counts": {
+          "adaptive": 172,
+          "flee": 114,
+          "intercept_chase": 96,
+          "lateral_negative": 57,
+          "lateral_positive": 87,
+          "observed": 570
+        },
+        "scenario_weights": {
+          "adaptive": 0.15693430656934307,
+          "flee": 0.10401459854014598,
+          "intercept_chase": 0.08759124087591241,
+          "lateral_negative": 0.05200729927007299,
+          "lateral_positive": 0.07937956204379562,
+          "observed": 0.5200729927007299
+        },
+        "split_accuracy": 0.9990875912408759
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.188402520455478,
+          "median": 1.408216641299604,
+          "p75": 10.669755778043866,
+          "p95": 33.68191250557194
+        },
+        "sample_count": 48775,
+        "scenario_counts": {
+          "adaptive": 5736,
+          "flee": 5198,
+          "intercept_chase": 4596,
+          "lateral_negative": 2700,
+          "lateral_positive": 2861,
+          "observed": 27684
+        },
+        "scenario_weights": {
+          "adaptive": 0.11760123013839056,
+          "flee": 0.10657098923628908,
+          "intercept_chase": 0.09422860071758073,
+          "lateral_negative": 0.055356227575602254,
+          "lateral_positive": 0.05865709892362891,
+          "observed": 0.5675858534085084
+        },
+        "split_accuracy": 0.9921681189133778
+      }
+    },
+    "13969": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 8.13980681001091,
+          "median": 3.0939983171291097,
+          "p75": 13.071497321131258,
+          "p95": 34.292605163122694
+        },
+        "sample_count": 1152,
+        "scenario_counts": {
+          "adaptive": 143,
+          "flee": 141,
+          "intercept_chase": 156,
+          "lateral_negative": 68,
+          "lateral_positive": 54,
+          "observed": 590
+        },
+        "scenario_weights": {
+          "adaptive": 0.12413194444444445,
+          "flee": 0.12239583333333333,
+          "intercept_chase": 0.13541666666666666,
+          "lateral_negative": 0.059027777777777776,
+          "lateral_positive": 0.046875,
+          "observed": 0.5121527777777778
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.192262398855375,
+          "median": 1.4243104719372552,
+          "p75": 10.643463706260263,
+          "p95": 33.63895704847209
+        },
+        "sample_count": 48719,
+        "scenario_counts": {
+          "adaptive": 5765,
+          "flee": 5171,
+          "intercept_chase": 4536,
+          "lateral_negative": 2689,
+          "lateral_positive": 2894,
+          "observed": 27664
+        },
+        "scenario_weights": {
+          "adaptive": 0.1183316570537162,
+          "flee": 0.10613928857324657,
+          "intercept_chase": 0.09310535930540446,
+          "lateral_negative": 0.05519407212791724,
+          "lateral_positive": 0.05940187606477965,
+          "observed": 0.5678277468749359
+        },
+        "split_accuracy": 0.9921385906935692
+      }
+    },
+    "13972": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 5.116881350223409,
+          "median": 0.8175069670460018,
+          "p75": 5.700881325062317,
+          "p95": 27.164248813264173
+        },
+        "sample_count": 1154,
+        "scenario_counts": {
+          "adaptive": 136,
+          "flee": 97,
+          "intercept_chase": 122,
+          "lateral_negative": 37,
+          "lateral_positive": 58,
+          "observed": 704
+        },
+        "scenario_weights": {
+          "adaptive": 0.11785095320623917,
+          "flee": 0.08405545927209705,
+          "intercept_chase": 0.10571923743500866,
+          "lateral_negative": 0.032062391681109186,
+          "lateral_positive": 0.05025996533795494,
+          "observed": 0.610051993067591
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.263871095855858,
+          "median": 1.4797236426299334,
+          "p75": 10.856558188617978,
+          "p95": 33.74999999999999
+        },
+        "sample_count": 48717,
+        "scenario_counts": {
+          "adaptive": 5772,
+          "flee": 5215,
+          "intercept_chase": 4570,
+          "lateral_negative": 2720,
+          "lateral_positive": 2890,
+          "observed": 27550
+        },
+        "scenario_weights": {
+          "adaptive": 0.11848020198288071,
+          "flee": 0.1070468214381017,
+          "intercept_chase": 0.0938070899275407,
+          "lateral_negative": 0.05583266621507892,
+          "lateral_positive": 0.05932220785352136,
+          "observed": 0.5655110125828766
+        },
+        "split_accuracy": 0.9921382679557444
+      }
+    },
+    "13975": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.47197569324905,
+          "median": 0.24238636096382293,
+          "p75": 8.607679526220759,
+          "p95": 31.66327182856135
+        },
+        "sample_count": 953,
+        "scenario_counts": {
+          "adaptive": 162,
+          "flee": 55,
+          "intercept_chase": 125,
+          "lateral_negative": 40,
+          "lateral_positive": 55,
+          "observed": 516
+        },
+        "scenario_weights": {
+          "adaptive": 0.16998950682056663,
+          "flee": 0.05771248688352571,
+          "intercept_chase": 0.1311647429171039,
+          "lateral_negative": 0.04197271773347324,
+          "lateral_positive": 0.05771248688352571,
+          "observed": 0.5414480587618048
+        },
+        "split_accuracy": 0.8835257082896117
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.22454099552928,
+          "median": 1.4837029667931678,
+          "p75": 10.769882589391246,
+          "p95": 33.70179832005938
+        },
+        "sample_count": 48918,
+        "scenario_counts": {
+          "adaptive": 5746,
+          "flee": 5257,
+          "intercept_chase": 4567,
+          "lateral_negative": 2717,
+          "lateral_positive": 2893,
+          "observed": 27738
+        },
+        "scenario_weights": {
+          "adaptive": 0.11746187497444703,
+          "flee": 0.10746555460157815,
+          "intercept_chase": 0.0933603172656282,
+          "lateral_negative": 0.055541927306921784,
+          "lateral_positive": 0.05913978494623656,
+          "observed": 0.5670305409051882
+        },
+        "split_accuracy": 0.9944396745574227
+      }
+    },
+    "13989": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.703277905583767,
+          "median": 2.788674096319197,
+          "p75": 12.143732353013956,
+          "p95": 29.735558620094803
+        },
+        "sample_count": 855,
+        "scenario_counts": {
+          "adaptive": 76,
+          "flee": 98,
+          "intercept_chase": 30,
+          "lateral_negative": 45,
+          "lateral_positive": 63,
+          "observed": 543
+        },
+        "scenario_weights": {
+          "adaptive": 0.08888888888888889,
+          "flee": 0.11461988304093568,
+          "intercept_chase": 0.03508771929824561,
+          "lateral_negative": 0.05263157894736842,
+          "lateral_positive": 0.07368421052631578,
+          "observed": 0.6350877192982456
+        },
+        "split_accuracy": 0.9812865497076023
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.199559055118604,
+          "median": 1.4363926013276922,
+          "p75": 10.708327899835433,
+          "p95": 33.72794842764471
+        },
+        "sample_count": 49016,
+        "scenario_counts": {
+          "adaptive": 5832,
+          "flee": 5214,
+          "intercept_chase": 4662,
+          "lateral_negative": 2712,
+          "lateral_positive": 2885,
+          "observed": 27711
+        },
+        "scenario_weights": {
+          "adaptive": 0.11898155704259833,
+          "flee": 0.1063734290843806,
+          "intercept_chase": 0.09511180022849682,
+          "lateral_negative": 0.05532887220499429,
+          "lateral_positive": 0.05885833197323323,
+          "observed": 0.5653460094662968
+        },
+        "split_accuracy": 0.9925126489309614
+      }
+    },
+    "14002": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 20.917190077222347,
+          "median": 0.9700427743448896,
+          "p75": 15.331138585163659,
+          "p95": 180.0
+        },
+        "sample_count": 1087,
+        "scenario_counts": {
+          "adaptive": 139,
+          "flee": 112,
+          "intercept_chase": 95,
+          "lateral_negative": 59,
+          "lateral_positive": 54,
+          "observed": 628
+        },
+        "scenario_weights": {
+          "adaptive": 0.12787488500459981,
+          "flee": 0.10303587856485741,
+          "intercept_chase": 0.08739650413983441,
+          "lateral_negative": 0.05427782888684453,
+          "lateral_positive": 0.04967801287948482,
+          "observed": 0.577736890524379
+        },
+        "split_accuracy": 0.9990800367985281
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 7.9074881854916965,
+          "median": 1.4689760790678508,
+          "p75": 10.658778017132672,
+          "p95": 33.29416880277172
+        },
+        "sample_count": 48784,
+        "scenario_counts": {
+          "adaptive": 5769,
+          "flee": 5200,
+          "intercept_chase": 4597,
+          "lateral_negative": 2698,
+          "lateral_positive": 2894,
+          "observed": 27626
+        },
+        "scenario_weights": {
+          "adaptive": 0.11825598556903903,
+          "flee": 0.10659232535257461,
+          "intercept_chase": 0.09423171531649721,
+          "lateral_negative": 0.05530501803870121,
+          "lateral_positive": 0.05932272876352902,
+          "observed": 0.5662922269596589
+        },
+        "split_accuracy": 0.992169563791407
+      }
+    },
+    "14008": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 4.21867927479452,
+          "median": 0.0,
+          "p75": 3.406608565497424,
+          "p95": 24.332380992948274
+        },
+        "sample_count": 444,
+        "scenario_counts": {
+          "adaptive": 44,
+          "flee": 58,
+          "intercept_chase": 6,
+          "lateral_negative": 16,
+          "lateral_positive": 24,
+          "observed": 296
+        },
+        "scenario_weights": {
+          "adaptive": 0.0990990990990991,
+          "flee": 0.13063063063063063,
+          "intercept_chase": 0.013513513513513514,
+          "lateral_negative": 0.036036036036036036,
+          "lateral_positive": 0.05405405405405406,
+          "observed": 0.6666666666666666
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.226734288080582,
+          "median": 1.4949447437546375,
+          "p75": 10.784521046009747,
+          "p95": 33.70179832005938
+        },
+        "sample_count": 49427,
+        "scenario_counts": {
+          "adaptive": 5864,
+          "flee": 5254,
+          "intercept_chase": 4686,
+          "lateral_negative": 2741,
+          "lateral_positive": 2924,
+          "observed": 27958
+        },
+        "scenario_weights": {
+          "adaptive": 0.11863960992979546,
+          "flee": 0.1062981771096769,
+          "intercept_chase": 0.09480648228700912,
+          "lateral_negative": 0.05545552026220487,
+          "lateral_positive": 0.05915795010824044,
+          "observed": 0.5656422603030732
+        },
+        "split_accuracy": 0.9922511987375321
+      }
+    },
+    "14010": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 23.72844417084648,
+          "median": 2.457544752962464,
+          "p75": 16.583792242492244,
+          "p95": 180.0
+        },
+        "sample_count": 1085,
+        "scenario_counts": {
+          "adaptive": 172,
+          "flee": 72,
+          "intercept_chase": 57,
+          "lateral_negative": 62,
+          "lateral_positive": 65,
+          "observed": 657
+        },
+        "scenario_weights": {
+          "adaptive": 0.1585253456221198,
+          "flee": 0.0663594470046083,
+          "intercept_chase": 0.052534562211981564,
+          "lateral_negative": 0.05714285714285714,
+          "lateral_positive": 0.059907834101382486,
+          "observed": 0.6055299539170507
+        },
+        "split_accuracy": 0.9944700460829493
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 7.845499268839404,
+          "median": 1.439604866124364,
+          "p75": 10.610032999714491,
+          "p95": 33.26574311313989
+        },
+        "sample_count": 48786,
+        "scenario_counts": {
+          "adaptive": 5736,
+          "flee": 5240,
+          "intercept_chase": 4635,
+          "lateral_negative": 2695,
+          "lateral_positive": 2883,
+          "observed": 27597
+        },
+        "scenario_weights": {
+          "adaptive": 0.11757471405731153,
+          "flee": 0.107407862911491,
+          "intercept_chase": 0.09500676423564137,
+          "lateral_negative": 0.05524125773787562,
+          "lateral_positive": 0.05909482228508178,
+          "observed": 0.5656745787725987
+        },
+        "split_accuracy": 0.9922723732218259
+      }
+    },
+    "14012": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.208112332862414,
+          "median": 1.7955482458996015,
+          "p75": 9.956589315254156,
+          "p95": 31.47939769380734
+        },
+        "sample_count": 852,
+        "scenario_counts": {
+          "adaptive": 72,
+          "flee": 101,
+          "intercept_chase": 119,
+          "lateral_negative": 50,
+          "lateral_positive": 47,
+          "observed": 463
+        },
+        "scenario_weights": {
+          "adaptive": 0.08450704225352113,
+          "flee": 0.11854460093896714,
+          "intercept_chase": 0.1396713615023474,
+          "lateral_negative": 0.05868544600938967,
+          "lateral_positive": 0.05516431924882629,
+          "observed": 0.5434272300469484
+        },
+        "split_accuracy": 0.9683098591549296
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.208135162842344,
+          "median": 1.4497177306684934,
+          "p75": 10.738389980674187,
+          "p95": 33.6938303310458
+        },
+        "sample_count": 49019,
+        "scenario_counts": {
+          "adaptive": 5836,
+          "flee": 5211,
+          "intercept_chase": 4573,
+          "lateral_negative": 2707,
+          "lateral_positive": 2901,
+          "observed": 27791
+        },
+        "scenario_weights": {
+          "adaptive": 0.11905587629286603,
+          "flee": 0.10630571819090556,
+          "intercept_chase": 0.09329035680042433,
+          "lateral_negative": 0.05522348477121116,
+          "lateral_positive": 0.05918113384605969,
+          "observed": 0.5669434300985332
+        },
+        "split_accuracy": 0.9927375099451233
+      }
+    },
+    "14013": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 5.23873965513117,
+          "median": 0.0,
+          "p75": 5.643504878213233,
+          "p95": 29.055655711706912
+        },
+        "sample_count": 1000,
+        "scenario_counts": {
+          "adaptive": 126,
+          "flee": 67,
+          "intercept_chase": 73,
+          "lateral_negative": 40,
+          "lateral_positive": 53,
+          "observed": 641
+        },
+        "scenario_weights": {
+          "adaptive": 0.126,
+          "flee": 0.067,
+          "intercept_chase": 0.073,
+          "lateral_negative": 0.04,
+          "lateral_positive": 0.053,
+          "observed": 0.641
+        },
+        "split_accuracy": 0.999
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.2514609809465,
+          "median": 1.5133475639683842,
+          "p75": 10.818900438156303,
+          "p95": 33.70179832005938
+        },
+        "sample_count": 48871,
+        "scenario_counts": {
+          "adaptive": 5782,
+          "flee": 5245,
+          "intercept_chase": 4619,
+          "lateral_negative": 2717,
+          "lateral_positive": 2895,
+          "observed": 27613
+        },
+        "scenario_weights": {
+          "adaptive": 0.11831147306173395,
+          "flee": 0.10732336150273168,
+          "intercept_chase": 0.0945141290335782,
+          "lateral_negative": 0.05559534284135786,
+          "lateral_positive": 0.05923758466166029,
+          "observed": 0.565018108898938
+        },
+        "split_accuracy": 0.9921835035092386
+      }
+    },
+    "14015": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.587759021632372,
+          "median": 2.250001532646188,
+          "p75": 10.392955173601038,
+          "p95": 35.04955327373101
+        },
+        "sample_count": 1241,
+        "scenario_counts": {
+          "adaptive": 119,
+          "flee": 177,
+          "intercept_chase": 72,
+          "lateral_negative": 71,
+          "lateral_positive": 73,
+          "observed": 729
+        },
+        "scenario_weights": {
+          "adaptive": 0.0958904109589041,
+          "flee": 0.1426269137792103,
+          "intercept_chase": 0.05801772763900081,
+          "lateral_negative": 0.057211925866236905,
+          "lateral_positive": 0.058823529411764705,
+          "observed": 0.5874294923448832
+        },
+        "split_accuracy": 0.9983883964544722
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.206446232965696,
+          "median": 1.4363926013276922,
+          "p75": 10.738389980674187,
+          "p95": 33.61782584881465
+        },
+        "sample_count": 48630,
+        "scenario_counts": {
+          "adaptive": 5789,
+          "flee": 5135,
+          "intercept_chase": 4620,
+          "lateral_negative": 2686,
+          "lateral_positive": 2875,
+          "observed": 27525
+        },
+        "scenario_weights": {
+          "adaptive": 0.11904174377955994,
+          "flee": 0.10559325519226814,
+          "intercept_chase": 0.09500308451573103,
+          "lateral_negative": 0.055233395023647956,
+          "lateral_positive": 0.05911988484474604,
+          "observed": 0.5660086366440469
+        },
+        "split_accuracy": 0.9921653300431832
+      }
+    },
+    "14019": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.805860298958671,
+          "median": 1.9646522713714187,
+          "p75": 11.583229800493669,
+          "p95": 34.33605186241272
+        },
+        "sample_count": 1148,
+        "scenario_counts": {
+          "adaptive": 77,
+          "flee": 152,
+          "intercept_chase": 121,
+          "lateral_negative": 60,
+          "lateral_positive": 69,
+          "observed": 669
+        },
+        "scenario_weights": {
+          "adaptive": 0.06707317073170732,
+          "flee": 0.13240418118466898,
+          "intercept_chase": 0.10540069686411149,
+          "lateral_negative": 0.05226480836236934,
+          "lateral_positive": 0.06010452961672474,
+          "observed": 0.5827526132404182
+        },
+        "split_accuracy": 0.9947735191637631
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.200126462487184,
+          "median": 1.4455583998401031,
+          "p75": 10.712784896874016,
+          "p95": 33.6134810188837
+        },
+        "sample_count": 48723,
+        "scenario_counts": {
+          "adaptive": 5831,
+          "flee": 5160,
+          "intercept_chase": 4571,
+          "lateral_negative": 2697,
+          "lateral_positive": 2879,
+          "observed": 27585
+        },
+        "scenario_weights": {
+          "adaptive": 0.11967653880097695,
+          "flee": 0.10590480881719105,
+          "intercept_chase": 0.09381606222933728,
+          "lateral_negative": 0.05535373437596207,
+          "lateral_positive": 0.05908913654742114,
+          "observed": 0.5661597192291115
+        },
+        "split_accuracy": 0.9922623812162633
+      }
+    },
+    "14021": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 9.678428590214873,
+          "median": 1.721976597288175,
+          "p75": 12.300581933444894,
+          "p95": 35.95818207391146
+        },
+        "sample_count": 1087,
+        "scenario_counts": {
+          "adaptive": 77,
+          "flee": 140,
+          "intercept_chase": 61,
+          "lateral_negative": 70,
+          "lateral_positive": 68,
+          "observed": 671
+        },
+        "scenario_weights": {
+          "adaptive": 0.07083716651333946,
+          "flee": 0.12879484820607176,
+          "intercept_chase": 0.05611775528978841,
+          "lateral_negative": 0.06439742410303588,
+          "lateral_positive": 0.062557497700092,
+          "observed": 0.6172953081876725
+        },
+        "split_accuracy": 0.9926402943882244
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.157909096781815,
+          "median": 1.453465759374322,
+          "p75": 10.708503064582315,
+          "p95": 33.58491772894625
+        },
+        "sample_count": 48784,
+        "scenario_counts": {
+          "adaptive": 5831,
+          "flee": 5172,
+          "intercept_chase": 4631,
+          "lateral_negative": 2687,
+          "lateral_positive": 2880,
+          "observed": 27583
+        },
+        "scenario_weights": {
+          "adaptive": 0.11952689406362742,
+          "flee": 0.10601836667759922,
+          "intercept_chase": 0.0949286651361102,
+          "lateral_negative": 0.05507953427353231,
+          "lateral_positive": 0.059035749426041326,
+          "observed": 0.5654107904230895
+        },
+        "split_accuracy": 0.9923130534601509
+      }
+    },
+    "14025": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.933961096720019,
+          "median": 2.4047361985796343,
+          "p75": 12.532620919053837,
+          "p95": 33.56248462079474
+        },
+        "sample_count": 899,
+        "scenario_counts": {
+          "adaptive": 95,
+          "flee": 125,
+          "intercept_chase": 62,
+          "lateral_negative": 68,
+          "lateral_positive": 62,
+          "observed": 487
+        },
+        "scenario_weights": {
+          "adaptive": 0.10567296996662959,
+          "flee": 0.13904338153503892,
+          "intercept_chase": 0.06896551724137931,
+          "lateral_negative": 0.07563959955506118,
+          "lateral_positive": 0.06896551724137931,
+          "observed": 0.5417130144605117
+        },
+        "split_accuracy": 0.9799777530589544
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.195770199890067,
+          "median": 1.4430325463257003,
+          "p75": 10.69715782134838,
+          "p95": 33.65725910358898
+        },
+        "sample_count": 48972,
+        "scenario_counts": {
+          "adaptive": 5813,
+          "flee": 5187,
+          "intercept_chase": 4630,
+          "lateral_negative": 2689,
+          "lateral_positive": 2886,
+          "observed": 27767
+        },
+        "scenario_weights": {
+          "adaptive": 0.11870048190802908,
+          "flee": 0.10591766723842196,
+          "intercept_chase": 0.0945438209589153,
+          "lateral_negative": 0.054908927550436984,
+          "lateral_positive": 0.05893163440333252,
+          "observed": 0.5669974679408641
+        },
+        "split_accuracy": 0.9925467614146859
+      }
+    },
+    "14031": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.530760236381276,
+          "median": 0.7168275812096321,
+          "p75": 8.663571248905656,
+          "p95": 30.93163725298373
+        },
+        "sample_count": 672,
+        "scenario_counts": {
+          "adaptive": 54,
+          "flee": 73,
+          "intercept_chase": 28,
+          "lateral_negative": 29,
+          "lateral_positive": 42,
+          "observed": 446
+        },
+        "scenario_weights": {
+          "adaptive": 0.08035714285714286,
+          "flee": 0.10863095238095238,
+          "intercept_chase": 0.041666666666666664,
+          "lateral_negative": 0.043154761904761904,
+          "lateral_positive": 0.0625,
+          "observed": 0.6636904761904762
+        },
+        "split_accuracy": 0.9985119047619048
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.213728294805168,
+          "median": 1.4689461016193939,
+          "p75": 10.747198343129009,
+          "p95": 33.69057808251708
+        },
+        "sample_count": 49199,
+        "scenario_counts": {
+          "adaptive": 5854,
+          "flee": 5239,
+          "intercept_chase": 4664,
+          "lateral_negative": 2728,
+          "lateral_positive": 2906,
+          "observed": 27808
+        },
+        "scenario_weights": {
+          "adaptive": 0.1189861582552491,
+          "flee": 0.10648590418504442,
+          "intercept_chase": 0.0947986747698124,
+          "lateral_negative": 0.05544828146913555,
+          "lateral_positive": 0.0590662411837639,
+          "observed": 0.5652147401369947
+        },
+        "split_accuracy": 0.9922356145450111
+      }
+    },
+    "14043": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.471426264002831,
+          "median": 0.025010083739200953,
+          "p75": 9.879134718419502,
+          "p95": 30.049792945516707
+        },
+        "sample_count": 564,
+        "scenario_counts": {
+          "adaptive": 78,
+          "flee": 98,
+          "intercept_chase": 32,
+          "lateral_negative": 23,
+          "lateral_positive": 25,
+          "observed": 308
+        },
+        "scenario_weights": {
+          "adaptive": 0.13829787234042554,
+          "flee": 0.17375886524822695,
+          "intercept_chase": 0.05673758865248227,
+          "lateral_negative": 0.040780141843971635,
+          "lateral_positive": 0.044326241134751775,
+          "observed": 0.5460992907801419
+        },
+        "split_accuracy": 1.0
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.210720685543027,
+          "median": 1.477685575974626,
+          "p75": 10.742436740291357,
+          "p95": 33.694526180044974
+        },
+        "sample_count": 49307,
+        "scenario_counts": {
+          "adaptive": 5830,
+          "flee": 5214,
+          "intercept_chase": 4660,
+          "lateral_negative": 2734,
+          "lateral_positive": 2923,
+          "observed": 27946
+        },
+        "scenario_weights": {
+          "adaptive": 0.11823878962419129,
+          "flee": 0.10574563449408807,
+          "intercept_chase": 0.09450990731539133,
+          "lateral_negative": 0.0554485164378283,
+          "lateral_positive": 0.05928164358001906,
+          "observed": 0.5667755085484819
+        },
+        "split_accuracy": 0.9922323402356663
+      }
+    },
+    "14048": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.536586871623243,
+          "median": 0.36294293326029603,
+          "p75": 7.860496936565767,
+          "p95": 28.373933338407287
+        },
+        "sample_count": 1077,
+        "scenario_counts": {
+          "adaptive": 124,
+          "flee": 133,
+          "intercept_chase": 81,
+          "lateral_negative": 36,
+          "lateral_positive": 63,
+          "observed": 640
+        },
+        "scenario_weights": {
+          "adaptive": 0.11513463324048283,
+          "flee": 0.12349117920148561,
+          "intercept_chase": 0.07520891364902507,
+          "lateral_negative": 0.033426183844011144,
+          "lateral_positive": 0.0584958217270195,
+          "observed": 0.5942432683379758
+        },
+        "split_accuracy": 0.9953574744661096
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.227568659962893,
+          "median": 1.4734646915510035,
+          "p75": 10.769882589391246,
+          "p95": 33.728682913506624
+        },
+        "sample_count": 48794,
+        "scenario_counts": {
+          "adaptive": 5784,
+          "flee": 5179,
+          "intercept_chase": 4611,
+          "lateral_negative": 2721,
+          "lateral_positive": 2885,
+          "observed": 27614
+        },
+        "scenario_weights": {
+          "adaptive": 0.11853916465139157,
+          "flee": 0.10614009919252367,
+          "intercept_chase": 0.09449932368733861,
+          "lateral_negative": 0.05576505308029676,
+          "lateral_positive": 0.05912612206418822,
+          "observed": 0.5659302373242612
+        },
+        "split_accuracy": 0.9922531458785916
+      }
+    },
+    "14054": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.542425608978909,
+          "median": 2.273927507395358,
+          "p75": 9.619660293358134,
+          "p95": 26.92484084164095
+        },
+        "sample_count": 744,
+        "scenario_counts": {
+          "adaptive": 55,
+          "flee": 85,
+          "intercept_chase": 52,
+          "lateral_negative": 43,
+          "lateral_positive": 35,
+          "observed": 474
+        },
+        "scenario_weights": {
+          "adaptive": 0.0739247311827957,
+          "flee": 0.11424731182795698,
+          "intercept_chase": 0.06989247311827956,
+          "lateral_negative": 0.05779569892473118,
+          "lateral_positive": 0.04704301075268817,
+          "observed": 0.6370967741935484
+        },
+        "split_accuracy": 0.9986559139784946
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.216018169273257,
+          "median": 1.445345908746802,
+          "p75": 10.745769641430293,
+          "p95": 33.7198591143947
+        },
+        "sample_count": 49127,
+        "scenario_counts": {
+          "adaptive": 5853,
+          "flee": 5227,
+          "intercept_chase": 4640,
+          "lateral_negative": 2714,
+          "lateral_positive": 2913,
+          "observed": 27780
+        },
+        "scenario_weights": {
+          "adaptive": 0.11914018767683758,
+          "flee": 0.10639770391027337,
+          "intercept_chase": 0.09444908095344719,
+          "lateral_negative": 0.05524457019561545,
+          "lateral_positive": 0.059295295865817166,
+          "observed": 0.5654731613980093
+        },
+        "split_accuracy": 0.992224235145643
+      }
+    },
+    "14061": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 6.798731350327175,
+          "median": 0.9131284894404267,
+          "p75": 9.513145894475976,
+          "p95": 30.554997537198787
+        },
+        "sample_count": 763,
+        "scenario_counts": {
+          "adaptive": 110,
+          "flee": 66,
+          "intercept_chase": 67,
+          "lateral_negative": 22,
+          "lateral_positive": 51,
+          "observed": 447
+        },
+        "scenario_weights": {
+          "adaptive": 0.14416775884665792,
+          "flee": 0.08650065530799476,
+          "intercept_chase": 0.08781127129750983,
+          "lateral_negative": 0.028833551769331587,
+          "lateral_positive": 0.06684141546526867,
+          "observed": 0.5858453473132372
+        },
+        "split_accuracy": 0.9973787680209698
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.212683416849965,
+          "median": 1.467410006729709,
+          "p75": 10.746372611088322,
+          "p95": 33.69057808251708
+        },
+        "sample_count": 49108,
+        "scenario_counts": {
+          "adaptive": 5798,
+          "flee": 5246,
+          "intercept_chase": 4625,
+          "lateral_negative": 2735,
+          "lateral_positive": 2897,
+          "observed": 27807
+        },
+        "scenario_weights": {
+          "adaptive": 0.11806630284271402,
+          "flee": 0.10682577176834732,
+          "intercept_chase": 0.09418017430968478,
+          "lateral_negative": 0.05569357334853792,
+          "lateral_positive": 0.05899242485949336,
+          "observed": 0.5662417528712226
+        },
+        "split_accuracy": 0.9922415899649751
+      }
+    },
+    "14062": {
+      "holdout": {
+        "angle_error_degrees": {
+          "mean": 7.427370694739788,
+          "median": 2.4319317682044743,
+          "p75": 11.885919511479354,
+          "p95": 30.259780949326494
+        },
+        "sample_count": 1439,
+        "scenario_counts": {
+          "adaptive": 195,
+          "flee": 193,
+          "intercept_chase": 129,
+          "lateral_negative": 96,
+          "lateral_positive": 95,
+          "observed": 731
+        },
+        "scenario_weights": {
+          "adaptive": 0.13551077136900624,
+          "flee": 0.1341209173036831,
+          "intercept_chase": 0.08964558721334259,
+          "lateral_negative": 0.06671299513551077,
+          "lateral_positive": 0.0660180681028492,
+          "observed": 0.5079916608756081
+        },
+        "split_accuracy": 0.9923558026407228
+      },
+      "training": {
+        "angle_error_degrees": {
+          "mean": 8.213740973431555,
+          "median": 1.43483192904834,
+          "p75": 10.689970858621454,
+          "p95": 33.734070935611996
+        },
+        "sample_count": 48432,
+        "scenario_counts": {
+          "adaptive": 5713,
+          "flee": 5119,
+          "intercept_chase": 4563,
+          "lateral_negative": 2661,
+          "lateral_positive": 2853,
+          "observed": 27523
+        },
+        "scenario_weights": {
+          "adaptive": 0.11795920052857614,
+          "flee": 0.10569458209448299,
+          "intercept_chase": 0.09421456888007929,
+          "lateral_negative": 0.05494301288404361,
+          "lateral_positive": 0.05890733399405352,
+          "observed": 0.5682813016187644
+        },
+        "split_accuracy": 0.9923191278493558
+      }
+    }
+  },
+  "matches": {
+    "11646": {
+      "angle_error_degrees": {
+        "mean": 7.92257070011955,
+        "median": 1.2555997625317454,
+        "p75": 13.14263374362265,
+        "p95": 32.11871325495433
+      },
+      "sample_count": 1220,
+      "scenario_counts": {
+        "adaptive": 181,
+        "flee": 128,
+        "intercept_chase": 86,
+        "lateral_negative": 66,
+        "lateral_positive": 91,
+        "observed": 668
+      },
+      "scenario_weights": {
+        "adaptive": 0.1483606557377049,
+        "flee": 0.10491803278688525,
+        "intercept_chase": 0.07049180327868852,
+        "lateral_negative": 0.054098360655737705,
+        "lateral_positive": 0.07459016393442623,
+        "observed": 0.5475409836065573
+      },
+      "split_accuracy": 0.9975409836065574
+    },
+    "11654": {
+      "angle_error_degrees": {
+        "mean": 6.953465316996571,
+        "median": 2.002819303200348,
+        "p75": 9.297225368896592,
+        "p95": 30.408368408672093
+      },
+      "sample_count": 1264,
+      "scenario_counts": {
+        "adaptive": 131,
+        "flee": 97,
+        "intercept_chase": 113,
+        "lateral_negative": 69,
+        "lateral_positive": 71,
+        "observed": 783
+      },
+      "scenario_weights": {
+        "adaptive": 0.10363924050632911,
+        "flee": 0.07674050632911393,
+        "intercept_chase": 0.0893987341772152,
+        "lateral_negative": 0.05458860759493671,
+        "lateral_positive": 0.05617088607594937,
+        "observed": 0.6194620253164557
+      },
+      "split_accuracy": 0.9897151898734177
+    },
+    "11667": {
+      "angle_error_degrees": {
+        "mean": 6.356269547373232,
+        "median": 1.1312840407441054,
+        "p75": 8.080238431114456,
+        "p95": 29.559980950994575
+      },
+      "sample_count": 1322,
+      "scenario_counts": {
+        "adaptive": 122,
+        "flee": 67,
+        "intercept_chase": 276,
+        "lateral_negative": 80,
+        "lateral_positive": 67,
+        "observed": 710
+      },
+      "scenario_weights": {
+        "adaptive": 0.09228441754916793,
+        "flee": 0.05068078668683813,
+        "intercept_chase": 0.2087745839636914,
+        "lateral_negative": 0.060514372163388806,
+        "lateral_positive": 0.05068078668683813,
+        "observed": 0.5370650529500757
+      },
+      "split_accuracy": 0.9992435703479576
+    },
+    "11673": {
+      "angle_error_degrees": {
+        "mean": 8.843185015104364,
+        "median": 3.5083721500797163,
+        "p75": 14.406017966015648,
+        "p95": 32.91551467820571
+      },
+      "sample_count": 966,
+      "scenario_counts": {
+        "adaptive": 93,
+        "flee": 120,
+        "intercept_chase": 110,
+        "lateral_negative": 73,
+        "lateral_positive": 67,
+        "observed": 503
+      },
+      "scenario_weights": {
+        "adaptive": 0.09627329192546584,
+        "flee": 0.12422360248447205,
+        "intercept_chase": 0.11387163561076605,
+        "lateral_negative": 0.07556935817805382,
+        "lateral_positive": 0.06935817805383022,
+        "observed": 0.520703933747412
+      },
+      "split_accuracy": 0.9989648033126294
+    },
+    "11679": {
+      "angle_error_degrees": {
+        "mean": 5.486329087234904,
+        "median": 0.44907137461880325,
+        "p75": 6.167567188709323,
+        "p95": 29.71259491052964
+      },
+      "sample_count": 1203,
+      "scenario_counts": {
+        "adaptive": 188,
+        "flee": 124,
+        "intercept_chase": 131,
+        "lateral_negative": 48,
+        "lateral_positive": 42,
+        "observed": 670
+      },
+      "scenario_weights": {
+        "adaptive": 0.15627597672485452,
+        "flee": 0.10307564422277639,
+        "intercept_chase": 0.10889443059019119,
+        "lateral_negative": 0.0399002493765586,
+        "lateral_positive": 0.034912718204488775,
+        "observed": 0.5569409808811305
+      },
+      "split_accuracy": 0.999168744804655
+    },
+    "11681": {
+      "angle_error_degrees": {
+        "mean": 11.591969144245937,
+        "median": 4.5539978337691895,
+        "p75": 18.95349519602025,
+        "p95": 36.2412584730642
+      },
+      "sample_count": 1363,
+      "scenario_counts": {
+        "adaptive": 100,
+        "flee": 209,
+        "intercept_chase": 270,
+        "lateral_negative": 74,
+        "lateral_positive": 85,
+        "observed": 625
+      },
+      "scenario_weights": {
+        "adaptive": 0.07336757153338225,
+        "flee": 0.1533382245047689,
+        "intercept_chase": 0.19809244314013205,
+        "lateral_negative": 0.05429200293470286,
+        "lateral_positive": 0.06236243580337491,
+        "observed": 0.458547322083639
+      },
+      "split_accuracy": 0.9985326485693323
+    },
+    "11694": {
+      "angle_error_degrees": {
+        "mean": 7.206242523156881,
+        "median": 0.28672622084558946,
+        "p75": 10.451213451738568,
+        "p95": 34.60332854061906
+      },
+      "sample_count": 898,
+      "scenario_counts": {
+        "adaptive": 71,
+        "flee": 107,
+        "intercept_chase": 62,
+        "lateral_negative": 54,
+        "lateral_positive": 61,
+        "observed": 543
+      },
+      "scenario_weights": {
+        "adaptive": 0.07906458797327394,
+        "flee": 0.11915367483296214,
+        "intercept_chase": 0.06904231625835189,
+        "lateral_negative": 0.060133630289532294,
+        "lateral_positive": 0.06792873051224944,
+        "observed": 0.6046770601336303
+      },
+      "split_accuracy": 0.9977728285077951
+    },
+    "11697": {
+      "angle_error_degrees": {
+        "mean": 18.823740041003656,
+        "median": 8.537736462515939e-07,
+        "p75": 7.221263964956084,
+        "p95": 180.0
+      },
+      "sample_count": 1055,
+      "scenario_counts": {
+        "adaptive": 194,
+        "flee": 49,
+        "intercept_chase": 115,
+        "lateral_negative": 30,
+        "lateral_positive": 40,
+        "observed": 627
+      },
+      "scenario_weights": {
+        "adaptive": 0.18388625592417063,
+        "flee": 0.046445497630331754,
+        "intercept_chase": 0.10900473933649289,
+        "lateral_negative": 0.02843601895734597,
+        "lateral_positive": 0.037914691943127965,
+        "observed": 0.5943127962085308
+      },
+      "split_accuracy": 0.9990521327014218
+    },
+    "11698": {
+      "angle_error_degrees": {
+        "mean": 7.687794168549593,
+        "median": 2.762393992016916,
+        "p75": 10.103723063883251,
+        "p95": 35.597624571601465
+      },
+      "sample_count": 1120,
+      "scenario_counts": {
+        "adaptive": 80,
+        "flee": 163,
+        "intercept_chase": 184,
+        "lateral_negative": 87,
+        "lateral_positive": 47,
+        "observed": 559
+      },
+      "scenario_weights": {
+        "adaptive": 0.07142857142857142,
+        "flee": 0.1455357142857143,
+        "intercept_chase": 0.16428571428571428,
+        "lateral_negative": 0.07767857142857143,
+        "lateral_positive": 0.04196428571428571,
+        "observed": 0.49910714285714286
+      },
+      "split_accuracy": 0.9973214285714286
+    },
+    "11710": {
+      "angle_error_degrees": {
+        "mean": 9.720567512836938,
+        "median": 6.6688273340039625,
+        "p75": 16.229196945476495,
+        "p95": 31.458475732918416
+      },
+      "sample_count": 1112,
+      "scenario_counts": {
+        "adaptive": 62,
+        "flee": 181,
+        "intercept_chase": 95,
+        "lateral_negative": 96,
+        "lateral_positive": 125,
+        "observed": 553
+      },
+      "scenario_weights": {
+        "adaptive": 0.05575539568345324,
+        "flee": 0.16276978417266186,
+        "intercept_chase": 0.08543165467625899,
+        "lateral_negative": 0.08633093525179857,
+        "lateral_positive": 0.11241007194244604,
+        "observed": 0.4973021582733813
+      },
+      "split_accuracy": 1.0
+    },
+    "11716": {
+      "angle_error_degrees": {
+        "mean": 5.923642291202147,
+        "median": 0.12853199651071937,
+        "p75": 7.676294318829401,
+        "p95": 30.697518696114543
+      },
+      "sample_count": 1030,
+      "scenario_counts": {
+        "adaptive": 150,
+        "flee": 74,
+        "intercept_chase": 71,
+        "lateral_negative": 60,
+        "lateral_positive": 42,
+        "observed": 633
+      },
+      "scenario_weights": {
+        "adaptive": 0.14563106796116504,
+        "flee": 0.07184466019417475,
+        "intercept_chase": 0.06893203883495146,
+        "lateral_negative": 0.05825242718446602,
+        "lateral_positive": 0.040776699029126215,
+        "observed": 0.6145631067961165
+      },
+      "split_accuracy": 0.996116504854369
+    },
+    "11719": {
+      "angle_error_degrees": {
+        "mean": 6.8601752359111785,
+        "median": 0.18640244717415147,
+        "p75": 7.596752955390786,
+        "p95": 34.695399169707706
+      },
+      "sample_count": 999,
+      "scenario_counts": {
+        "adaptive": 168,
+        "flee": 88,
+        "intercept_chase": 66,
+        "lateral_negative": 59,
+        "lateral_positive": 73,
+        "observed": 545
+      },
+      "scenario_weights": {
+        "adaptive": 0.16816816816816818,
+        "flee": 0.08808808808808809,
+        "intercept_chase": 0.06606606606606606,
+        "lateral_negative": 0.05905905905905906,
+        "lateral_positive": 0.07307307307307308,
+        "observed": 0.5455455455455456
+      },
+      "split_accuracy": 0.994994994994995
+    },
+    "11724": {
+      "angle_error_degrees": {
+        "mean": 5.044199336238204,
+        "median": 0.0,
+        "p75": 4.245809990785708,
+        "p95": 32.36722728184348
+      },
+      "sample_count": 970,
+      "scenario_counts": {
+        "adaptive": 137,
+        "flee": 58,
+        "intercept_chase": 131,
+        "lateral_negative": 49,
+        "lateral_positive": 43,
+        "observed": 552
+      },
+      "scenario_weights": {
+        "adaptive": 0.14123711340206185,
+        "flee": 0.05979381443298969,
+        "intercept_chase": 0.13505154639175257,
+        "lateral_negative": 0.050515463917525774,
+        "lateral_positive": 0.0443298969072165,
+        "observed": 0.5690721649484536
+      },
+      "split_accuracy": 0.9948453608247423
+    },
+    "11725": {
+      "angle_error_degrees": {
+        "mean": 8.863592054967455,
+        "median": 3.915405900408098,
+        "p75": 14.99999999999997,
+        "p95": 32.96451163220658
+      },
+      "sample_count": 817,
+      "scenario_counts": {
+        "adaptive": 74,
+        "flee": 117,
+        "intercept_chase": 33,
+        "lateral_negative": 68,
+        "lateral_positive": 53,
+        "observed": 472
+      },
+      "scenario_weights": {
+        "adaptive": 0.09057527539779682,
+        "flee": 0.14320685434516525,
+        "intercept_chase": 0.04039167686658507,
+        "lateral_negative": 0.0832313341493268,
+        "lateral_positive": 0.06487148102815178,
+        "observed": 0.5777233782129743
+      },
+      "split_accuracy": 1.0
+    },
+    "11739": {
+      "angle_error_degrees": {
+        "mean": 7.388397525391855,
+        "median": 0.960776894659364,
+        "p75": 11.415612959519375,
+        "p95": 33.366007527797954
+      },
+      "sample_count": 759,
+      "scenario_counts": {
+        "adaptive": 66,
+        "flee": 65,
+        "intercept_chase": 56,
+        "lateral_negative": 60,
+        "lateral_positive": 44,
+        "observed": 468
+      },
+      "scenario_weights": {
+        "adaptive": 0.08695652173913043,
+        "flee": 0.08563899868247694,
+        "intercept_chase": 0.07378129117259552,
+        "lateral_negative": 0.07905138339920949,
+        "lateral_positive": 0.057971014492753624,
+        "observed": 0.616600790513834
+      },
+      "split_accuracy": 0.994729907773386
+    },
+    "11745": {
+      "angle_error_degrees": {
+        "mean": 9.034250089655675,
+        "median": 3.5234451566643807,
+        "p75": 14.807922443914622,
+        "p95": 33.484414108776335
+      },
+      "sample_count": 991,
+      "scenario_counts": {
+        "adaptive": 174,
+        "flee": 111,
+        "intercept_chase": 89,
+        "lateral_negative": 76,
+        "lateral_positive": 91,
+        "observed": 450
+      },
+      "scenario_weights": {
+        "adaptive": 0.17558022199798184,
+        "flee": 0.11200807265388496,
+        "intercept_chase": 0.08980827447023208,
+        "lateral_negative": 0.07669021190716448,
+        "lateral_positive": 0.09182643794147326,
+        "observed": 0.45408678102926336
+      },
+      "split_accuracy": 0.9959636730575177
+    },
+    "11752": {
+      "angle_error_degrees": {
+        "mean": 6.609773936919964,
+        "median": 0.42266363338211665,
+        "p75": 6.940984474526818,
+        "p95": 33.57197168870563
+      },
+      "sample_count": 1052,
+      "scenario_counts": {
+        "adaptive": 151,
+        "flee": 94,
+        "intercept_chase": 82,
+        "lateral_negative": 55,
+        "lateral_positive": 65,
+        "observed": 605
+      },
+      "scenario_weights": {
+        "adaptive": 0.1435361216730038,
+        "flee": 0.08935361216730038,
+        "intercept_chase": 0.0779467680608365,
+        "lateral_negative": 0.05228136882129278,
+        "lateral_positive": 0.06178707224334601,
+        "observed": 0.5750950570342205
+      },
+      "split_accuracy": 0.9933460076045627
+    },
+    "11753": {
+      "angle_error_degrees": {
+        "mean": 9.008547477410545,
+        "median": 1.679812828145224,
+        "p75": 10.976137409022693,
+        "p95": 36.95731308291932
+      },
+      "sample_count": 1133,
+      "scenario_counts": {
+        "adaptive": 174,
+        "flee": 78,
+        "intercept_chase": 172,
+        "lateral_negative": 64,
+        "lateral_positive": 68,
+        "observed": 577
+      },
+      "scenario_weights": {
+        "adaptive": 0.15357458075904679,
+        "flee": 0.06884377758164166,
+        "intercept_chase": 0.15180935569285084,
+        "lateral_negative": 0.05648720211827008,
+        "lateral_positive": 0.06001765225066196,
+        "observed": 0.5092674315975286
+      },
+      "split_accuracy": 0.9761694616063548
+    },
+    "11756": {
+      "angle_error_degrees": {
+        "mean": 6.696983408640298,
+        "median": 1.531501226305517,
+        "p75": 10.100850085120843,
+        "p95": 30.680888830776702
+      },
+      "sample_count": 813,
+      "scenario_counts": {
+        "adaptive": 124,
+        "flee": 99,
+        "intercept_chase": 58,
+        "lateral_negative": 48,
+        "lateral_positive": 42,
+        "observed": 442
+      },
+      "scenario_weights": {
+        "adaptive": 0.15252152521525214,
+        "flee": 0.12177121771217712,
+        "intercept_chase": 0.07134071340713408,
+        "lateral_negative": 0.05904059040590406,
+        "lateral_positive": 0.05166051660516605,
+        "observed": 0.5436654366543665
+      },
+      "split_accuracy": 0.991389913899139
+    },
+    "11757": {
+      "angle_error_degrees": {
+        "mean": 4.671477825777917,
+        "median": 0.0,
+        "p75": 5.12007570155211,
+        "p95": 24.69414138093857
+      },
+      "sample_count": 1249,
+      "scenario_counts": {
+        "adaptive": 164,
+        "flee": 129,
+        "intercept_chase": 62,
+        "lateral_negative": 35,
+        "lateral_positive": 55,
+        "observed": 804
+      },
+      "scenario_weights": {
+        "adaptive": 0.1313050440352282,
+        "flee": 0.10328262610088071,
+        "intercept_chase": 0.049639711769415534,
+        "lateral_negative": 0.02802241793434748,
+        "lateral_positive": 0.044035228182546036,
+        "observed": 0.6437149719775821
+      },
+      "split_accuracy": 0.9975980784627703
+    },
+    "13931": {
+      "angle_error_degrees": {
+        "mean": 7.269662192201664,
+        "median": 0.0034872497901425326,
+        "p75": 8.552710519500675,
+        "p95": 35.09225331369963
+      },
+      "sample_count": 964,
+      "scenario_counts": {
+        "adaptive": 92,
+        "flee": 103,
+        "intercept_chase": 95,
+        "lateral_negative": 61,
+        "lateral_positive": 49,
+        "observed": 564
+      },
+      "scenario_weights": {
+        "adaptive": 0.0954356846473029,
+        "flee": 0.10684647302904564,
+        "intercept_chase": 0.09854771784232365,
+        "lateral_negative": 0.06327800829875518,
+        "lateral_positive": 0.0508298755186722,
+        "observed": 0.5850622406639004
+      },
+      "split_accuracy": 0.946058091286307
+    },
+    "13932": {
+      "angle_error_degrees": {
+        "mean": 5.887318208484327,
+        "median": 0.9513143451505987,
+        "p75": 6.364685427518477,
+        "p95": 31.142866001429514
+      },
+      "sample_count": 1249,
+      "scenario_counts": {
+        "adaptive": 157,
+        "flee": 82,
+        "intercept_chase": 159,
+        "lateral_negative": 52,
+        "lateral_positive": 54,
+        "observed": 745
+      },
+      "scenario_weights": {
+        "adaptive": 0.1257005604483587,
+        "flee": 0.0656525220176141,
+        "intercept_chase": 0.12730184147317855,
+        "lateral_negative": 0.041633306645316254,
+        "lateral_positive": 0.04323458767013611,
+        "observed": 0.5964771817453963
+      },
+      "split_accuracy": 0.9991993594875901
+    },
+    "13933": {
+      "angle_error_degrees": {
+        "mean": 8.853648178637068,
+        "median": 3.729616920920104,
+        "p75": 12.85008626707996,
+        "p95": 35.24570234160496
+      },
+      "sample_count": 788,
+      "scenario_counts": {
+        "adaptive": 55,
+        "flee": 118,
+        "intercept_chase": 119,
+        "lateral_negative": 52,
+        "lateral_positive": 54,
+        "observed": 390
+      },
+      "scenario_weights": {
+        "adaptive": 0.06979695431472081,
+        "flee": 0.14974619289340102,
+        "intercept_chase": 0.15101522842639595,
+        "lateral_negative": 0.06598984771573604,
+        "lateral_positive": 0.06852791878172589,
+        "observed": 0.4949238578680203
+      },
+      "split_accuracy": 0.9974619289340102
+    },
+    "13934": {
+      "angle_error_degrees": {
+        "mean": 5.787823838529012,
+        "median": 1.4567634213019867,
+        "p75": 6.689818354785478,
+        "p95": 26.389906238978682
+      },
+      "sample_count": 663,
+      "scenario_counts": {
+        "adaptive": 42,
+        "flee": 74,
+        "intercept_chase": 63,
+        "lateral_negative": 42,
+        "lateral_positive": 28,
+        "observed": 414
+      },
+      "scenario_weights": {
+        "adaptive": 0.06334841628959276,
+        "flee": 0.11161387631975868,
+        "intercept_chase": 0.09502262443438914,
+        "lateral_negative": 0.06334841628959276,
+        "lateral_positive": 0.042232277526395176,
+        "observed": 0.6244343891402715
+      },
+      "split_accuracy": 1.0
+    },
+    "13935": {
+      "angle_error_degrees": {
+        "mean": 7.808257355313212,
+        "median": 2.04264832808654,
+        "p75": 12.050119411043918,
+        "p95": 32.40147525013263
+      },
+      "sample_count": 713,
+      "scenario_counts": {
+        "adaptive": 101,
+        "flee": 80,
+        "intercept_chase": 35,
+        "lateral_negative": 56,
+        "lateral_positive": 51,
+        "observed": 390
+      },
+      "scenario_weights": {
+        "adaptive": 0.14165497896213183,
+        "flee": 0.11220196353436185,
+        "intercept_chase": 0.04908835904628331,
+        "lateral_negative": 0.0785413744740533,
+        "lateral_positive": 0.07152875175315568,
+        "observed": 0.5469845722300141
+      },
+      "split_accuracy": 0.9831697054698457
+    },
+    "13936": {
+      "angle_error_degrees": {
+        "mean": 5.799874877786066,
+        "median": 0.7795132214844278,
+        "p75": 6.207217079546803,
+        "p95": 28.860094559422034
+      },
+      "sample_count": 1048,
+      "scenario_counts": {
+        "adaptive": 163,
+        "flee": 106,
+        "intercept_chase": 52,
+        "lateral_negative": 39,
+        "lateral_positive": 42,
+        "observed": 646
+      },
+      "scenario_weights": {
+        "adaptive": 0.15553435114503816,
+        "flee": 0.10114503816793893,
+        "intercept_chase": 0.04961832061068702,
+        "lateral_negative": 0.03721374045801527,
+        "lateral_positive": 0.04007633587786259,
+        "observed": 0.6164122137404581
+      },
+      "split_accuracy": 0.9952290076335878
+    },
+    "13937": {
+      "angle_error_degrees": {
+        "mean": 7.48017554479814,
+        "median": 3.0443757920968775,
+        "p75": 11.023454492735427,
+        "p95": 31.15440148580779
+      },
+      "sample_count": 602,
+      "scenario_counts": {
+        "adaptive": 92,
+        "flee": 42,
+        "intercept_chase": 32,
+        "lateral_negative": 29,
+        "lateral_positive": 41,
+        "observed": 366
+      },
+      "scenario_weights": {
+        "adaptive": 0.15282392026578073,
+        "flee": 0.06976744186046512,
+        "intercept_chase": 0.053156146179401995,
+        "lateral_negative": 0.04817275747508306,
+        "lateral_positive": 0.0681063122923588,
+        "observed": 0.6079734219269103
+      },
+      "split_accuracy": 1.0
+    },
+    "13938": {
+      "angle_error_degrees": {
+        "mean": 6.976575075205417,
+        "median": 2.0159188884873593,
+        "p75": 11.249999999999941,
+        "p95": 29.06842626877985
+      },
+      "sample_count": 1139,
+      "scenario_counts": {
+        "adaptive": 185,
+        "flee": 83,
+        "intercept_chase": 89,
+        "lateral_negative": 59,
+        "lateral_positive": 72,
+        "observed": 651
+      },
+      "scenario_weights": {
+        "adaptive": 0.16242317822651448,
+        "flee": 0.07287093942054433,
+        "intercept_chase": 0.0781387181738367,
+        "lateral_negative": 0.05179982440737489,
+        "lateral_positive": 0.06321334503950835,
+        "observed": 0.5715539947322212
+      },
+      "split_accuracy": 1.0
+    },
+    "13939": {
+      "angle_error_degrees": {
+        "mean": 9.93053214298531,
+        "median": 3.4019119420417754,
+        "p75": 16.643583713220565,
+        "p95": 40.18734453664095
+      },
+      "sample_count": 956,
+      "scenario_counts": {
+        "adaptive": 84,
+        "flee": 134,
+        "intercept_chase": 104,
+        "lateral_negative": 59,
+        "lateral_positive": 77,
+        "observed": 498
+      },
+      "scenario_weights": {
+        "adaptive": 0.08786610878661087,
+        "flee": 0.1401673640167364,
+        "intercept_chase": 0.1087866108786611,
+        "lateral_negative": 0.06171548117154812,
+        "lateral_positive": 0.08054393305439331,
+        "observed": 0.5209205020920502
+      },
+      "split_accuracy": 1.0
+    },
+    "13940": {
+      "angle_error_degrees": {
+        "mean": 6.687281167705835,
+        "median": 0.7775803834698946,
+        "p75": 8.060320055620386,
+        "p95": 32.031598516372604
+      },
+      "sample_count": 1101,
+      "scenario_counts": {
+        "adaptive": 107,
+        "flee": 175,
+        "intercept_chase": 98,
+        "lateral_negative": 65,
+        "lateral_positive": 65,
+        "observed": 591
+      },
+      "scenario_weights": {
+        "adaptive": 0.0971843778383288,
+        "flee": 0.1589464123524069,
+        "intercept_chase": 0.08900999091734786,
+        "lateral_negative": 0.05903723887375113,
+        "lateral_positive": 0.05903723887375113,
+        "observed": 0.5367847411444142
+      },
+      "split_accuracy": 0.9990917347865577
+    },
+    "13941": {
+      "angle_error_degrees": {
+        "mean": 8.308901751598292,
+        "median": 4.085386019008967,
+        "p75": 12.808815004106968,
+        "p95": 32.30743077111148
+      },
+      "sample_count": 1096,
+      "scenario_counts": {
+        "adaptive": 172,
+        "flee": 114,
+        "intercept_chase": 96,
+        "lateral_negative": 57,
+        "lateral_positive": 87,
+        "observed": 570
+      },
+      "scenario_weights": {
+        "adaptive": 0.15693430656934307,
+        "flee": 0.10401459854014598,
+        "intercept_chase": 0.08759124087591241,
+        "lateral_negative": 0.05200729927007299,
+        "lateral_positive": 0.07937956204379562,
+        "observed": 0.5200729927007299
+      },
+      "split_accuracy": 0.9990875912408759
+    },
+    "13969": {
+      "angle_error_degrees": {
+        "mean": 8.13980681001091,
+        "median": 3.0939983171291097,
+        "p75": 13.071497321131258,
+        "p95": 34.292605163122694
+      },
+      "sample_count": 1152,
+      "scenario_counts": {
+        "adaptive": 143,
+        "flee": 141,
+        "intercept_chase": 156,
+        "lateral_negative": 68,
+        "lateral_positive": 54,
+        "observed": 590
+      },
+      "scenario_weights": {
+        "adaptive": 0.12413194444444445,
+        "flee": 0.12239583333333333,
+        "intercept_chase": 0.13541666666666666,
+        "lateral_negative": 0.059027777777777776,
+        "lateral_positive": 0.046875,
+        "observed": 0.5121527777777778
+      },
+      "split_accuracy": 1.0
+    },
+    "13972": {
+      "angle_error_degrees": {
+        "mean": 5.116881350223409,
+        "median": 0.8175069670460018,
+        "p75": 5.700881325062317,
+        "p95": 27.164248813264173
+      },
+      "sample_count": 1154,
+      "scenario_counts": {
+        "adaptive": 136,
+        "flee": 97,
+        "intercept_chase": 122,
+        "lateral_negative": 37,
+        "lateral_positive": 58,
+        "observed": 704
+      },
+      "scenario_weights": {
+        "adaptive": 0.11785095320623917,
+        "flee": 0.08405545927209705,
+        "intercept_chase": 0.10571923743500866,
+        "lateral_negative": 0.032062391681109186,
+        "lateral_positive": 0.05025996533795494,
+        "observed": 0.610051993067591
+      },
+      "split_accuracy": 1.0
+    },
+    "13975": {
+      "angle_error_degrees": {
+        "mean": 6.47197569324905,
+        "median": 0.24238636096382293,
+        "p75": 8.607679526220759,
+        "p95": 31.66327182856135
+      },
+      "sample_count": 953,
+      "scenario_counts": {
+        "adaptive": 162,
+        "flee": 55,
+        "intercept_chase": 125,
+        "lateral_negative": 40,
+        "lateral_positive": 55,
+        "observed": 516
+      },
+      "scenario_weights": {
+        "adaptive": 0.16998950682056663,
+        "flee": 0.05771248688352571,
+        "intercept_chase": 0.1311647429171039,
+        "lateral_negative": 0.04197271773347324,
+        "lateral_positive": 0.05771248688352571,
+        "observed": 0.5414480587618048
+      },
+      "split_accuracy": 0.8835257082896117
+    },
+    "13989": {
+      "angle_error_degrees": {
+        "mean": 7.703277905583767,
+        "median": 2.788674096319197,
+        "p75": 12.143732353013956,
+        "p95": 29.735558620094803
+      },
+      "sample_count": 855,
+      "scenario_counts": {
+        "adaptive": 76,
+        "flee": 98,
+        "intercept_chase": 30,
+        "lateral_negative": 45,
+        "lateral_positive": 63,
+        "observed": 543
+      },
+      "scenario_weights": {
+        "adaptive": 0.08888888888888889,
+        "flee": 0.11461988304093568,
+        "intercept_chase": 0.03508771929824561,
+        "lateral_negative": 0.05263157894736842,
+        "lateral_positive": 0.07368421052631578,
+        "observed": 0.6350877192982456
+      },
+      "split_accuracy": 0.9812865497076023
+    },
+    "14002": {
+      "angle_error_degrees": {
+        "mean": 20.917190077222347,
+        "median": 0.9700427743448896,
+        "p75": 15.331138585163659,
+        "p95": 180.0
+      },
+      "sample_count": 1087,
+      "scenario_counts": {
+        "adaptive": 139,
+        "flee": 112,
+        "intercept_chase": 95,
+        "lateral_negative": 59,
+        "lateral_positive": 54,
+        "observed": 628
+      },
+      "scenario_weights": {
+        "adaptive": 0.12787488500459981,
+        "flee": 0.10303587856485741,
+        "intercept_chase": 0.08739650413983441,
+        "lateral_negative": 0.05427782888684453,
+        "lateral_positive": 0.04967801287948482,
+        "observed": 0.577736890524379
+      },
+      "split_accuracy": 0.9990800367985281
+    },
+    "14008": {
+      "angle_error_degrees": {
+        "mean": 4.21867927479452,
+        "median": 0.0,
+        "p75": 3.406608565497424,
+        "p95": 24.332380992948274
+      },
+      "sample_count": 444,
+      "scenario_counts": {
+        "adaptive": 44,
+        "flee": 58,
+        "intercept_chase": 6,
+        "lateral_negative": 16,
+        "lateral_positive": 24,
+        "observed": 296
+      },
+      "scenario_weights": {
+        "adaptive": 0.0990990990990991,
+        "flee": 0.13063063063063063,
+        "intercept_chase": 0.013513513513513514,
+        "lateral_negative": 0.036036036036036036,
+        "lateral_positive": 0.05405405405405406,
+        "observed": 0.6666666666666666
+      },
+      "split_accuracy": 1.0
+    },
+    "14010": {
+      "angle_error_degrees": {
+        "mean": 23.72844417084648,
+        "median": 2.457544752962464,
+        "p75": 16.583792242492244,
+        "p95": 180.0
+      },
+      "sample_count": 1085,
+      "scenario_counts": {
+        "adaptive": 172,
+        "flee": 72,
+        "intercept_chase": 57,
+        "lateral_negative": 62,
+        "lateral_positive": 65,
+        "observed": 657
+      },
+      "scenario_weights": {
+        "adaptive": 0.1585253456221198,
+        "flee": 0.0663594470046083,
+        "intercept_chase": 0.052534562211981564,
+        "lateral_negative": 0.05714285714285714,
+        "lateral_positive": 0.059907834101382486,
+        "observed": 0.6055299539170507
+      },
+      "split_accuracy": 0.9944700460829493
+    },
+    "14012": {
+      "angle_error_degrees": {
+        "mean": 7.208112332862414,
+        "median": 1.7955482458996015,
+        "p75": 9.956589315254156,
+        "p95": 31.47939769380734
+      },
+      "sample_count": 852,
+      "scenario_counts": {
+        "adaptive": 72,
+        "flee": 101,
+        "intercept_chase": 119,
+        "lateral_negative": 50,
+        "lateral_positive": 47,
+        "observed": 463
+      },
+      "scenario_weights": {
+        "adaptive": 0.08450704225352113,
+        "flee": 0.11854460093896714,
+        "intercept_chase": 0.1396713615023474,
+        "lateral_negative": 0.05868544600938967,
+        "lateral_positive": 0.05516431924882629,
+        "observed": 0.5434272300469484
+      },
+      "split_accuracy": 0.9683098591549296
+    },
+    "14013": {
+      "angle_error_degrees": {
+        "mean": 5.23873965513117,
+        "median": 0.0,
+        "p75": 5.643504878213233,
+        "p95": 29.055655711706912
+      },
+      "sample_count": 1000,
+      "scenario_counts": {
+        "adaptive": 126,
+        "flee": 67,
+        "intercept_chase": 73,
+        "lateral_negative": 40,
+        "lateral_positive": 53,
+        "observed": 641
+      },
+      "scenario_weights": {
+        "adaptive": 0.126,
+        "flee": 0.067,
+        "intercept_chase": 0.073,
+        "lateral_negative": 0.04,
+        "lateral_positive": 0.053,
+        "observed": 0.641
+      },
+      "split_accuracy": 0.999
+    },
+    "14015": {
+      "angle_error_degrees": {
+        "mean": 7.587759021632372,
+        "median": 2.250001532646188,
+        "p75": 10.392955173601038,
+        "p95": 35.04955327373101
+      },
+      "sample_count": 1241,
+      "scenario_counts": {
+        "adaptive": 119,
+        "flee": 177,
+        "intercept_chase": 72,
+        "lateral_negative": 71,
+        "lateral_positive": 73,
+        "observed": 729
+      },
+      "scenario_weights": {
+        "adaptive": 0.0958904109589041,
+        "flee": 0.1426269137792103,
+        "intercept_chase": 0.05801772763900081,
+        "lateral_negative": 0.057211925866236905,
+        "lateral_positive": 0.058823529411764705,
+        "observed": 0.5874294923448832
+      },
+      "split_accuracy": 0.9983883964544722
+    },
+    "14019": {
+      "angle_error_degrees": {
+        "mean": 7.805860298958671,
+        "median": 1.9646522713714187,
+        "p75": 11.583229800493669,
+        "p95": 34.33605186241272
+      },
+      "sample_count": 1148,
+      "scenario_counts": {
+        "adaptive": 77,
+        "flee": 152,
+        "intercept_chase": 121,
+        "lateral_negative": 60,
+        "lateral_positive": 69,
+        "observed": 669
+      },
+      "scenario_weights": {
+        "adaptive": 0.06707317073170732,
+        "flee": 0.13240418118466898,
+        "intercept_chase": 0.10540069686411149,
+        "lateral_negative": 0.05226480836236934,
+        "lateral_positive": 0.06010452961672474,
+        "observed": 0.5827526132404182
+      },
+      "split_accuracy": 0.9947735191637631
+    },
+    "14021": {
+      "angle_error_degrees": {
+        "mean": 9.678428590214873,
+        "median": 1.721976597288175,
+        "p75": 12.300581933444894,
+        "p95": 35.95818207391146
+      },
+      "sample_count": 1087,
+      "scenario_counts": {
+        "adaptive": 77,
+        "flee": 140,
+        "intercept_chase": 61,
+        "lateral_negative": 70,
+        "lateral_positive": 68,
+        "observed": 671
+      },
+      "scenario_weights": {
+        "adaptive": 0.07083716651333946,
+        "flee": 0.12879484820607176,
+        "intercept_chase": 0.05611775528978841,
+        "lateral_negative": 0.06439742410303588,
+        "lateral_positive": 0.062557497700092,
+        "observed": 0.6172953081876725
+      },
+      "split_accuracy": 0.9926402943882244
+    },
+    "14025": {
+      "angle_error_degrees": {
+        "mean": 7.933961096720019,
+        "median": 2.4047361985796343,
+        "p75": 12.532620919053837,
+        "p95": 33.56248462079474
+      },
+      "sample_count": 899,
+      "scenario_counts": {
+        "adaptive": 95,
+        "flee": 125,
+        "intercept_chase": 62,
+        "lateral_negative": 68,
+        "lateral_positive": 62,
+        "observed": 487
+      },
+      "scenario_weights": {
+        "adaptive": 0.10567296996662959,
+        "flee": 0.13904338153503892,
+        "intercept_chase": 0.06896551724137931,
+        "lateral_negative": 0.07563959955506118,
+        "lateral_positive": 0.06896551724137931,
+        "observed": 0.5417130144605117
+      },
+      "split_accuracy": 0.9799777530589544
+    },
+    "14031": {
+      "angle_error_degrees": {
+        "mean": 6.530760236381276,
+        "median": 0.7168275812096321,
+        "p75": 8.663571248905656,
+        "p95": 30.93163725298373
+      },
+      "sample_count": 672,
+      "scenario_counts": {
+        "adaptive": 54,
+        "flee": 73,
+        "intercept_chase": 28,
+        "lateral_negative": 29,
+        "lateral_positive": 42,
+        "observed": 446
+      },
+      "scenario_weights": {
+        "adaptive": 0.08035714285714286,
+        "flee": 0.10863095238095238,
+        "intercept_chase": 0.041666666666666664,
+        "lateral_negative": 0.043154761904761904,
+        "lateral_positive": 0.0625,
+        "observed": 0.6636904761904762
+      },
+      "split_accuracy": 0.9985119047619048
+    },
+    "14043": {
+      "angle_error_degrees": {
+        "mean": 6.471426264002831,
+        "median": 0.025010083739200953,
+        "p75": 9.879134718419502,
+        "p95": 30.049792945516707
+      },
+      "sample_count": 564,
+      "scenario_counts": {
+        "adaptive": 78,
+        "flee": 98,
+        "intercept_chase": 32,
+        "lateral_negative": 23,
+        "lateral_positive": 25,
+        "observed": 308
+      },
+      "scenario_weights": {
+        "adaptive": 0.13829787234042554,
+        "flee": 0.17375886524822695,
+        "intercept_chase": 0.05673758865248227,
+        "lateral_negative": 0.040780141843971635,
+        "lateral_positive": 0.044326241134751775,
+        "observed": 0.5460992907801419
+      },
+      "split_accuracy": 1.0
+    },
+    "14048": {
+      "angle_error_degrees": {
+        "mean": 6.536586871623243,
+        "median": 0.36294293326029603,
+        "p75": 7.860496936565767,
+        "p95": 28.373933338407287
+      },
+      "sample_count": 1077,
+      "scenario_counts": {
+        "adaptive": 124,
+        "flee": 133,
+        "intercept_chase": 81,
+        "lateral_negative": 36,
+        "lateral_positive": 63,
+        "observed": 640
+      },
+      "scenario_weights": {
+        "adaptive": 0.11513463324048283,
+        "flee": 0.12349117920148561,
+        "intercept_chase": 0.07520891364902507,
+        "lateral_negative": 0.033426183844011144,
+        "lateral_positive": 0.0584958217270195,
+        "observed": 0.5942432683379758
+      },
+      "split_accuracy": 0.9953574744661096
+    },
+    "14054": {
+      "angle_error_degrees": {
+        "mean": 6.542425608978909,
+        "median": 2.273927507395358,
+        "p75": 9.619660293358134,
+        "p95": 26.92484084164095
+      },
+      "sample_count": 744,
+      "scenario_counts": {
+        "adaptive": 55,
+        "flee": 85,
+        "intercept_chase": 52,
+        "lateral_negative": 43,
+        "lateral_positive": 35,
+        "observed": 474
+      },
+      "scenario_weights": {
+        "adaptive": 0.0739247311827957,
+        "flee": 0.11424731182795698,
+        "intercept_chase": 0.06989247311827956,
+        "lateral_negative": 0.05779569892473118,
+        "lateral_positive": 0.04704301075268817,
+        "observed": 0.6370967741935484
+      },
+      "split_accuracy": 0.9986559139784946
+    },
+    "14061": {
+      "angle_error_degrees": {
+        "mean": 6.798731350327175,
+        "median": 0.9131284894404267,
+        "p75": 9.513145894475976,
+        "p95": 30.554997537198787
+      },
+      "sample_count": 763,
+      "scenario_counts": {
+        "adaptive": 110,
+        "flee": 66,
+        "intercept_chase": 67,
+        "lateral_negative": 22,
+        "lateral_positive": 51,
+        "observed": 447
+      },
+      "scenario_weights": {
+        "adaptive": 0.14416775884665792,
+        "flee": 0.08650065530799476,
+        "intercept_chase": 0.08781127129750983,
+        "lateral_negative": 0.028833551769331587,
+        "lateral_positive": 0.06684141546526867,
+        "observed": 0.5858453473132372
+      },
+      "split_accuracy": 0.9973787680209698
+    },
+    "14062": {
+      "angle_error_degrees": {
+        "mean": 7.427370694739788,
+        "median": 2.4319317682044743,
+        "p75": 11.885919511479354,
+        "p95": 30.259780949326494
+      },
+      "sample_count": 1439,
+      "scenario_counts": {
+        "adaptive": 195,
+        "flee": 193,
+        "intercept_chase": 129,
+        "lateral_negative": 96,
+        "lateral_positive": 95,
+        "observed": 731
+      },
+      "scenario_weights": {
+        "adaptive": 0.13551077136900624,
+        "flee": 0.1341209173036831,
+        "intercept_chase": 0.08964558721334259,
+        "lateral_negative": 0.06671299513551077,
+        "lateral_positive": 0.0660180681028492,
+        "observed": 0.5079916608756081
+      },
+      "split_accuracy": 0.9923558026407228
+    }
+  },
+  "overall": {
+    "angle_error_degrees": {
+      "mean": 8.191050695894761,
+      "median": 1.4561639713144194,
+      "p75": 10.730551790879682,
+      "p95": 33.64292569781288
+    },
+    "sample_count": 49871,
+    "scenario_counts": {
+      "adaptive": 5908,
+      "flee": 5312,
+      "intercept_chase": 4692,
+      "lateral_negative": 2757,
+      "lateral_positive": 2948,
+      "observed": 28254
+    },
+    "scenario_weights": {
+      "adaptive": 0.11846564135469512,
+      "flee": 0.10651480820516934,
+      "intercept_chase": 0.09408273345230696,
+      "lateral_negative": 0.055282629183292895,
+      "lateral_positive": 0.0591125102765134,
+      "observed": 0.5665416775280223
+    },
+    "split_accuracy": 0.9923201860800867
+  },
+  "schema_version": 1,
+  "stage": "scenario_action_classification"
+}

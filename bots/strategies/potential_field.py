@@ -5,19 +5,15 @@ import random
 from dataclasses import dataclass
 
 from lib.config.arena import ARENA_SIZE, MAX_BLOB_COUNT
-from lib.config.player import (
-    EAT_SIZE_RATIO,
-    SPLIT_EJECT_SPEED,
-    SPLIT_MIN_MASS,
-)
+from lib.config.player import SPLIT_EJECT_SPEED, SPLIT_MIN_MASS
 from lib.models.blob_model import BlobModel, VisibleBlobModel
 from lib.models.virus_model import VirusModel
-from simulation.rules import can_consume_virus
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.features import (
+    can_consume_virus,
     can_eat_player_blob,
     normalise,
-    player_speed as _speed,
+    player_speed,
     squared_distance,
 )
 
@@ -189,7 +185,7 @@ class PotentialFieldHunterStrategy:
             (
                 enemy,
                 _mass(enemy.radius) >= SPLIT_MIN_MASS,
-                enemy.radius + _speed(enemy.radius) * 4.0 + 1.2,
+                enemy.radius + player_speed(enemy.radius) * 4.0 + 1.2,
             )
             for enemy in enemies
         )
@@ -242,11 +238,7 @@ class PotentialFieldHunterStrategy:
         count = 0
         for own in own_blobs:
             for virus in viruses:
-                if not can_consume_virus(
-                    own.radius,
-                    virus.radius,
-                    eat_size_ratio=EAT_SIZE_RATIO,
-                ):
+                if not can_consume_virus(own.radius, virus.radius):
                     continue
                 keep_clear = own.radius + 1.5 + own.radius * 0.5
                 distance = math.dist(own.pos, virus.pos)
@@ -268,11 +260,7 @@ class PotentialFieldHunterStrategy:
     ) -> tuple[float, float]:
         if not threatened or not viruses:
             return (0.0, 0.0)
-        if can_consume_virus(
-            primary.radius,
-            viruses[0].radius,
-            eat_size_ratio=EAT_SIZE_RATIO,
-        ):
+        if can_consume_virus(primary.radius, viruses[0].radius):
             return (0.0, 0.0)
         nearest = min(viruses, key=lambda virus: squared_distance(primary.pos, virus.pos))
         return normalise((nearest.pos[0] - primary.pos[0], nearest.pos[1] - primary.pos[1]))
@@ -454,7 +442,7 @@ def _split_capture_reach(radius: float) -> float:
     """Maximum one-round center distance for a directly aimed split capture."""
 
     child_radius = radius / SQRT2
-    return 3.0 * child_radius + SPLIT_EJECT_SPEED + _speed(child_radius)
+    return 3.0 * child_radius + SPLIT_EJECT_SPEED + player_speed(child_radius)
 
 
 def _lerp(start: float, end: float, t: float) -> float:

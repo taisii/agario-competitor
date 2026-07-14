@@ -13,12 +13,14 @@ sys.path.insert(0, str(ROOT / "bots"))
 
 from lib.models.virus_model import VirusModel  # noqa: E402
 from lib.models.food_model import FoodModel  # noqa: E402
+from lib.interface.events.moves.move_player import MovePlayer  # noqa: E402
 from engine.state.blob_state import BlobState  # noqa: E402
 from engine.state.player_state import PlayerState  # noqa: E402
 from engine.state.state_mutator import StateMutator  # noqa: E402
 from strategies.receding_horizon import (  # noqa: E402
     Action,
     EnemyBlob,
+    EnemyTrack,
     OwnBlob,
     ProxyBlobMotion,
     ProxyThreat,
@@ -37,6 +39,11 @@ from strategies.features import (  # noqa: E402
     player_speed,
     squared_distance,
 )
+from strategies.world_transition import (  # noqa: E402
+    CompleteJointCommand,
+    PlayerCommand,
+)
+from lib.config.player import MASS_DECAY_RATE, SAME_PLAYER_OVERLAP_EPSILON  # noqa: E402
 
 
 def test_legacy_receding_horizon_names_resolve_without_duplicate_list_entries() -> None:
@@ -50,6 +57,205 @@ def test_replay_dominance_is_a_distinct_registered_strategy() -> None:
     assert isinstance(strategy, ReplayDominanceStrategy)
     assert strategy.name == "replay_dominance"
     assert "replay_dominance" in available_strategy_names()
+
+
+def test_complete_joint_command_requires_every_live_player_once() -> None:
+    command = CompleteJointCommand.build(
+        live_player_ids={0, 7},
+        commands={
+            0: PlayerCommand((1.0, 0.0)),
+            7: PlayerCommand((0.0, 1.0), split=True),
+        },
+    )
+
+    assert command.for_player(7).split
+    assert command.player_ids == frozenset({0, 7})
+
+    try:
+        CompleteJointCommand.build(
+            live_player_ids={0, 7},
+            commands={0: PlayerCommand((1.0, 0.0))},
+        )
+    except ValueError as error:
+        assert "missing=(7,)" in str(error)
+    else:
+        raise AssertionError("incomplete joint command must be rejected")
+
+
+def test_complete_joint_command_rejects_duplicate_player() -> None:
+    try:
+        CompleteJointCommand(
+            (
+                (0, PlayerCommand((1.0, 0.0))),
+                (7, PlayerCommand((0.0, 1.0))),
+                (7, PlayerCommand((0.0, -1.0))),
+            )
+        )
+    except ValueError as error:
+        assert "duplicate players" in str(error)
+    else:
+        raise AssertionError("duplicate player commands must be rejected")
+
+
+def test_complete_joint_command_canonicalises_direct_construction() -> None:
+    command = CompleteJointCommand(
+        (
+            (7, PlayerCommand((0.0, 1.0))),
+            (0, PlayerCommand((1.0, 0.0))),
+        )
+    )
+
+    assert tuple(player_id for player_id, _ in command.commands) == (0, 7)
+
+
+def test_joint_enemy_split_uses_one_command_and_carries_ejection_two_steps() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    enemy = EnemyBlob(7, 3, 20.0, 20.0, 2.0, direction=(-1.0, 0.0))
+    first_command = CompleteJointCommand.build(
+        live_player_ids={0, 7},
+        commands={
+            0: PlayerCommand((1.0, 0.0)),
+            7: PlayerCommand((0.0, 1.0), split=True),
+        },
+    )
+
+    first = strategy._move_enemy_players_with_joint_command(
+        (enemy,),
+        first_command,
+        60.0,
+    )
+
+    assert len(first) == 2
+    assert {blob.direction for blob in first} == {(0.0, 1.0)}
+    assert math.isclose(
+        sum(blob.mass for blob in first),
+        enemy.mass * (1.0 - MASS_DECAY_RATE),
+    )
+    assert first[1].eject_vy > 0.0
+
+    second_command = CompleteJointCommand.build(
+        live_player_ids={0, 7},
+        commands={
+            0: PlayerCommand((1.0, 0.0)),
+            7: PlayerCommand((1.0, 0.0)),
+        },
+    )
+    before_y = first[1].y
+    second = strategy._move_enemy_players_with_joint_command(
+        first,
+        second_command,
+        60.0,
+    )
+
+    assert second[1].direction == (1.0, 0.0)
+    assert second[1].y > before_y
+    assert 0.0 < second[1].eject_vy < first[1].eject_vy
+
+
+def test_zero_direction_split_matches_engine_for_own_and_enemy_geometry() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    own = OwnBlob(blob_id=3, x=20.0, y=20.0, radius=2.0)
+    modelled_own = sorted(
+        strategy._apply_split([own], (0.0, 0.0), 60.0),
+        key=lambda blob: blob.blob_id,
+    )
+
+    player = PlayerState(player_id=0, team_id=0)
+    player.blobs = {
+        own.blob_id: BlobState(
+            blob_id=own.blob_id,
+            x=own.x,
+            y=own.y,
+            radius=own.radius,
+        )
+    }
+    player._next_blob_id = own.blob_id + 1
+    state = SimpleNamespace(
+        players={0: player},
+        map=SimpleNamespace(size=60.0),
+    )
+    StateMutator(state)._apply_split(
+        MovePlayer(
+            player_id=0,
+            direction={"x": 0.0, "y": 0.0},
+            split=True,
+        )
+    )
+    authoritative = player.sorted_blobs()
+
+    assert len(modelled_own) == len(authoritative) == 2
+    for modelled, expected in zip(modelled_own, authoritative, strict=True):
+        assert math.isclose(modelled.x, expected.x, abs_tol=1e-12)
+        assert math.isclose(modelled.y, expected.y, abs_tol=1e-12)
+        assert math.isclose(modelled.radius, expected.radius, abs_tol=1e-12)
+        assert modelled.merge_cooldown == expected.merge_cooldown
+        assert modelled.eject_vx == expected.eject_vx == 0.0
+        assert modelled.eject_vy == expected.eject_vy == 0.0
+
+    enemy = EnemyBlob(
+        player_id=7,
+        blob_id=own.blob_id,
+        x=own.x,
+        y=own.y,
+        radius=own.radius,
+    )
+    modelled_enemy = strategy._apply_enemy_split([enemy], (0.0, 0.0), 60.0)
+    for modelled, expected in zip(modelled_enemy, authoritative, strict=True):
+        assert math.isclose(modelled.x, expected.x, abs_tol=1e-12)
+        assert math.isclose(modelled.y, expected.y, abs_tol=1e-12)
+        assert math.isclose(modelled.radius, expected.radius, abs_tol=1e-12)
+        assert modelled.merge_cooldown == expected.merge_cooldown
+        assert modelled.eject_vx == expected.eject_vx == 0.0
+        assert modelled.eject_vy == expected.eject_vy == 0.0
+
+
+def test_joint_physical_step_does_not_invoke_policy_risk_analysis() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    node = SearchNode(
+        own_blobs=(OwnBlob(0, 20.0, 20.0, 2.0),),
+        enemies=(EnemyBlob(7, 0, 30.0, 20.0, 1.0),),
+        score=17.0,
+        first_direction=(1.0, 0.0),
+        first_split=False,
+        first_reason="probe",
+        last_direction=(1.0, 0.0),
+    )
+    joint = CompleteJointCommand.build(
+        live_player_ids={0, 7},
+        commands={
+            0: PlayerCommand((1.0, 0.0)),
+            7: PlayerCommand((-1.0, 0.0)),
+        },
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("joint physical kernel must not evaluate policy risk")
+
+    strategy._risk_analysis = fail_if_called
+    result = strategy._joint_physical_step(
+        node=node,
+        action=Action((1.0, 0.0)),
+        foods=(),
+        viruses=(),
+        arena_size=60.0,
+        first_step=True,
+        joint_command=joint,
+    )
+
+    assert not result.dead
+    assert result.state.score == node.score
+    assert result.state.min_safety_margin == node.min_safety_margin
+
+
+def test_zero_and_east_actions_have_distinct_physics_cache_keys() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+
+    assert strategy._action_key(Action((0.0, 0.0))) != strategy._action_key(
+        Action((1.0, 0.0))
+    )
+    assert strategy._action_key(Action((0.0, 0.0), split=True)) != strategy._action_key(
+        Action((1.0, 0.0), split=True)
+    )
 
 
 def test_replay_dominance_compares_two_roots_before_deadline() -> None:
@@ -770,45 +976,57 @@ def test_exposed_radii_include_future_virus_fragments() -> None:
     assert all(radius >= own.radius / math.sqrt(2.0) for radius in without_virus)
 
 
-def test_visible_enemy_set_ignores_public_ids_and_input_order() -> None:
-    physical = (
-        SimpleNamespace(
-            player_id=2,
-            blob_id=91,
-            pos=(12.0, 10.0),
-            radius=2.0,
-            merge_cooldown=4,
-        ),
-        SimpleNamespace(
-            player_id=1,
-            blob_id=44,
-            pos=(8.0, 11.0),
-            radius=1.5,
-            merge_cooldown=0,
-        ),
-        SimpleNamespace(
-            player_id=2,
-            blob_id=17,
-            pos=(9.0, 10.0),
-            radius=1.0,
-            merge_cooldown=2,
-        ),
+def test_enemy_memory_predicts_every_track_once_before_authoritative_overwrite(
+    monkeypatch,
+) -> None:
+    strategy = ReplayDominanceStrategy()
+    strategy.enemy_tracks[(1, 0)] = EnemyTrack(
+        player_id=1,
+        blob_id=0,
+        x=10.0,
+        y=10.0,
+        radius=2.0,
+        direction=(1.0, 0.0),
+        last_seen_round=4,
     )
-    relabelled = tuple(
-        SimpleNamespace(**{**vars(blob), "blob_id": new_id})
-        for blob, new_id in zip(reversed(physical), (0, 1, 2), strict=True)
+    visible = SimpleNamespace(
+        player_id=1,
+        blob_id=0,
+        pos=(12.0, 10.0),
+        radius=2.0,
+        merge_cooldown=0,
+    )
+    context = SimpleNamespace(
+        game=SimpleNamespace(
+            state=SimpleNamespace(
+                round=5,
+                visible_blobs=(visible,),
+                view_center=(30.0, 30.0),
+                vision_size=60.0,
+            )
+        )
     )
 
-    baseline = ReplayDominanceStrategy._visible_enemies(physical)
-    transformed = ReplayDominanceStrategy._visible_enemies(relabelled)
+    calls = 0
+    original_speed = player_speed
 
-    assert transformed == baseline
-    assert ReplayDominanceStrategy._visible_enemies(()) == ()
-    assert [(enemy.player_id, enemy.blob_id) for enemy in baseline] == [
-        (1, 0),
-        (2, 0),
-        (2, 1),
-    ]
+    def counted_speed(radius):
+        nonlocal calls
+        calls += 1
+        return original_speed(radius)
+
+    monkeypatch.setattr(
+        "strategies.receding_horizon.player_speed",
+        counted_speed,
+    )
+    enemies = strategy._update_enemy_memory(
+        context,
+        (OwnBlob(blob_id=0, x=30.0, y=30.0, radius=1.0),),
+        60.0,
+    )
+
+    assert calls == 1
+    assert enemies[0].pos == visible.pos
 
 
 def test_replay_dominance_does_not_reorder_by_semantic_family() -> None:
@@ -1473,14 +1691,9 @@ def test_proxy_short_path_matches_one_round_physics_for_all_motion_modes() -> No
             arena_size=60.0,
             horizon=8,
         )
-        initial = (
-            strategy._apply_split([own], unit, 60.0)
-            if action.split
-            else [own]
-        )
+        initial = strategy._apply_split([own], unit, 60.0) if action.split else [own]
         expected = {
-            blob.blob_id: strategy._move_own(blob, unit, 60.0)
-            for blob in initial
+            blob.blob_id: strategy._move_own(blob, unit, 60.0) for blob in initial
         }
 
         assert len(projected.blobs) == len(expected)
@@ -1650,7 +1863,7 @@ def test_replay_dominance_merges_before_virus_like_engine_failure_replay() -> No
     expected_mass = sum(blob.mass for blob in own_blobs) + virus.radius**2
     stabilised = strategy._stabilise_own_blobs(own_blobs, 60.0)
 
-    after, _, _ = strategy._resolve_own_viruses(
+    after, _, _, own_consumed = strategy._resolve_own_viruses(
         own_blobs=stabilised,
         viruses=(virus,),
         consumed_virus_ids=consumed,
@@ -1658,6 +1871,7 @@ def test_replay_dominance_merges_before_virus_like_engine_failure_replay() -> No
     )
 
     assert consumed == {50}
+    assert own_consumed == 1
     assert len(stabilised) == 1
     assert len(after) == 16
     assert all(
@@ -2365,6 +2579,138 @@ def test_replay_dominance_stabilisation_matches_engine_transition() -> None:
                 authoritative.eject_vy,
                 abs_tol=1e-12,
             )
+
+
+def test_enemy_separation_mutable_work_rows_match_frozen_replace_oracle() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    rng = random.Random(20260715)
+
+    def frozen_replace_oracle(
+        enemies: tuple[EnemyBlob, ...],
+        arena_size: float,
+        iterations: int,
+    ) -> tuple[EnemyBlob, ...]:
+        by_key = {enemy.key: enemy for enemy in enemies}
+        for _ in range(iterations):
+            changed = False
+            keys = sorted(by_key)
+            for index, first_key in enumerate(keys):
+                for second_key in keys[index + 1 :]:
+                    if first_key[0] != second_key[0]:
+                        continue
+                    first = by_key[first_key]
+                    second = by_key[second_key]
+                    dx = second.x - first.x
+                    dy = second.y - first.y
+                    distance = math.hypot(dx, dy)
+                    minimum = first.radius + second.radius + SAME_PLAYER_OVERLAP_EPSILON
+                    if distance >= minimum:
+                        continue
+                    nx, ny = (
+                        (1.0, 0.0)
+                        if distance <= 1e-9
+                        else (dx / distance, dy / distance)
+                    )
+                    overlap = minimum - distance
+                    total_mass = first.mass + second.mass
+                    first_move = overlap * second.mass / total_mass
+                    second_move = overlap * first.mass / total_mass
+                    by_key[first_key] = replace(
+                        first,
+                        x=min(
+                            max(first.x - nx * first_move, first.radius),
+                            arena_size - first.radius,
+                        ),
+                        y=min(
+                            max(first.y - ny * first_move, first.radius),
+                            arena_size - first.radius,
+                        ),
+                    )
+                    by_key[second_key] = replace(
+                        second,
+                        x=min(
+                            max(second.x + nx * second_move, second.radius),
+                            arena_size - second.radius,
+                        ),
+                        y=min(
+                            max(second.y + ny * second_move, second.radius),
+                            arena_size - second.radius,
+                        ),
+                    )
+                    changed = True
+            if not changed:
+                break
+        return tuple(by_key[key] for key in sorted(by_key))
+
+    for _ in range(100):
+        count = rng.choice((2, 4, 8, 16))
+        enemies = tuple(
+            EnemyBlob(
+                player_id=rng.randrange(1, 4),
+                blob_id=blob_id,
+                x=rng.uniform(0.6, 8.0),
+                y=rng.uniform(0.6, 8.0),
+                radius=rng.uniform(0.5, 1.8),
+                direction=(rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)),
+                stale_rounds=rng.randrange(0, 3),
+                merge_cooldown=rng.randrange(0, 20),
+            )
+            for blob_id in range(count)
+        )
+        iterations = rng.randrange(1, 5)
+
+        expected = frozen_replace_oracle(enemies, 60.0, iterations)
+        actual = strategy._separate_enemy_blobs(enemies, 60.0, iterations)
+
+        assert actual == expected
+
+
+def test_nonmerging_enemy_stabilisation_matches_two_four_pass_sequence() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    rng = random.Random(20260716)
+
+    for _ in range(50):
+        enemies = tuple(
+            EnemyBlob(
+                player_id=1 + index // 8,
+                blob_id=index,
+                x=rng.uniform(2.0, 58.0),
+                y=rng.uniform(2.0, 58.0),
+                radius=rng.uniform(0.5, 1.8),
+                direction=(rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)),
+                merge_cooldown=rng.randrange(1, 20),
+            )
+            for index in range(16)
+        )
+        by_player: dict[int, list[EnemyBlob]] = {}
+        for enemy in enemies:
+            by_player.setdefault(enemy.player_id, []).append(enemy)
+        expected = []
+        for player_id in sorted(by_player):
+            group = list(strategy._apply_attraction(by_player[player_id], 60.0))
+            group = list(strategy._merge_enemy_blobs(tuple(group), 60.0))
+            group = list(strategy._separate_enemy_blobs(tuple(group), 60.0))
+            group = list(strategy._merge_enemy_blobs(tuple(group), 60.0))
+            group = list(strategy._separate_enemy_blobs(tuple(group), 60.0))
+            expected.extend(group)
+
+        actual = strategy._stabilise_enemy_blobs(enemies, 60.0)
+
+        assert actual == tuple(sorted(expected, key=lambda enemy: enemy.key))
+
+
+def test_virus_fragment_layout_cache_is_bounded_and_recomputation_is_exact() -> None:
+    strategy = ReplayDominanceStrategy(depth=1, width=1, angular_samples=4)
+    original = strategy._virus_fragment_layout(0.5, 16)
+    assert strategy._virus_fragment_layout(0.5, 16) is original
+
+    for index in range(strategy._VIRUS_FRAGMENT_LAYOUT_CACHE_LIMIT + 20):
+        strategy._virus_fragment_layout(0.6 + index / 1000.0, 16)
+
+    assert len(strategy._virus_fragment_layout_cache) == (
+        strategy._VIRUS_FRAGMENT_LAYOUT_CACHE_LIMIT
+    )
+    assert strategy._virus_fragment_layout(0.5, 16) == original
 
 
 def test_replay_dominance_resolves_virus_before_food_like_engine() -> None:

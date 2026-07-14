@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import math
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -13,6 +15,13 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "bots"))
 
 from scripts.build_submission import build_submission  # noqa: E402
+from strategies.base import StrategyContext  # noqa: E402
+from strategies.features import player_speed  # noqa: E402
+from strategies.receding_horizon import (  # noqa: E402
+    EnemyTrack,
+    OwnBlob,
+    ThreatAwareRecedingHorizonStrategy,
+)
 
 
 def test_submission_bundle_is_single_file_without_local_imports() -> None:
@@ -103,7 +112,10 @@ def test_replay_dominance_submission_preserves_local_import_aliases() -> None:
             sys.modules.pop(module_name, None)
         namespace = vars(module)
 
-    assert namespace["_feature_can_consume_virus"] is namespace["_replay_can_consume_virus"]
+    assert (
+        namespace["_feature_can_consume_virus"]
+        is namespace["_replay_can_consume_virus"]
+    )
     assert namespace["_replay_can_consume_virus"] is not namespace["can_consume_virus"]
     assert namespace["_replay_decayed_radius"] is namespace["decayed_radius"]
     assert namespace["_feature_movement_speed"] is namespace["movement_speed"]
@@ -112,3 +124,173 @@ def test_replay_dominance_submission_preserves_local_import_aliases() -> None:
         1.5,
         eat_size_ratio=1.1,
     )
+
+
+def test_local_submission_process_handles_a_fatal_exact_transition() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "local_tactical_search.py",
+            strategy_name="local_tactical_search",
+        )
+        script = f"""
+import importlib.util
+import sys
+spec = importlib.util.spec_from_file_location('official_local', {str(output)!r})
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+strategy = module.LocalTacticalSearchStrategy(depth=1)
+node = module.SearchNode(
+    own_blobs=(module.OwnBlob(0, 30.0, 30.0, 1.0),),
+    enemies=(module.EnemyBlob(7, 0, 30.0, 30.0, 4.0),),
+    score=0.0,
+    first_direction=(1.0, 0.0),
+    first_split=False,
+    first_reason='keep',
+    last_direction=(1.0, 0.0),
+)
+result = strategy._step(
+    node=node,
+    action=module.Action((1.0, 0.0), reason='toward_predator'),
+    foods=(),
+    viruses=(),
+    arena_size=60.0,
+    first_step=True,
+    safety_weight=1.3,
+    aggression=1.0,
+)
+assert result.fatal and not result.node.own_blobs
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_potential_tactical_hybrid_bundle_runs_in_a_clean_process() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "potential_tactical_hybrid.py",
+            strategy_name="potential_tactical_hybrid",
+        )
+        script = f"""
+import importlib.util
+import sys
+from types import SimpleNamespace
+spec = importlib.util.spec_from_file_location('official_hybrid', {str(output)!r})
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+strategy = module.PotentialTacticalHybridStrategy()
+blob = module.BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.0)
+state = SimpleNamespace(
+    me=SimpleNamespace(
+        player_id=0, x=30.0, y=30.0, radius=1.0, alive=True, blobs={{0: blob}}
+    ),
+    visible_blobs=[], visible_food=[], visible_viruses=[],
+    map=SimpleNamespace(size=60.0), round=100, max_rounds=1400,
+    rankings=list(range(8)), view_center=(30.0, 30.0), vision_size=20.0,
+)
+decision = strategy.choose(
+    module.StrategyContext(
+        game=SimpleNamespace(state=state), query=SimpleNamespace(update={{}})
+    )
+)
+assert decision.reason == 'potential_mix'
+assert not strategy.last_hybrid_diagnostics['hybrid_full_executed']
+
+# Exercise both potential-field virus branches in the flattened namespace:
+# consumable-virus avoidance and non-consumable-virus shelter while threatened.
+virus = module.VirusModel(virus_id=1, pos=(31.0, 30.0), radius=1.5)
+large = module.BlobModel(blob_id=0, pos=(30.0, 30.0), radius=2.0)
+state.me.blobs = {{0: large}}
+state.me.radius = 2.0
+state.visible_viruses = [virus]
+module.PotentialTacticalHybridStrategy().choose(
+    module.StrategyContext(
+        game=SimpleNamespace(state=state), query=SimpleNamespace(update={{}})
+    )
+)
+small = module.BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.0)
+state.me.blobs = {{0: small}}
+state.me.radius = 1.0
+state.visible_blobs = [
+    module.VisibleBlobModel(
+        player_id=1, team_id=1, blob_id=0, pos=(33.0, 30.0), radius=2.0
+    )
+]
+module.PotentialTacticalHybridStrategy().choose(
+    module.StrategyContext(
+        game=SimpleNamespace(state=state), query=SimpleNamespace(update={{}})
+    )
+)
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_expected_final_mass_submission_contains_replay_experts_and_is_self_contained() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as directory:
+        output, digest = build_submission(
+            Path(directory) / "expected_final_mass.py",
+            strategy_name="expected_final_mass",
+        )
+        source = output.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+    assert len(digest) == 64
+    assert "class ExpectedFinalMassStrategy(ReplayDominanceStrategy)" in source
+    assert "strategy = ExpectedFinalMassStrategy()" in source
+    assert "PROFILES = {" in source
+    assert source.count('if __name__ == "__main__":') == 1
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert node.module.split(".", 1)[0] not in {
+                "strategies",
+                "telemetry",
+            }
+
+
+def test_censored_predator_track_advances_toward_vulnerable_blob() -> None:
+    strategy = ThreatAwareRecedingHorizonStrategy(depth=1, width=1, angular_samples=4)
+    strategy.enemy_tracks[(1, 0)] = EnemyTrack(
+        player_id=1,
+        blob_id=0,
+        x=10.0,
+        y=10.0,
+        radius=2.0,
+        direction=(0.0, 0.0),
+        last_seen_round=1,
+    )
+    own = OwnBlob(blob_id=0, x=20.0, y=10.0, radius=1.0)
+    state = SimpleNamespace(
+        round=2,
+        visible_blobs=(),
+        view_center=(50.0, 50.0),
+        vision_size=8.0,
+    )
+    context = StrategyContext(
+        game=SimpleNamespace(state=state),
+        query=SimpleNamespace(update={}),
+    )
+
+    enemies = strategy._update_enemy_memory(context, (own,), arena_size=60.0)
+
+    assert len(enemies) == 1
+    assert math.isclose(enemies[0].x, 10.0 + player_speed(2.0))
+    assert enemies[0].direction == (1.0, 0.0)
+    assert enemies[0].stale_rounds == 1

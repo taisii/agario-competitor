@@ -9,6 +9,7 @@ checked with the official ``simulation --headless`` process layout.
 """
 
 import argparse
+from collections.abc import Mapping
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def forward_engine_overrides(
+    env: dict[str, str],
+    source: Mapping[str, str] = os.environ,
+) -> None:
+    """Preserve explicit validation-only engine settings through runtime_env."""
+
+    for key in (
+        "AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS",
+        "AGARIO_LOCAL_TURN_TIMEOUT_SECONDS",
+    ):
+        if key in source:
+            env[key] = source[key]
+
+
 def main() -> None:
     args = parse_args()
     workspace = args.workspace.resolve()
@@ -38,6 +53,7 @@ def main() -> None:
     seeded_engine = Path(__file__).with_name("run_seeded_engine.py").resolve()
     setup_match_environment(workspace)
     env = runtime_env(workspace)
+    forward_engine_overrides(env)
     variant_env = json.loads(env.pop("BOT_BENCHMARK_VARIANT_ENV_JSON", "{}"))
     variant_slots = {
         int(value)
@@ -54,9 +70,7 @@ def main() -> None:
             stderr_file = (io_dir / "submission.err").open("wb")
             opened_logs.extend((stdout_file, stderr_file))
             bot_env = env.copy()
-            bot_env["BOT_METRICS_ENABLED"] = (
-                "1" if player_id in variant_slots else "0"
-            )
+            bot_env["BOT_METRICS_ENABLED"] = "1" if player_id in variant_slots else "0"
             if player_id in variant_slots:
                 bot_env.update(variant_env)
             bots.append(
@@ -71,9 +85,10 @@ def main() -> None:
 
         engine_log_path = workspace / "output" / "engine.log"
         engine_err_path = workspace / "output" / "engine.err"
-        with engine_log_path.open("w") as engine_log, engine_err_path.open(
-            "w"
-        ) as engine_err:
+        with (
+            engine_log_path.open("w") as engine_log,
+            engine_err_path.open("w") as engine_err,
+        ):
             engine = subprocess.Popen(
                 [sys.executable, str(seeded_engine), "--no-recording"],
                 cwd=workspace,

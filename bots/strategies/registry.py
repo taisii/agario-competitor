@@ -74,6 +74,7 @@ def _spec(
 _COMMON_SUBMISSION_MODULES = (
     "bots/strategies/base.py",
     "bots/simulation/rules.py",
+    "bots/strategies/world_transition.py",
 )
 
 
@@ -81,6 +82,7 @@ def _submission(
     strategy_class: str,
     *source_modules: str,
     local_only_classes: frozenset[str] = frozenset(),
+    after_features_modules: tuple[str, ...] = (),
 ) -> SubmissionBundleSpec:
     return SubmissionBundleSpec(
         strategy_class=strategy_class,
@@ -88,6 +90,7 @@ def _submission(
             *_COMMON_SUBMISSION_MODULES,
             *source_modules,
             "bots/strategies/features.py",
+            *after_features_modules,
         ),
         local_only_classes=local_only_classes,
     )
@@ -108,9 +111,59 @@ _BUILT_IN_SPECS = (
         ),
     ),
     _spec(
+        "expected_final_mass",
+        "strategies.expected_final_mass:ExpectedFinalMassStrategy",
+        "search",
+        submission=_submission(
+            "ExpectedFinalMassStrategy",
+            "bots/strategies/randomness.py",
+            "bots/strategies/replay_imitation.py",
+            "bots/strategies/replay_profiles.py",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/expected_final_mass.py",
+        ),
+    ),
+    _spec(
+        "local_tactical_search",
+        "strategies.local_tactical_search:LocalTacticalSearchStrategy",
+        "search",
+        submission=_submission(
+            "LocalTacticalSearchStrategy",
+            "bots/strategies/randomness.py",
+            "bots/strategies/replay_imitation.py",
+            "bots/strategies/replay_profiles.py",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/expected_final_mass.py",
+            "bots/strategies/local_tactical_search.py",
+        ),
+    ),
+    _spec(
+        "local_tactical_search_reference",
+        "strategies.local_tactical_search:LocalTacticalSearchReferenceStrategy",
+        "reference",
+    ),
+    _spec(
         "potential_field_hunter",
         "strategies.potential_field:PotentialFieldHunterStrategy",
         "potential_field",
+    ),
+    _spec(
+        "potential_tactical_hybrid",
+        "strategies.potential_tactical_hybrid:PotentialTacticalHybridStrategy",
+        "search",
+        submission=_submission(
+            "PotentialTacticalHybridStrategy",
+            "bots/strategies/randomness.py",
+            "bots/strategies/replay_imitation.py",
+            "bots/strategies/replay_profiles.py",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/expected_final_mass.py",
+            "bots/strategies/local_tactical_search.py",
+            after_features_modules=(
+                "bots/strategies/potential_field.py",
+                "bots/strategies/potential_tactical_hybrid.py",
+            ),
+        ),
     ),
     _spec(
         "potential_field_virus_farmer",
@@ -175,9 +228,7 @@ _BUILT_IN_SPECS = (
     ),
 )
 
-STRATEGY_SPECS: dict[str, StrategySpec] = {
-    spec.name: spec for spec in _BUILT_IN_SPECS
-}
+STRATEGY_SPECS: dict[str, StrategySpec] = {spec.name: spec for spec in _BUILT_IN_SPECS}
 
 # Old commands remain valid, but aliases are intentionally excluded from the
 # public strategy list so every behavior appears exactly once.

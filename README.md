@@ -35,10 +35,12 @@ uv run interactive 7:bots/my_bot.py
 This template installs the published `agario-kit` package from PyPI. The local
 interactive launcher expects `count:path` specs whose counts sum to `n - 1`.
 For the current 8-player game, that means the counts must sum to `7`.
-The lockfile currently resolves `agario-kit==2026.1.14`. This is the engine
-version used by the official match reports. It keeps the 2026.1.13 virus and
-arena-clamping rules, and additionally exposes food, virus, and opponent-blob
-IDs as per-query public identifiers rather than stable private engine IDs.
+The lockfile currently resolves `agario-kit==2026.1.14`. In that release, a
+consumable virus is hit only when its center lies inside the blob radius, and
+food/player growth is clamped back into the arena in the same round.
+Visible food, virus, and opponent blob indices are rebuilt from zero for each
+public query. They identify records only inside that observation; strategies
+must use geometry or their own internal IDs for tracking across turns.
 
 To play manually against example bots instead, run:
 
@@ -168,6 +170,8 @@ Strategy implementations are grouped by their fundamental algorithm:
   strategies.
 - `bots/strategies/replay_imitation.py`: replay-fitted opponent behavior; it
   needs a validated profile before it can be registered in the opponent catalog.
+- `bots/strategies/local_tactical_search.py`: shallow two-step local planning
+  with rational nearby-opponent responses and reversal-only steering cost.
 
 Available local strategy entry points:
 
@@ -179,6 +183,9 @@ Available local strategy entry points:
 - `bots/entries/threat_aware_receding_horizon.py`: robust adversarial prediction with engine-matched split physics.
 - `bots/entries/threat_aware_receding_horizon_reference.py`: deliberately expensive reference profile of the same strategy.
 - `bots/entries/replay_dominance.py`: default unified search policy for survival, virus growth, wall mobility, and rival elimination.
+- `bots/entries/expected_final_mass.py`: expected-final-mass search that evaluates proposals from strong official-replay policies instead of protecting ordinal rank.
+- `bots/entries/local_tactical_search.py`: submission-safe local tactical search; validates the DP-ranked roots with exact engine physics.
+- `bots/entries/local_tactical_search_reference.py`: correctness-first wide local planner used as an optimisation oracle; not submission-safe.
 - `bots/entries/random_opponent.py`: picks one stable strategy at process startup.
 
 Example mixed match:

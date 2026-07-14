@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 
-from scripts import run_seeded_engine
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from scripts import run_fast_simulation, run_seeded_engine
 
 
 class _Result:
@@ -51,3 +57,40 @@ def test_results_only_engine_omits_large_recording_files(
     assert (output / "response_timings.json").read_text() == '{\n  "0": 1.25\n}\n'
     assert not (output / "game.json").exists()
     assert not (output / "visualiser_forwards_differential.json").exists()
+
+
+def test_local_reference_timeout_override_is_explicit(monkeypatch) -> None:
+    monkeypatch.setenv("AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS", "60")
+    monkeypatch.setattr(
+        run_seeded_engine.player_connection,
+        "CUMULATIVE_TIMEOUT_SECONDS",
+        8,
+    )
+
+    run_seeded_engine.configure_local_cumulative_timeout()
+
+    assert run_seeded_engine.player_connection.CUMULATIVE_TIMEOUT_SECONDS == 60.0
+
+
+def test_fast_runner_forwards_local_timeout_override() -> None:
+    env = {"PATH": "/bin"}
+
+    run_fast_simulation.forward_engine_overrides(
+        env,
+        {
+            "AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS": "60",
+            "AGARIO_LOCAL_TURN_TIMEOUT_SECONDS": "10",
+        },
+    )
+
+    assert env["AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS"] == "60"
+    assert env["AGARIO_LOCAL_TURN_TIMEOUT_SECONDS"] == "10"
+
+
+def test_local_turn_timeout_override_is_explicit(monkeypatch) -> None:
+    monkeypatch.setenv("AGARIO_LOCAL_TURN_TIMEOUT_SECONDS", "10")
+    monkeypatch.setattr(run_seeded_engine.player_connection, "TIMEOUT_SECONDS", 1)
+
+    run_seeded_engine.configure_local_turn_timeout()
+
+    assert run_seeded_engine.player_connection.TIMEOUT_SECONDS == 10
