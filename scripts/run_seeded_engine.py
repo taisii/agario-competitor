@@ -9,6 +9,7 @@ from pathlib import Path
 
 from engine.config.io_config import CORE_DIRECTORY
 from engine.game_engine import GameEngine
+from engine.interface.io import player_connection
 from engine.interface.logging.event_inspector import EventInspector
 
 
@@ -38,8 +39,40 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def configure_local_cumulative_timeout() -> None:
+    """Optionally raise the timeout for correctness-first local benchmarks.
+
+    Official-format verification leaves this variable unset and therefore
+    uses the kit's authoritative eight-second limit.  The override exists only
+    so a deliberately slow reference planner can provide an optimisation
+    oracle before its choices are reproduced by a submission-safe planner.
+    """
+
+    raw_timeout = os.environ.get("AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS")
+    if raw_timeout is None:
+        return
+    timeout = float(raw_timeout)
+    if timeout <= 0.0:
+        raise ValueError("AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS must be positive")
+    player_connection.CUMULATIVE_TIMEOUT_SECONDS = timeout
+
+
+def configure_local_turn_timeout() -> None:
+    """Optionally raise the per-query timeout for behavior-only replays."""
+
+    raw_timeout = os.environ.get("AGARIO_LOCAL_TURN_TIMEOUT_SECONDS")
+    if raw_timeout is None:
+        return
+    timeout = int(raw_timeout)
+    if timeout <= 0:
+        raise ValueError("AGARIO_LOCAL_TURN_TIMEOUT_SECONDS must be positive")
+    player_connection.TIMEOUT_SECONDS = timeout
+
+
 def main() -> None:
     args = parse_args()
+    configure_local_cumulative_timeout()
+    configure_local_turn_timeout()
     random.seed(int(os.environ.get("AGARIO_ENGINE_RANDOM_SEED", "0")))
     engine_type = ResultsOnlyGameEngine if args.no_recording else GameEngine
     engine_type().start()

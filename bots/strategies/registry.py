@@ -96,6 +96,38 @@ def _submission(
 _BUILT_IN_SPECS = (
     _spec("food_greedy", "strategies.greedy:FoodGreedyStrategy", "baseline"),
     _spec(
+        "expected_final_mass",
+        "strategies.expected_final_mass:ExpectedFinalMassStrategy",
+        "search",
+        submission=_submission(
+            "ExpectedFinalMassStrategy",
+            "bots/strategies/randomness.py",
+            "bots/strategies/replay_imitation.py",
+            "bots/strategies/replay_profiles.py",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/expected_final_mass.py",
+        ),
+    ),
+    _spec(
+        "local_tactical_search",
+        "strategies.local_tactical_search:LocalTacticalSearchStrategy",
+        "search",
+        submission=_submission(
+            "LocalTacticalSearchStrategy",
+            "bots/strategies/randomness.py",
+            "bots/strategies/replay_imitation.py",
+            "bots/strategies/replay_profiles.py",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/expected_final_mass.py",
+            "bots/strategies/local_tactical_search.py",
+        ),
+    ),
+    _spec(
+        "local_tactical_search_reference",
+        "strategies.local_tactical_search:LocalTacticalSearchReferenceStrategy",
+        "reference",
+    ),
+    _spec(
         "potential_field_hunter",
         "strategies.potential_field:PotentialFieldHunterStrategy",
         "potential_field",

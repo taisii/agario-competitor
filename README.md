@@ -167,6 +167,8 @@ Strategy implementations are grouped by their fundamental algorithm:
   strategies.
 - `bots/strategies/replay_imitation.py`: replay-fitted opponent behavior; it
   needs a validated profile before it can be registered in the opponent catalog.
+- `bots/strategies/local_tactical_search.py`: shallow two-step local planning
+  with rational nearby-opponent responses and reversal-only steering cost.
 
 Available local strategy entry points:
 
@@ -178,6 +180,9 @@ Available local strategy entry points:
 - `bots/entries/threat_aware_receding_horizon.py`: robust adversarial prediction with engine-matched split physics.
 - `bots/entries/threat_aware_receding_horizon_reference.py`: deliberately expensive reference profile of the same strategy.
 - `bots/entries/replay_dominance.py`: default unified search policy for survival, virus growth, wall mobility, and rival elimination.
+- `bots/entries/expected_final_mass.py`: expected-final-mass search that evaluates proposals from strong official-replay policies instead of protecting ordinal rank.
+- `bots/entries/local_tactical_search.py`: submission-safe local tactical search; validates the DP-ranked roots with exact engine physics.
+- `bots/entries/local_tactical_search_reference.py`: correctness-first wide local planner used as an optimisation oracle; not submission-safe.
 - `bots/entries/random_opponent.py`: picks one stable strategy at process startup.
 
 Example mixed match:

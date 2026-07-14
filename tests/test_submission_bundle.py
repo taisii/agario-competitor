@@ -122,6 +122,28 @@ def test_replay_dominance_submission_preserves_local_import_aliases() -> None:
     )
 
 
+def test_expected_final_mass_submission_contains_replay_experts_and_is_self_contained() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, digest = build_submission(
+            Path(directory) / "expected_final_mass.py",
+            strategy_name="expected_final_mass",
+        )
+        source = output.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+    assert len(digest) == 64
+    assert "class ExpectedFinalMassStrategy(ReplayDominanceStrategy)" in source
+    assert "strategy = ExpectedFinalMassStrategy()" in source
+    assert "PROFILES = {" in source
+    assert source.count('if __name__ == "__main__":') == 1
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert node.module.split(".", 1)[0] not in {
+                "strategies",
+                "telemetry",
+            }
+
+
 def test_censored_predator_track_advances_toward_vulnerable_blob() -> None:
     strategy = ThreatAwareRecedingHorizonStrategy(depth=1, width=1, angular_samples=4)
     strategy.enemy_tracks[(1, 0)] = EnemyTrack(

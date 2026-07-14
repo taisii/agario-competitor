@@ -1078,7 +1078,10 @@ class ThreatAwareRecedingHorizonStrategy:
                 continue
             danger_radius = enemy.radius
             if _can_split_eat(enemy.radius, candidate_radius):
-                danger_radius = max(danger_radius, _split_attack_reach(enemy.radius))
+                danger_radius = max(
+                    danger_radius,
+                    _split_chain_attack_reach(enemy.radius, candidate_radius),
+                )
             threat_margins.append(math.dist(own.pos, enemy.pos) - danger_radius)
 
         center_distance = math.dist(center, enemy.pos)
@@ -2531,7 +2534,8 @@ class ThreatAwareRecedingHorizonStrategy:
                 danger_radius = enemy.radius
                 if _can_split_eat(enemy.radius, own.radius):
                     danger_radius = max(
-                        danger_radius, _split_attack_reach(enemy.radius)
+                        danger_radius,
+                        _split_chain_attack_reach(enemy.radius, own.radius),
                     )
                 split_margin = distance - danger_radius
                 margin = min(normal_margin, split_margin)
@@ -2672,7 +2676,8 @@ class ThreatAwareRecedingHorizonStrategy:
                 danger_radius = enemy.radius
                 if _can_split_eat(enemy.radius, own.radius):
                     danger_radius = max(
-                        danger_radius, _split_attack_reach(enemy.radius)
+                        danger_radius,
+                        _split_chain_attack_reach(enemy.radius, own.radius),
                     )
                 distance = math.dist(own.pos, enemy.pos)
                 if distance > danger_radius + 8.0:
@@ -2992,6 +2997,29 @@ def _split_attack_reach(predator_radius: float) -> float:
 
     child_radius = predator_radius / SQRT2
     return 3.0 * child_radius + SPLIT_EJECT_SPEED + player_speed(child_radius)
+
+
+def _split_chain_attack_reach(
+    predator_radius: float,
+    prey_radius: float,
+    *,
+    max_splits: int = MAX_BLOB_COUNT.bit_length() - 1,
+) -> float:
+    """Return the farthest center reach of one repeatedly splitting lineage."""
+
+    attacker_radius = predator_radius
+    forward_center_offset = 0.0
+    reach = predator_radius
+    for _ in range(max(0, max_splits)):
+        if not _can_split_eat(attacker_radius, prey_radius):
+            break
+        child_radius = attacker_radius / SQRT2
+        forward_center_offset += (
+            2.0 * child_radius + SPLIT_EJECT_SPEED + player_speed(child_radius)
+        )
+        reach = max(reach, forward_center_offset + child_radius)
+        attacker_radius = child_radius
+    return reach
 
 
 def _damped(value: float) -> float:
@@ -6549,9 +6577,9 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         arena_size: float,
     ) -> float:
         profile_started = self._profile_start()
-        # Retention depends on the pop mass, not on which same-radius virus
-        # caused it. Competition viruses share one radius, so reuse the result.
-        cache_key = (id(node), origin.blob_id, virus.radius)
+        # Contact position and travel time change which predators can sweep the
+        # fragments, so equal-radius viruses are not interchangeable.
+        cache_key = (id(node), origin.blob_id, virus.virus_id)
         cached = self._virus_retention_cache.get(cache_key)
         if cached is not None and cached[0] is node:
             self._record_profile_count("virus_retention_hit")
@@ -6647,7 +6675,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                 if _can_split_eat(enemy.radius, own.radius):
                     danger_radius = max(
                         danger_radius,
-                        _split_attack_reach(enemy.radius),
+                        _split_chain_attack_reach(enemy.radius, own.radius),
                     )
                 raw_margin = math.dist(own.pos, enemy.pos) - danger_radius
                 min_margin = min(min_margin, raw_margin)
@@ -6729,20 +6757,71 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         prey, or escape without switching modes.
         """
         piece_count = max(1, MAX_BLOB_COUNT - len(own_blobs) + 1)
-        total_mass = origin.mass + virus.radius * virus.radius
+        center_distance = math.dist(origin.pos, virus.pos)
+        contact_gap = max(0.0, center_distance - origin.radius)
+        turns_to_contact = math.ceil(
+            contact_gap / max(player_speed(origin.radius), EPSILON)
+        )
+        contact_direction = normalise(
+            (virus.pos[0] - origin.x, virus.pos[1] - origin.y)
+        )
+        contact_x = _clamp(
+            origin.x + contact_direction[0] * contact_gap,
+            origin.radius,
+            arena_size - origin.radius,
+        )
+        contact_y = _clamp(
+            origin.y + contact_direction[1] * contact_gap,
+            origin.radius,
+            arena_size - origin.radius,
+        )
+        projected_origin_mass = decayed_mass_after_turns(
+            origin.mass,
+            turns_to_contact,
+            decay_rate=MASS_DECAY_RATE,
+            minimum_radius=STARTING_RADIUS,
+        )
+        total_mass = projected_origin_mass + virus.radius * virus.radius
         piece_radius = math.sqrt(total_mass / piece_count)
         post_radii = [piece_radius]
         post_radii.extend(
             blob.radius for blob in own_blobs if blob.blob_id != origin.blob_id
         )
         enemy_tuple = enemies if isinstance(enemies, tuple) else tuple(enemies)
+        merge_horizon = max(8, min(turns_to_contact, 16))
         risk_enemies = tuple(
             enemy
-            for enemy in self._risk_enemies(enemy_tuple)
+            for enemy in (
+                *enemy_tuple,
+                *self._future_enemy_envelopes(
+                    enemy_tuple,
+                    horizon=merge_horizon,
+                ),
+            )
             if any(can_eat_player_blob(enemy.radius, radius) for radius in post_radii)
         )
         if not risk_enemies:
             return 1.0
+        pursuit_turns = min(turns_to_contact, 12)
+        projected_risk_enemies: list[EnemyBlob] = []
+        for enemy in risk_enemies:
+            pursuit = normalise((contact_x - enemy.x, contact_y - enemy.y))
+            travel = pursuit_turns * player_speed(enemy.radius)
+            projected_risk_enemies.append(
+                replace(
+                    enemy,
+                    x=_clamp(
+                        enemy.x + pursuit[0] * travel,
+                        enemy.radius,
+                        arena_size - enemy.radius,
+                    ),
+                    y=_clamp(
+                        enemy.y + pursuit[1] * travel,
+                        enemy.radius,
+                        arena_size - enemy.radius,
+                    ),
+                )
+            )
         layout_key = (piece_radius, piece_count)
         offsets = self._virus_fragment_layout_cache.get(layout_key)
         self._record_cache_access("virus_layout", hit=offsets is not None)
@@ -6763,12 +6842,12 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         post_blobs.extend(
             (
                 _clamp(
-                    origin.x + offset_x,
+                    contact_x + offset_x,
                     piece_radius,
                     arena_size - piece_radius,
                 ),
                 _clamp(
-                    origin.y + offset_y,
+                    contact_y + offset_y,
                     piece_radius,
                     arena_size - piece_radius,
                 ),
@@ -6783,26 +6862,28 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         retained_mass = 0.0
         for blob_x, blob_y, blob_radius, blob_mass in post_blobs:
             retention = 1.0
-            for enemy in risk_enemies:
+            for enemy in projected_risk_enemies:
                 if not can_eat_player_blob(enemy.radius, blob_radius):
                     continue
-                danger_radius = enemy.radius
+                center_distance = math.hypot(blob_x - enemy.x, blob_y - enemy.y)
+                immediate_radius = enemy.radius
+                chain_radius = enemy.radius
                 if _can_split_eat(enemy.radius, blob_radius):
-                    danger_radius = max(
-                        danger_radius,
+                    immediate_radius = max(
+                        immediate_radius,
                         _split_attack_reach(enemy.radius),
                     )
-                margin = (
-                    math.hypot(blob_x - enemy.x, blob_y - enemy.y)
-                    - danger_radius
-                    - enemy.stale_rounds * 0.35
+                    chain_radius = max(
+                        chain_radius,
+                        _split_chain_attack_reach(enemy.radius, blob_radius),
+                    )
+                uncertainty_distance = enemy.stale_rounds * 0.35
+                immediate_margin = (
+                    center_distance - immediate_radius - uncertainty_distance
                 )
-                if margin <= 0.0:
+                if immediate_margin <= 0.0:
                     retention = 0.0
                     break
-                pressure = _clamp((8.0 - margin) / 8.0, 0.0, 1.0)
-                if pressure <= 0.0:
-                    continue
                 wall_trap = self._wall_trap_factor_at(
                     blob_x,
                     blob_y,
@@ -6810,6 +6891,21 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                     enemy,
                     arena_size,
                 )
+                chain_margin = center_distance - chain_radius - uncertainty_distance
+                if chain_margin <= 0.0 and chain_radius > immediate_radius:
+                    chain_pressure = _clamp(
+                        -chain_margin / (chain_radius - immediate_radius),
+                        0.0,
+                        1.0,
+                    )
+                    predator_retention = 1.0 - chain_pressure * (
+                        0.65 + 0.35 * wall_trap
+                    )
+                    retention = min(retention, predator_retention)
+                    continue
+                pressure = _clamp((8.0 - chain_margin) / 8.0, 0.0, 1.0)
+                if pressure <= 0.0:
+                    continue
                 predator_retention = 1.0 - pressure * (0.55 + 0.45 * wall_trap)
                 retention = min(retention, predator_retention)
             retained_mass += blob_mass * retention

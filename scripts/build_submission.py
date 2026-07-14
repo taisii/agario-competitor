@@ -23,8 +23,12 @@ LOCAL_IMPORTS = {
     "strategies.base",
     "strategies.features",
     "strategies.greedy",
+    "strategies.expected_final_mass",
     "strategies.potential_field",
     "strategies.receding_horizon",
+    "strategies.replay_imitation",
+    "strategies.replay_profiles",
+    "strategies.randomness",
 }
 
 HEADER = '''from __future__ import annotations
@@ -67,16 +71,16 @@ def _without_local_imports(
     omitted_lines: set[int] = set()
     replacement_lines: dict[int, str] = {}
 
-    for node in tree.body:
-        omit = (
+    # Local imports can appear inside a factory as well as at module scope.
+    # Every bundled module shares one generated namespace, so remove all of
+    # them while preserving explicit aliases used by the flattened source.
+    for node in ast.walk(tree):
+        if not (
             isinstance(node, ast.ImportFrom)
             and (node.module == "__future__" or node.module in LOCAL_IMPORTS)
-        ) or (
-            isinstance(node, ast.ClassDef) and node.name in local_only_classes
-        )
-        if not omit:
+        ):
             continue
-        if isinstance(node, ast.ImportFrom) and node.module in LOCAL_IMPORTS:
+        if node.module in LOCAL_IMPORTS:
             aliases = [
                 f"{alias.asname} = {alias.name}\n"
                 for alias in node.names
@@ -84,6 +88,11 @@ def _without_local_imports(
             ]
             if aliases:
                 replacement_lines[node.lineno] = "".join(aliases)
+        omitted_lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+
+    for node in tree.body:
+        if not (isinstance(node, ast.ClassDef) and node.name in local_only_classes):
+            continue
         omitted_lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
 
     return "".join(
