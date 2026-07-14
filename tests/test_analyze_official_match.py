@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from scripts.analyze_official_match import analyze
@@ -99,3 +100,45 @@ def test_analyze_compares_capture_intent_and_outcome(tmp_path: Path) -> None:
     assert by_player[1]["food"] == 2
     assert by_player[1]["viruses"] == 1
     assert by_player[0]["death_rounds"] == [0]
+
+
+def test_analyze_incomplete_match_reports_formation_without_a_winner(
+    tmp_path: Path,
+) -> None:
+    player = _player(0, 73, 10.0, 1.0)
+    fragmented_blobs = [
+        {
+            "blob_id": blob_id,
+            "pos": [x, 10.0],
+            "radius": 1.0,
+            "merge_cooldown": 5,
+        }
+        for blob_id, x in enumerate((10.0, 12.0))
+    ]
+    events = [
+        {
+            "event_type": "event_game_started",
+            "arena_size": 60.0,
+            "vision_size": 20.0,
+            "max_rounds": 1,
+            "players": [player],
+        },
+        {
+            "event_type": "event_player_moved",
+            "player_id": 0,
+            "alive": True,
+            "blobs": fragmented_blobs,
+        },
+    ]
+    replay = tmp_path / "match-2-replay.json"
+    replay.write_text(json.dumps(events))
+
+    result = analyze(replay)
+    metrics = result["players"][0]
+
+    assert result["winner_player_id"] is None
+    assert result["winner_team_id"] is None
+    assert metrics["final_blob_count"] == 2
+    assert metrics["fragmented_fraction"] == 1.0
+    assert math.isclose(metrics["final_extent_ratio"], math.sqrt(2.0))
+    assert metrics["final_largest_blob_mass_share"] == 0.5

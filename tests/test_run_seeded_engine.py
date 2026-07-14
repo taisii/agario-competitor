@@ -31,6 +31,11 @@ def test_results_only_engine_omits_large_recording_files(
         private_event_history=["event"],
         get_rankings=lambda: [0],
         get_final_masses=lambda: {0: 1.0},
+        players={
+            0: SimpleNamespace(
+                connection=SimpleNamespace(_cumulative_time=1.25),
+            )
+        },
     )
     engine = run_seeded_engine.ResultsOnlyGameEngine.__new__(
         run_seeded_engine.ResultsOnlyGameEngine
@@ -43,5 +48,6 @@ def test_results_only_engine_omits_large_recording_files(
 
     output = tmp_path / "output"
     assert (output / "results.json").read_text() == '{"result_type":"SUCCESS"}'
+    assert (output / "response_timings.json").read_text() == '{\n  "0": 1.25\n}\n'
     assert not (output / "game.json").exists()
     assert not (output / "visualiser_forwards_differential.json").exists()

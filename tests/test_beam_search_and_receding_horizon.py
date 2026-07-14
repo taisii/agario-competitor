@@ -14,7 +14,6 @@ from strategies.receding_horizon import (  # noqa: E402
     ReplayDominanceStrategy,
     ThreatAwareRecedingHorizonStrategy,
     EnemyBlob,
-    EnemyTrack,
     OwnBlob,
     SearchNode as RecedingHorizonSearchNode,
     _split_attack_reach,
@@ -23,7 +22,7 @@ from lib.models.food_model import FoodModel  # noqa: E402
 from lib.models.virus_model import VirusModel  # noqa: E402
 from lib.models.blob_model import BlobModel, VisibleBlobModel  # noqa: E402
 from strategies.base import StrategyContext  # noqa: E402
-from strategies.features import can_eat_player_blob, player_speed  # noqa: E402
+from strategies.features import player_speed  # noqa: E402
 
 
 def test_threat_aware_receding_horizon_split_matches_engine_geometry() -> None:
@@ -41,44 +40,6 @@ def test_threat_aware_receding_horizon_split_matches_engine_geometry() -> None:
     assert math.isclose(split[1].x, 10.0 + 2.0 * math.sqrt(2.0) + 1e-4)
     assert math.isclose(split[1].eject_vx, 1.6)
     assert split[0].merge_cooldown == split[1].merge_cooldown == 18
-
-
-def test_enemy_memory_retains_threat_to_only_the_small_fragment() -> None:
-    strategy = ThreatAwareRecedingHorizonStrategy(
-        depth=1,
-        width=1,
-        angular_samples=4,
-    )
-    own_blobs = (
-        OwnBlob(blob_id=0, x=10.0, y=10.0, radius=3.0),
-        OwnBlob(blob_id=1, x=12.0, y=10.0, radius=1.0),
-    )
-    strategy.enemy_tracks[(1, 0)] = EnemyTrack(
-        player_id=1,
-        blob_id=0,
-        x=40.0,
-        y=40.0,
-        radius=1.2,
-        direction=(0.0, 0.0),
-        last_seen_round=9,
-    )
-    state = SimpleNamespace(
-        round=10,
-        visible_blobs=(),
-        view_center=(10.0, 10.0),
-        vision_size=20.0,
-    )
-
-    enemies = strategy._update_enemy_memory(
-        SimpleNamespace(game=SimpleNamespace(state=state)),
-        own_blobs,
-        60.0,
-    )
-
-    assert len(enemies) == 1
-    assert enemies[0].player_id == 1
-    assert can_eat_player_blob(enemies[0].radius, own_blobs[1].radius)
-    assert not can_eat_player_blob(enemies[0].radius, own_blobs[0].radius)
 
 
 def test_replay_utility_cache_reuses_the_same_physical_state() -> None:

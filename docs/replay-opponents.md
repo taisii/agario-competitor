@@ -20,9 +20,10 @@ logic have a `bots/strategies/replay_team_<id>.py` module.
 
 The shared fitter and visibility reconstruction live in
 `scripts/replay_imitation.py` and `bots/strategies/replay_imitation.py`. They
-rebuild each bot's `QueryMovePlayer` view using the official 2026.1.13 engine
+rebuild each bot's `QueryMovePlayer` view using the official 2026.1.14 engine
 rules: dynamic vision size, wall-clamped view center, square point visibility,
-circle visibility, food/virus lifecycle, player blobs, and mass rankings.
+circle visibility, per-query public IDs, food/virus lifecycle, player blobs,
+and mass rankings.
 
 ## Run a local panel
 

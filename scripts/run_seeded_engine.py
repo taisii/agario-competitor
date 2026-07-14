@@ -3,12 +3,14 @@ from __future__ import annotations
 """Start the installed engine with a reproducible arena random stream."""
 
 import argparse
+import json
 import os
 import random
 from pathlib import Path
 
 from engine.config.io_config import CORE_DIRECTORY
 from engine.game_engine import GameEngine
+from engine.interface.io import player_connection
 from engine.interface.logging.event_inspector import EventInspector
 
 
@@ -25,6 +27,17 @@ class ResultsOnlyGameEngine(GameEngine):
         output = Path(CORE_DIRECTORY) / "output"
         output.mkdir(parents=True, exist_ok=True)
         (output / "results.json").write_text(result.model_dump_json())
+        # The official cumulative timeout measures the complete query/response
+        # wall time, not only time spent inside Strategy.choose().  The engine
+        # does not expose this counter publicly, so the local diagnostic runner
+        # records the authoritative PlayerConnection value alongside results.
+        response_seconds = {
+            str(player_id): player.connection._cumulative_time
+            for player_id, player in self.state.players.items()
+        }
+        (output / "response_timings.json").write_text(
+            json.dumps(response_seconds, indent=2, sort_keys=True) + "\n"
+        )
         print(f"[engine]: match complete, outcome was {{{result}}}", flush=True)
 
 
@@ -41,6 +54,17 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     random.seed(int(os.environ.get("AGARIO_ENGINE_RANDOM_SEED", "0")))
+    cumulative_timeout = os.environ.get(
+        "AGARIO_ENGINE_CUMULATIVE_TIMEOUT_SECONDS"
+    )
+    if cumulative_timeout is not None:
+        player_connection.CUMULATIVE_TIMEOUT_SECONDS = max(
+            0.001,
+            float(cumulative_timeout),
+        )
+    query_timeout = os.environ.get("AGARIO_ENGINE_QUERY_TIMEOUT_SECONDS")
+    if query_timeout is not None:
+        player_connection.TIMEOUT_SECONDS = max(1, int(query_timeout))
     engine_type = ResultsOnlyGameEngine if args.no_recording else GameEngine
     engine_type().start()
 

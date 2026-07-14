@@ -77,6 +77,15 @@ class Metrics:
     late_prey_approaches: int = 0
     late_prey_split_attempts: int = 0
     rounds_alive: int = 0
+    final_blob_count: int = 0
+    max_blob_count: int = 0
+    fragmented_rounds: int = 0
+    fragmented_fraction: float = 0.0
+    final_extent_ratio: float = 0.0
+    mean_fragmented_extent_ratio: float = 0.0
+    max_extent_ratio: float = 0.0
+    final_largest_blob_mass_share: float = 0.0
+    mean_fragmented_largest_blob_mass_share: float = 0.0
 
 
 def _unit(x: float, y: float) -> tuple[float, float]:
@@ -112,6 +121,22 @@ def _center(player: Player) -> tuple[float, float]:
     return (
         sum(blob.x * blob.mass for blob in player.blobs.values()) / mass,
         sum(blob.y * blob.mass for blob in player.blobs.values()) / mass,
+    )
+
+
+def _formation_shape(player: Player) -> tuple[float, float]:
+    """Return footprint/equivalent-radius and largest-blob mass share."""
+    mass = player.mass
+    if mass <= 1e-9 or not player.blobs:
+        return (0.0, 0.0)
+    center = _center(player)
+    extent = max(
+        math.hypot(blob.x - center[0], blob.y - center[1]) + blob.radius
+        for blob in player.blobs.values()
+    )
+    return (
+        extent / math.sqrt(mass),
+        max(blob.mass for blob in player.blobs.values()) / mass,
     )
 
 
@@ -195,6 +220,8 @@ def analyze(path: Path) -> dict[str, object]:
         for player_id, team_id in team_by_player.items()
     }
     mass_history: dict[int, list[float]] = defaultdict(list)
+    blob_count_history: dict[int, list[int]] = defaultdict(list)
+    formation_history: dict[int, list[tuple[float, float]]] = defaultdict(list)
     prey_alignments: dict[int, list[float]] = defaultdict(list)
     previous_direction: dict[int, tuple[float, float]] = {}
     round_number = -1
@@ -268,6 +295,8 @@ def analyze(path: Path) -> dict[str, object]:
                     }
                 )
             history.append(updated.mass)
+            blob_count_history[player_id].append(len(updated.blobs))
+            formation_history[player_id].append(_formation_shape(updated))
             if updated.alive:
                 metrics[player_id].rounds_alive += 1
             elif prior_alive:
@@ -293,9 +322,12 @@ def analyze(path: Path) -> dict[str, object]:
             )
 
     winner_id = next(
-        int(event["player_id"])
-        for event in reversed(events)
-        if event["event_type"] == "event_player_won"
+        (
+            int(event["player_id"])
+            for event in reversed(events)
+            if event["event_type"] == "event_player_won"
+        ),
+        None,
     )
     for player_id, item in metrics.items():
         history = mass_history[player_id]
@@ -309,12 +341,35 @@ def analyze(path: Path) -> dict[str, object]:
         alignments = prey_alignments[player_id]
         if alignments:
             item.prey_alignment_mean = statistics.fmean(alignments)
+        blob_counts = blob_count_history[player_id]
+        shapes = formation_history[player_id]
+        if blob_counts:
+            item.final_blob_count = blob_counts[-1]
+            item.max_blob_count = max(blob_counts)
+            item.fragmented_rounds = sum(count > 1 for count in blob_counts)
+            item.fragmented_fraction = item.fragmented_rounds / len(blob_counts)
+        if shapes:
+            item.final_extent_ratio = shapes[-1][0]
+            item.final_largest_blob_mass_share = shapes[-1][1]
+            item.max_extent_ratio = max(extent for extent, _ in shapes)
+            fragmented_shapes = [
+                shape
+                for shape, count in zip(shapes, blob_counts, strict=True)
+                if count > 1
+            ]
+            if fragmented_shapes:
+                item.mean_fragmented_extent_ratio = statistics.fmean(
+                    extent for extent, _ in fragmented_shapes
+                )
+                item.mean_fragmented_largest_blob_mass_share = statistics.fmean(
+                    largest_share for _, largest_share in fragmented_shapes
+                )
 
     ranked = sorted(metrics.values(), key=lambda item: item.final_mass, reverse=True)
     return {
         "match_id": int(path.name.split("-")[1]),
         "winner_player_id": winner_id,
-        "winner_team_id": team_by_player[winner_id],
+        "winner_team_id": team_by_player[winner_id] if winner_id is not None else None,
         "players": [asdict(item) | {"final_rank": rank} for rank, item in enumerate(ranked, 1)],
     }
 

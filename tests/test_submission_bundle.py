@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-import math
 import sys
 import tempfile
 from pathlib import Path
@@ -14,13 +13,6 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "bots"))
 
 from scripts.build_submission import build_submission  # noqa: E402
-from strategies.base import StrategyContext  # noqa: E402
-from strategies.features import player_speed  # noqa: E402
-from strategies.receding_horizon import (  # noqa: E402
-    EnemyTrack,
-    OwnBlob,
-    ThreatAwareRecedingHorizonStrategy,
-)
 
 
 def test_submission_bundle_is_single_file_without_local_imports() -> None:
@@ -120,34 +112,3 @@ def test_replay_dominance_submission_preserves_local_import_aliases() -> None:
         1.5,
         eat_size_ratio=1.1,
     )
-
-
-def test_censored_predator_track_advances_toward_vulnerable_blob() -> None:
-    strategy = ThreatAwareRecedingHorizonStrategy(depth=1, width=1, angular_samples=4)
-    strategy.enemy_tracks[(1, 0)] = EnemyTrack(
-        player_id=1,
-        blob_id=0,
-        x=10.0,
-        y=10.0,
-        radius=2.0,
-        direction=(0.0, 0.0),
-        last_seen_round=1,
-    )
-    own = OwnBlob(blob_id=0, x=20.0, y=10.0, radius=1.0)
-    state = SimpleNamespace(
-        round=2,
-        visible_blobs=(),
-        view_center=(50.0, 50.0),
-        vision_size=8.0,
-    )
-    context = StrategyContext(
-        game=SimpleNamespace(state=state),
-        query=SimpleNamespace(update={}),
-    )
-
-    enemies = strategy._update_enemy_memory(context, (own,), arena_size=60.0)
-
-    assert len(enemies) == 1
-    assert math.isclose(enemies[0].x, 10.0 + player_speed(2.0))
-    assert enemies[0].direction == (1.0, 0.0)
-    assert enemies[0].stale_rounds == 1

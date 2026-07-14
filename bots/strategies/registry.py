@@ -96,6 +96,18 @@ def _submission(
 _BUILT_IN_SPECS = (
     _spec("food_greedy", "strategies.greedy:FoodGreedyStrategy", "baseline"),
     _spec(
+        "event_driven_static_search",
+        "strategies.event_driven:EventDrivenStaticSearchStrategy",
+        "search",
+        submission=_submission(
+            "EventDrivenStaticSearchStrategy",
+            "bots/strategies/greedy.py",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/event_driven.py",
+            local_only_classes=frozenset(),
+        ),
+    ),
+    _spec(
         "potential_field_hunter",
         "strategies.potential_field:PotentialFieldHunterStrategy",
         "potential_field",
@@ -112,6 +124,28 @@ _BUILT_IN_SPECS = (
         submission=_submission(
             "ReplayDominanceStrategy",
             "bots/strategies/receding_horizon.py",
+        ),
+    ),
+    _spec(
+        "static_retained_growth",
+        "strategies.retained_growth:StaticRetainedGrowthStrategy",
+        "potential_field",
+        submission=_submission(
+            "StaticRetainedGrowthStrategy",
+            "bots/strategies/retained_growth.py",
+        ),
+    ),
+    _spec(
+        "static_option_growth",
+        "strategies.virus_farming:StaticOptionGrowthStrategy",
+        "potential_field",
+        submission=_submission(
+            "StaticOptionGrowthStrategy",
+            "bots/strategies/greedy.py",
+            "bots/strategies/potential_field.py",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/virus_farming.py",
+            local_only_classes=frozenset({"ReplayDominanceStrategy"}),
         ),
     ),
     _spec("survival_greedy", "strategies.greedy:SurvivalGreedyStrategy", "baseline"),

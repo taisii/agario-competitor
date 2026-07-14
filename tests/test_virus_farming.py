@@ -15,7 +15,10 @@ from lib.models.blob_model import BlobModel, VisibleBlobModel  # noqa: E402
 from lib.models.food_model import FoodModel  # noqa: E402
 from lib.models.virus_model import VirusModel  # noqa: E402
 from strategies.base import StrategyContext  # noqa: E402
-from strategies.virus_farming import PotentialFieldVirusFarmerStrategy  # noqa: E402
+from strategies.virus_farming import (  # noqa: E402
+    PotentialFieldVirusFarmerStrategy,
+    StaticOptionGrowthStrategy,
+)
 from strategies.registry import create_strategy  # noqa: E402
 
 
@@ -316,6 +319,46 @@ def test_potential_field_virus_farmer_keeps_mass_target_latched_after_decay() ->
     assert decision.diagnostics["virus_unavailable_reason"] == (
         "mass_target_preservation"
     )
+
+
+def test_static_option_growth_keeps_safe_virus_above_mass_target() -> None:
+    own = BlobModel(blob_id=0, pos=(10.0, 10.0), radius=7.0)
+    virus = VirusModel(virus_id=7, pos=(18.0, 10.0), radius=1.5)
+
+    decision = StaticOptionGrowthStrategy().choose(
+        _context(_game((own,), viruses=(virus,)))
+    )
+
+    assert decision.target_kind == "virus"
+    assert decision.diagnostics["mass_target_latched"] is False
+    assert decision.diagnostics["mass_target_rejected_pairs"] == 0
+
+
+def test_static_option_growth_replans_instead_of_advancing_enemy_to_virus_contact() -> None:
+    own = BlobModel(blob_id=0, pos=(10.0, 10.0), radius=2.0)
+    virus = VirusModel(virus_id=7, pos=(18.0, 10.0), radius=1.5)
+    distant_fragment_predator = VisibleBlobModel(
+        player_id=1,
+        team_id=1,
+        blob_id=0,
+        pos=(30.0, 10.0),
+        radius=1.2,
+    )
+    game = _game(
+        (own,),
+        enemies=(distant_fragment_predator,),
+        viruses=(virus,),
+    )
+
+    conservative = PotentialFieldVirusFarmerStrategy().choose(_context(game))
+    one_step = StaticOptionGrowthStrategy().choose(_context(game))
+
+    assert conservative.target_kind != "virus"
+    assert conservative.diagnostics["virus_unavailable_reason"] == (
+        "post_split_predator_risk"
+    )
+    assert one_step.target_kind == "virus"
+    assert one_step.diagnostics["post_split_rejected_pairs"] == 0
 
 
 def test_potential_field_virus_farmer_is_registered() -> None:

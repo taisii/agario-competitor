@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,12 +30,10 @@ from simulation.rules import (  # noqa: E402
     movement_speed,
     virus_replacement_positions,
 )
-from strategies.base import StrategyContext  # noqa: E402
 from strategies.features import can_consume_virus as feature_can_consume_virus  # noqa: E402
 from strategies.potential_field import _speed as potential_field_speed  # noqa: E402
 from strategies.receding_horizon import (  # noqa: E402
     EnemyBlob,
-    EnemyTrack,
     OwnBlob,
     ThreatAwareRecedingHorizonStrategy,
 )
@@ -127,34 +124,6 @@ def test_projected_decay_matches_repeated_engine_rounds() -> None:
         authoritative.players[0].blobs[0].mass,
         rel_tol=1e-12,
     )
-
-
-def test_enemy_memory_keeps_blob_outside_vision_corner() -> None:
-    strategy = ThreatAwareRecedingHorizonStrategy(depth=1, width=1, angular_samples=4)
-    strategy.enemy_tracks[(1, 0)] = EnemyTrack(
-        player_id=1,
-        blob_id=0,
-        x=56.0,
-        y=56.0,
-        radius=1.0,
-        direction=(0.0, 0.0),
-        last_seen_round=1,
-    )
-    state = SimpleNamespace(
-        round=2,
-        visible_blobs=(),
-        view_center=(50.0, 50.0),
-        vision_size=10.0,
-    )
-    context = StrategyContext(game=SimpleNamespace(state=state), query=SimpleNamespace(update={}))
-
-    strategy._update_enemy_memory(
-        context,
-        (OwnBlob(blob_id=0, x=40.0, y=40.0, radius=2.0),),
-        arena_size=60.0,
-    )
-
-    assert (1, 0) in strategy.enemy_tracks
 
 
 def test_receding_virus_collision_does_not_split_self_when_enemy_is_larger() -> None:
