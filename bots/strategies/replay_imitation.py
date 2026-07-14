@@ -4,9 +4,9 @@ from __future__ import annotations
 
 The official recordings contain the private world state and every submitted
 move.  Profiles are fitted offline against bot-visible observations rebuilt
-with the 2026.1.13 engine visibility rules.  Runtime code deliberately stays
-small and standard-library-only so every inferred opponent can be used in the
-normal local simulator.
+with the 2026.1.14 engine visibility and public-ID rules. Runtime code
+deliberately stays small and standard-library-only so every inferred opponent
+can be used in the normal local simulator.
 """
 
 from dataclasses import dataclass

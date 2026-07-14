@@ -112,7 +112,10 @@ def test_replay_dominance_submission_preserves_local_import_aliases() -> None:
             sys.modules.pop(module_name, None)
         namespace = vars(module)
 
-    assert namespace["_feature_can_consume_virus"] is namespace["_replay_can_consume_virus"]
+    assert (
+        namespace["_feature_can_consume_virus"]
+        is namespace["_replay_can_consume_virus"]
+    )
     assert namespace["_replay_can_consume_virus"] is not namespace["can_consume_virus"]
     assert namespace["_replay_decayed_radius"] is namespace["decayed_radius"]
     assert namespace["_feature_movement_speed"] is namespace["movement_speed"]
@@ -238,7 +241,9 @@ module.PotentialTacticalHybridStrategy().choose(
     assert completed.returncode == 0, completed.stderr
 
 
-def test_expected_final_mass_submission_contains_replay_experts_and_is_self_contained() -> None:
+def test_expected_final_mass_submission_contains_replay_experts_and_is_self_contained() -> (
+    None
+):
     with tempfile.TemporaryDirectory() as directory:
         output, digest = build_submission(
             Path(directory) / "expected_final_mass.py",

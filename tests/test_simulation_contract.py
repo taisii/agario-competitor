@@ -83,12 +83,15 @@ def test_shared_physics_primitives_match_installed_engine() -> None:
     virus_radius = 1.5
 
     expected_speed = mutator._movement_speed(radius)
-    assert movement_speed(
-        radius,
-        base_speed=BASE_PLAYER_SPEED,
-        radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
-        minimum_speed=MIN_PLAYER_SPEED,
-    ) == expected_speed
+    assert (
+        movement_speed(
+            radius,
+            base_speed=BASE_PLAYER_SPEED,
+            radius_factor=PLAYER_SPEED_RADIUS_FACTOR,
+            minimum_speed=MIN_PLAYER_SPEED,
+        )
+        == expected_speed
+    )
     assert potential_field_speed(radius) == expected_speed
     assert VirusHunterStrategy()._speed(radius) == expected_speed
 
@@ -96,11 +99,14 @@ def test_shared_physics_primitives_match_installed_engine() -> None:
         authoritative.players[0].blobs[0],
         virus_radius,
     )
-    assert can_consume_virus(
-        radius,
-        virus_radius,
-        eat_size_ratio=EAT_SIZE_RATIO,
-    ) is expected_can_consume
+    assert (
+        can_consume_virus(
+            radius,
+            virus_radius,
+            eat_size_ratio=EAT_SIZE_RATIO,
+        )
+        is expected_can_consume
+    )
     assert feature_can_consume_virus(radius, virus_radius) is expected_can_consume
 
     positions = virus_replacement_positions(
@@ -148,7 +154,9 @@ def test_enemy_memory_keeps_blob_outside_vision_corner() -> None:
         view_center=(50.0, 50.0),
         vision_size=10.0,
     )
-    context = StrategyContext(game=SimpleNamespace(state=state), query=SimpleNamespace(update={}))
+    context = StrategyContext(
+        game=SimpleNamespace(state=state), query=SimpleNamespace(update={})
+    )
 
     strategy._update_enemy_memory(
         context,
@@ -228,7 +236,9 @@ def test_enemy_matching_maximises_cardinality_before_geometric_cost() -> None:
     assert matches == {0: (1, 11), 1: (1, 10)}
 
 
-def test_enemy_memory_uses_one_post_prediction_assignment_without_track_growth() -> None:
+def test_enemy_memory_uses_one_post_prediction_assignment_without_track_growth() -> (
+    None
+):
     strategy = ThreatAwareRecedingHorizonStrategy(depth=1, width=1, angular_samples=4)
     strategy.enemy_tracks = {
         (1, 10): EnemyTrack(1, 10, 14.0, 30.0, 1.0, (-1.0, 0.0), 10),
@@ -575,7 +585,9 @@ def test_independent_assigned_fragment_does_not_block_merge_retirement() -> None
     assert strategy.enemy_tracks[(1, 12)].radius == observations[1].radius
 
 
-def test_assigned_observations_inside_one_ready_component_block_merge_retirement() -> None:
+def test_assigned_observations_inside_one_ready_component_block_merge_retirement() -> (
+    None
+):
     strategy = ThreatAwareRecedingHorizonStrategy(depth=1, width=1, angular_samples=4)
     strategy.enemy_tracks = {
         (1, 10): EnemyTrack(1, 10, 13.43, 30.0, 0.9, (0.0, 0.0), 10, 0),

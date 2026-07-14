@@ -104,6 +104,8 @@ class VirusHunterStrategy:
         *,
         use_receding_horizon_growth: bool = True,
         growth_strategy: Strategy | None = None,
+        preserve_mass: bool = True,
+        one_step_safety: bool = False,
     ) -> None:
         self._survival = SurvivalGreedyStrategy(danger_margin=danger_margin)
         # The paired benchmark showed that rank/progress multipliers reduced
@@ -122,6 +124,8 @@ class VirusHunterStrategy:
             self._growth = self._survival
             self._growth_uses_receding_horizon = False
         self._last_direction = (1.0, 0.0)
+        self._preserve_mass = preserve_mass
+        self._one_step_safety = one_step_safety
         self._mass_target_reached = False
         self._mass_preservation_reason: str | None = None
 
@@ -136,7 +140,14 @@ class VirusHunterStrategy:
             rank_position = tuple(state.rankings).index(state.me.player_id) + 1
         except ValueError:
             rank_position = len(tuple(state.rankings)) + 1
-        if total_mass <= STARTING_RADIUS * STARTING_RADIUS * 1.05:
+        if not self._preserve_mass:
+            # Safe virus entry remains a growth option at every mass.  The
+            # post-fragment reachable-envelope check below still rejects
+            # immediate catastrophe; only the arbitrary phase threshold is
+            # removed.
+            self._mass_target_reached = False
+            self._mass_preservation_reason = None
+        elif total_mass <= STARTING_RADIUS * STARTING_RADIUS * 1.05:
             self._mass_target_reached = False
             self._mass_preservation_reason = None
         elif total_mass >= MASS_PRESERVATION_TARGET:
@@ -517,7 +528,7 @@ class VirusHunterStrategy:
     ) -> float:
         minimum = math.inf
         for blob in consumers:
-            turns = max(1, blob.merge_cooldown)
+            turns = 1 if self._one_step_safety else max(1, blob.merge_cooldown)
             projected_mass = self._mass_after_decay(blob.radius * blob.radius, turns)
             projected_radius = math.sqrt(projected_mass)
             x = min(
@@ -640,16 +651,20 @@ class VirusHunterStrategy:
             if not can_eat_player_blob(enemy.radius, piece_radius):
                 continue
             predator_count += 1
-            normal_reach = enemy.radius + self._speed(enemy.radius) * (
-                turns_to_contact + POST_SPLIT_REACTION_TURNS
+            threat_turns = (
+                1
+                if self._one_step_safety
+                else turns_to_contact + POST_SPLIT_REACTION_TURNS
             )
+            normal_reach = enemy.radius + self._speed(enemy.radius) * threat_turns
             attack_reach = normal_reach
             if (
                 enemy.radius * enemy.radius >= SPLIT_MIN_MASS
                 and can_eat_player_blob(enemy.radius / SQRT2, piece_radius)
             ):
+                approach_turns = 1 if self._one_step_safety else turns_to_contact
                 split_reach = (
-                    self._speed(enemy.radius) * turns_to_contact
+                    self._speed(enemy.radius) * approach_turns
                     + self._split_attack_reach(enemy.radius)
                     + POST_SPLIT_POSITION_UNCERTAINTY
                 )
@@ -750,14 +765,24 @@ class PotentialFieldVirusFarmerStrategy:
 
     name = "potential_field_virus_farmer"
 
-    def __init__(self, danger_margin: float = 3.0) -> None:
+    def __init__(
+        self,
+        danger_margin: float = 3.0,
+        *,
+        preserve_mass: bool = True,
+        one_step_safety: bool = False,
+        suppress_split_near_visible_virus: bool = True,
+    ) -> None:
         self._growth_policy = PotentialFieldHunterStrategy()
         # Inject the growth policy so VirusHunter can select it once and still
         # retain ownership of emergency escape and virus-safety decisions.
         self._virus_policy = VirusHunterStrategy(
             danger_margin=danger_margin,
             growth_strategy=self._growth_policy,
+            preserve_mass=preserve_mass,
+            one_step_safety=one_step_safety,
         )
+        self._suppress_split_near_visible_virus = suppress_split_near_visible_virus
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         state = context.game.state
@@ -793,7 +818,11 @@ class PotentialFieldVirusFarmerStrategy:
         ):
             allow_split = False
             split_suppressed_reason = "mass_target_preservation"
-        elif growth.split and unavailable_reason != "no_visible_virus":
+        elif (
+            growth.split
+            and self._suppress_split_near_visible_virus
+            and unavailable_reason != "no_visible_virus"
+        ):
             # Preserve the individually capable blob while a visible virus is
             # temporarily too risky or just below the mass threshold.
             allow_split = False
@@ -834,4 +863,24 @@ class PotentialFieldVirusFarmerStrategy:
                 **decision.diagnostics,
                 "potential_field_virus_farmer_mode": mode,
             },
+        )
+
+
+class StaticOptionGrowthStrategy(PotentialFieldVirusFarmerStrategy):
+    """One-step nominal growth with event-gated prey and virus options.
+
+    The continuous controller is a cheap potential field. Opponents are not
+    expanded into a response tree: prey uses current geometry and predator
+    handling uses a reachable safety envelope. Split and virus actions are
+    evaluated only when those discrete events are executable.
+    """
+
+    name = "static_option_growth"
+
+    def __init__(self, danger_margin: float = 3.0) -> None:
+        super().__init__(
+            danger_margin=danger_margin,
+            preserve_mass=False,
+            one_step_safety=True,
+            suppress_split_near_visible_virus=False,
         )

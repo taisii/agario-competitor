@@ -93,6 +93,7 @@ def test_strategy_and_replay_opponent_catalogs_have_distinct_public_names() -> N
     assert modules == CUSTOM_REPLAY_TEAM_IDS
     assert tuple(sorted(STRATEGY_SPECS)) == available_strategy_names()
     assert available_strategy_names() == (
+        "event_driven_static_search",
         "expected_final_mass",
         "food_greedy",
         "local_tactical_search",
@@ -101,6 +102,8 @@ def test_strategy_and_replay_opponent_catalogs_have_distinct_public_names() -> N
         "potential_field_virus_farmer",
         "potential_tactical_hybrid",
         "replay_dominance",
+        "static_option_growth",
+        "static_retained_growth",
         "survival_greedy",
         "threat_aware_receding_horizon",
         "virus_hunter",
@@ -113,10 +116,13 @@ def test_strategy_and_replay_opponent_catalogs_have_distinct_public_names() -> N
     }
     assert entry_team_ids == set(REPLAY_TEAM_IDS)
     assert submission_strategy_names() == (
+        "event_driven_static_search",
         "expected_final_mass",
         "local_tactical_search",
         "potential_tactical_hybrid",
         "replay_dominance",
+        "static_option_growth",
+        "static_retained_growth",
         "threat_aware_receding_horizon",
         "virus_hunter",
     )

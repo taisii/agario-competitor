@@ -35,12 +35,12 @@ uv run interactive 7:bots/my_bot.py
 This template installs the published `agario-kit` package from PyPI. The local
 interactive launcher expects `count:path` specs whose counts sum to `n - 1`.
 For the current 8-player game, that means the counts must sum to `7`.
-The lockfile currently resolves `agario-kit==2026.1.14`. In that release, a
-consumable virus is hit only when its center lies inside the blob radius, and
-food/player growth is clamped back into the arena in the same round.
-Visible food, virus, and opponent blob indices are rebuilt from zero for each
-public query. They identify records only inside that observation; strategies
-must use geometry or their own internal IDs for tracking across turns.
+The lockfile currently resolves `agario-kit==2026.1.14`, the engine version
+used by the official match reports. A virus is consumed only when its center
+lies inside a blob, and food/player growth is clamped back into the arena in
+the same round. Food, virus, and opponent-blob IDs are rebuilt for each public
+query, so strategies must use geometry and internal IDs for tracking across
+turns rather than treating public indices as stable identities.
 
 To play manually against example bots instead, run:
 
