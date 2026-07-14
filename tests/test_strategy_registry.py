@@ -99,6 +99,7 @@ def test_strategy_and_replay_opponent_catalogs_have_distinct_public_names() -> N
         "local_tactical_search_reference",
         "potential_field_hunter",
         "potential_field_virus_farmer",
+        "potential_tactical_hybrid",
         "replay_dominance",
         "survival_greedy",
         "threat_aware_receding_horizon",
@@ -114,6 +115,7 @@ def test_strategy_and_replay_opponent_catalogs_have_distinct_public_names() -> N
     assert submission_strategy_names() == (
         "expected_final_mass",
         "local_tactical_search",
+        "potential_tactical_hybrid",
         "replay_dominance",
         "threat_aware_receding_horizon",
         "virus_hunter",

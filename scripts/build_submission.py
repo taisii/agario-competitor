@@ -24,11 +24,13 @@ LOCAL_IMPORTS = {
     "strategies.features",
     "strategies.greedy",
     "strategies.expected_final_mass",
+    "strategies.local_tactical_search",
     "strategies.potential_field",
     "strategies.receding_horizon",
     "strategies.replay_imitation",
     "strategies.replay_profiles",
     "strategies.randomness",
+    "strategies.world_transition",
 }
 
 HEADER = '''from __future__ import annotations

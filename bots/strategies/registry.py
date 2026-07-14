@@ -74,6 +74,7 @@ def _spec(
 _COMMON_SUBMISSION_MODULES = (
     "bots/strategies/base.py",
     "bots/simulation/rules.py",
+    "bots/strategies/world_transition.py",
 )
 
 
@@ -81,6 +82,7 @@ def _submission(
     strategy_class: str,
     *source_modules: str,
     local_only_classes: frozenset[str] = frozenset(),
+    after_features_modules: tuple[str, ...] = (),
 ) -> SubmissionBundleSpec:
     return SubmissionBundleSpec(
         strategy_class=strategy_class,
@@ -88,6 +90,7 @@ def _submission(
             *_COMMON_SUBMISSION_MODULES,
             *source_modules,
             "bots/strategies/features.py",
+            *after_features_modules,
         ),
         local_only_classes=local_only_classes,
     )
@@ -131,6 +134,24 @@ _BUILT_IN_SPECS = (
         "potential_field_hunter",
         "strategies.potential_field:PotentialFieldHunterStrategy",
         "potential_field",
+    ),
+    _spec(
+        "potential_tactical_hybrid",
+        "strategies.potential_tactical_hybrid:PotentialTacticalHybridStrategy",
+        "search",
+        submission=_submission(
+            "PotentialTacticalHybridStrategy",
+            "bots/strategies/randomness.py",
+            "bots/strategies/replay_imitation.py",
+            "bots/strategies/replay_profiles.py",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/expected_final_mass.py",
+            "bots/strategies/local_tactical_search.py",
+            after_features_modules=(
+                "bots/strategies/potential_field.py",
+                "bots/strategies/potential_tactical_hybrid.py",
+            ),
+        ),
     ),
     _spec(
         "potential_field_virus_farmer",

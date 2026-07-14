@@ -55,6 +55,7 @@ from strategies.features import (
     player_speed,
     squared_distance,
 )
+from strategies.world_transition import CompleteJointCommand, JointPhysicalTransition
 
 
 SQRT2 = math.sqrt(2.0)
@@ -104,6 +105,8 @@ class EnemyBlob:
     direction: tuple[float, float] = (0.0, 0.0)
     stale_rounds: int = 0
     merge_cooldown: int = 0
+    eject_vx: float = 0.0
+    eject_vy: float = 0.0
 
     @property
     def key(self) -> tuple[int, int]:
@@ -143,6 +146,7 @@ class SearchNode:
     consumed_virus_ids: frozenset[int] = field(default_factory=frozenset)
     projected_food: int = 0
     projected_captures: int = 0
+    projected_viruses: int = 0
     min_safety_margin: float = math.inf
 
     @cached_property
@@ -173,6 +177,20 @@ class OwnMovement:
     blobs: tuple[OwnBlob, ...]
     blocked_distance: float
     efficiency: float
+
+
+@dataclass(frozen=True)
+class PhysicalStepCoreResult:
+    """Policy-free event result plus metrics needed by legacy finalisation."""
+
+    node: SearchNode
+    movement_efficiency: float
+    blocked_distance: float
+    split_lost_fragment: bool
+    split_penalty: float
+    virus_penalty: float
+    food_reward: float
+    interaction_score: float
 
 
 @dataclass(slots=True)
@@ -503,6 +521,17 @@ class ThreatAwareRecedingHorizonStrategy:
         self.previous_direction: tuple[float, float] = (1.0, 0.0)
         self.last_moves: dict[int, tuple[tuple[float, float], bool]] = {}
         self.enemy_tracks: dict[tuple[int, int], EnemyTrack] = {}
+        self._next_enemy_track_id = 0
+        # Stabilisation is a pure function of one immutable enemy layout and
+        # the arena.  Expected-response evaluation deliberately reuses the
+        # same enemy transition across several own continuations, so retain
+        # its exact result for the duration of one observed turn.
+        self._enemy_stabilisation_cache: dict[
+            tuple[tuple[EnemyBlob, ...], float], tuple[EnemyBlob, ...]
+        ] = {}
+        self._enemy_group_stabilisation_cache: dict[
+            tuple[tuple[EnemyBlob, ...], float], tuple[EnemyBlob, ...]
+        ] = {}
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         started_at = perf_counter()
@@ -762,6 +791,8 @@ class ThreatAwareRecedingHorizonStrategy:
         consistent while avoiding repeated exposure analysis during sorting.
         """
 
+        self._enemy_stabilisation_cache.clear()
+        self._enemy_group_stabilisation_cache.clear()
         state = context.game.state
         own_blobs = tuple(
             OwnBlob(
@@ -1124,7 +1155,7 @@ class ThreatAwareRecedingHorizonStrategy:
     ) -> tuple[EnemyBlob, ...]:
         state = context.game.state
         round_number = int(state.round)
-        visible_keys = {(blob.player_id, blob.blob_id) for blob in state.visible_blobs}
+        visible_blobs = tuple(state.visible_blobs)
 
         # Current competition payloads censor opponent movement. Advance an
         # unseen predator toward the nearest vulnerable fragment unless an
@@ -1132,10 +1163,6 @@ class ThreatAwareRecedingHorizonStrategy:
         # this conservative estimate.
         advanced: dict[tuple[int, int], EnemyTrack] = {}
         for key, track in self.enemy_tracks.items():
-            if key in visible_keys:
-                # The authoritative observation below replaces this track.
-                # Avoid predicting a value that would be discarded unchanged.
-                continue
             observed_move = self.last_moves.get(track.player_id)
             if observed_move is not None:
                 direction = observed_move[0]
@@ -1164,12 +1191,37 @@ class ThreatAwareRecedingHorizonStrategy:
                 merge_cooldown=max(0, track.merge_cooldown - 1),
             )
 
-        for blob in state.visible_blobs:
-            key = (blob.player_id, blob.blob_id)
+        matched_observations = self._match_enemy_observations(
+            advanced,
+            visible_blobs,
+        )
+        retired_merges = self._retired_merged_tracks(
+            advanced,
+            visible_blobs,
+            matched_observations,
+        )
+        for key in retired_merges:
+            advanced.pop(key, None)
+        visible_track_keys: set[tuple[int, int]] = set()
+        for observation_index, blob in enumerate(visible_blobs):
+            key = matched_observations.get(observation_index)
+            if key is None:
+                used_ids = {
+                    track_id
+                    for player_id, track_id in advanced
+                    if player_id == blob.player_id
+                }
+                next_id = max(
+                    self._next_enemy_track_id,
+                    max(used_ids, default=-1) + 1,
+                )
+                self._next_enemy_track_id = next_id + 1
+                key = (blob.player_id, next_id)
+            visible_track_keys.add(key)
             direction = self.last_moves.get(blob.player_id, ((0.0, 0.0), False))[0]
             advanced[key] = EnemyTrack(
                 player_id=blob.player_id,
-                blob_id=blob.blob_id,
+                blob_id=key[1],
                 x=blob.pos[0],
                 y=blob.pos[1],
                 radius=blob.radius,
@@ -1194,7 +1246,7 @@ class ThreatAwareRecedingHorizonStrategy:
                 square_center_y=view_center[1],
                 square_size=half_view * 2.0,
             )
-            if key not in visible_keys and should_be_visible:
+            if key not in visible_track_keys and should_be_visible:
                 # The estimate contradicted the authoritative current view.
                 continue
             kept[key] = track
@@ -1221,6 +1273,263 @@ class ThreatAwareRecedingHorizonStrategy:
             )
         self.enemy_tracks = kept
         return tuple(enemies)
+
+    @staticmethod
+    def _retired_merged_tracks(
+        predicted: dict[tuple[int, int], EnemyTrack],
+        observations: tuple,
+        matches: dict[int, tuple[int, int]],
+    ) -> set[tuple[int, int]]:
+        """Retire unmatched tracks whose complete merge is now authoritative.
+
+        A merge observation inherits one internal survivor ID.  Other ready,
+        touching tracks in the same physical component are consumed only when
+        their combined mass and center explain that observation.  Split
+        observations cannot satisfy the mass check, so one child inherits the
+        parent ID and every additional child remains a new observation.
+        """
+
+        matched_keys = set(matches.values())
+        retired: set[tuple[int, int]] = set()
+        for observation_index, survivor_key in matches.items():
+            survivor = predicted[survivor_key]
+            observation = observations[observation_index]
+            if survivor.merge_cooldown > 0:
+                continue
+            component = {survivor_key}
+            changed = True
+            while changed:
+                changed = False
+                for key, candidate in predicted.items():
+                    if (
+                        key in component
+                        or key in retired
+                        or candidate.player_id != survivor.player_id
+                        or candidate.merge_cooldown > 0
+                    ):
+                        continue
+                    if any(
+                        math.dist(
+                            (candidate.x, candidate.y),
+                            (predicted[member].x, predicted[member].y),
+                        )
+                        <= (
+                            candidate.radius
+                            + predicted[member].radius
+                            + 2.0 * MERGE_ATTRACTION_SPEED
+                            + SAME_PLAYER_OVERLAP_EPSILON
+                        )
+                        for member in component
+                    ):
+                        component.add(key)
+                        changed = True
+            if len(component) == 1:
+                continue
+            tracks = tuple(predicted[key] for key in component)
+            total_mass = sum(track.radius * track.radius for track in tracks)
+            observed_mass = observation.radius * observation.radius
+            center = (
+                sum(track.x * track.radius * track.radius for track in tracks)
+                / total_mass,
+                sum(track.y * track.radius * track.radius for track in tracks)
+                / total_mass,
+            )
+            if math.dist(center, observation.pos) > max(
+                0.25,
+                2.0 * MERGE_ATTRACTION_SPEED,
+            ):
+                continue
+            derived_observations = []
+            for other_index, other in enumerate(observations):
+                if other.player_id != survivor.player_id:
+                    continue
+                assigned_track = matches.get(other_index)
+                if assigned_track in component:
+                    derived_observations.append(other_index)
+                    continue
+                if assigned_track is not None:
+                    # The observation has independent provenance outside this
+                    # ready/touching component, even when it is spatially near.
+                    continue
+                if (
+                    other.radius * other.radius <= total_mass * 1.05
+                    and math.dist(center, other.pos)
+                    <= math.sqrt(total_mass) + SPLIT_EJECT_SPEED + 2.0
+                ):
+                    derived_observations.append(other_index)
+            conservation_tolerance = max(0.05, total_mass * 0.05)
+            if derived_observations != [observation_index]:
+                # More than one observation derives from this component, so
+                # its mass remains split/crossing instead of having one merge
+                # survivor.  Assignment provenance prevents a nearby but
+                # independent track from blocking a real merge.
+                continue
+
+            minimum_observed_mass = total_mass - conservation_tolerance
+            # Engine player-eating repeats until stable, so a freshly merged
+            # blob may gain any number of legal prey in this same transition.
+            # Mass is therefore one-sided: decay gives the lower bound, while
+            # component geometry and the single authoritative survivor prevent
+            # an unrelated observation from consuming these tracks.
+            if observed_mass < minimum_observed_mass:
+                continue
+            retired.update(component - matched_keys)
+        return retired
+
+    @staticmethod
+    def _match_enemy_observations(
+        predicted: dict[tuple[int, int], EnemyTrack],
+        observations: tuple,
+    ) -> dict[int, tuple[int, int]]:
+        """Globally match re-indexed public blobs to persistent tracks.
+
+        agario-kit 2026.1.14 numbers the visible subset from zero on every
+        query, so the public blob index is explicitly not an identity.  Each
+        player's feasible bipartite graph is solved once after every track has
+        advanced: cardinality is maximised first, then total geometric cost is
+        minimised.  This handles crossing fragments without the order-dependent
+        track theft of a greedy matcher.
+        """
+
+        result: dict[int, tuple[int, int]] = {}
+        player_ids = sorted(
+            {
+                *(track.player_id for track in predicted.values()),
+                *(blob.player_id for blob in observations),
+            }
+        )
+        for player_id in player_ids:
+            track_rows = tuple(
+                sorted(
+                    (
+                        (key, track)
+                        for key, track in predicted.items()
+                        if track.player_id == player_id
+                    ),
+                    key=lambda row: row[0],
+                )
+            )
+            observation_rows = tuple(
+                (index, blob)
+                for index, blob in enumerate(observations)
+                if blob.player_id == player_id
+            )
+            if not track_rows or not observation_rows:
+                continue
+
+            edge_costs: list[list[float | None]] = []
+            maximum_edge_cost = 0.0
+            for _, track in track_rows:
+                row = []
+                for _, blob in observation_rows:
+                    distance = math.dist((track.x, track.y), blob.pos)
+                    radius_delta = abs(track.radius - blob.radius)
+                    maximum_displacement = (
+                        SPLIT_EJECT_SPEED
+                        + 2.0
+                        + track.radius
+                        + blob.radius
+                    )
+                    cost = (
+                        distance + radius_delta
+                        if distance <= maximum_displacement
+                        else None
+                    )
+                    row.append(cost)
+                    if cost is not None:
+                        maximum_edge_cost = max(maximum_edge_cost, cost)
+                edge_costs.append(row)
+
+            # One avoided dummy assignment must dominate every possible sum
+            # of physical edge costs, making maximum cardinality the primary
+            # objective of the ordinary minimum-cost assignment below.
+            pair_limit = min(len(track_rows), len(observation_rows))
+            unmatched_cost = (maximum_edge_cost + 1.0) * (pair_limit + 1)
+            forbidden_cost = unmatched_cost * (len(track_rows) + 2)
+            cost_matrix = [
+                [
+                    forbidden_cost if cost is None else cost
+                    for cost in physical_costs
+                ]
+                + [unmatched_cost] * len(track_rows)
+                for physical_costs in edge_costs
+            ]
+            assignment = (
+                ThreatAwareRecedingHorizonStrategy._minimum_cost_assignment(
+                    cost_matrix
+                )
+            )
+            for track_index, column in enumerate(assignment):
+                if column >= len(observation_rows):
+                    continue
+                if edge_costs[track_index][column] is None:
+                    continue
+                observation_index = observation_rows[column][0]
+                result[observation_index] = track_rows[track_index][0]
+        return result
+
+    @staticmethod
+    def _minimum_cost_assignment(costs: list[list[float]]) -> tuple[int, ...]:
+        """Return the minimum-cost unique column for every row in O(R²C)."""
+
+        row_count = len(costs)
+        if row_count == 0:
+            return ()
+        column_count = len(costs[0])
+        if column_count < row_count or any(
+            len(row) != column_count for row in costs
+        ):
+            raise ValueError("assignment matrix must be rectangular with rows <= columns")
+
+        row_potential = [0.0] * (row_count + 1)
+        column_potential = [0.0] * (column_count + 1)
+        matched_row = [0] * (column_count + 1)
+        predecessor = [0] * (column_count + 1)
+        for row in range(1, row_count + 1):
+            matched_row[0] = row
+            minimum = [math.inf] * (column_count + 1)
+            used = [False] * (column_count + 1)
+            column = 0
+            while True:
+                used[column] = True
+                active_row = matched_row[column]
+                delta = math.inf
+                next_column = 0
+                for candidate in range(1, column_count + 1):
+                    if used[candidate]:
+                        continue
+                    reduced = (
+                        costs[active_row - 1][candidate - 1]
+                        - row_potential[active_row]
+                        - column_potential[candidate]
+                    )
+                    if reduced < minimum[candidate]:
+                        minimum[candidate] = reduced
+                        predecessor[candidate] = column
+                    if minimum[candidate] < delta:
+                        delta = minimum[candidate]
+                        next_column = candidate
+                for candidate in range(column_count + 1):
+                    if used[candidate]:
+                        row_potential[matched_row[candidate]] += delta
+                        column_potential[candidate] -= delta
+                    else:
+                        minimum[candidate] -= delta
+                column = next_column
+                if matched_row[column] == 0:
+                    break
+            while True:
+                previous = predecessor[column]
+                matched_row[column] = matched_row[previous]
+                column = previous
+                if column == 0:
+                    break
+
+        assignment = [-1] * row_count
+        for column in range(1, column_count + 1):
+            if matched_row[column]:
+                assignment[matched_row[column] - 1] = column - 1
+        return tuple(assignment)
 
     def _stale_enemy_can_threaten_transition(
         self,
@@ -1415,10 +1724,11 @@ class ThreatAwareRecedingHorizonStrategy:
         return actions
 
     @staticmethod
-    def _action_key(action: Action) -> tuple[int, bool]:
+    def _action_key(action: Action) -> tuple[bool, int, bool]:
         direction = normalise(action.direction)
+        is_zero = direction == (0.0, 0.0)
         angle_bin = int(round(math.atan2(direction[1], direction[0]) / TAU * 96)) % 96
-        return angle_bin, action.split
+        return is_zero, angle_bin, action.split
 
     def _actions_per_node_limit(self, depth_index: int) -> int | None:
         return None
@@ -1469,14 +1779,84 @@ class ThreatAwareRecedingHorizonStrategy:
         safety_weight: float,
         aggression: float,
     ) -> StepResult:
+        """Rank one transition using the legacy opponent policy."""
+
+        return self._physical_step(
+            node=node,
+            action=action,
+            foods=foods,
+            viruses=viruses,
+            arena_size=arena_size,
+            first_step=first_step,
+            safety_weight=safety_weight,
+            aggression=aggression,
+            joint_command=None,
+        )
+
+    def _physical_step(
+        self,
+        *,
+        node: SearchNode,
+        action: Action,
+        foods: tuple[FoodModel, ...],
+        viruses: tuple[VirusModel, ...],
+        arena_size: float,
+        first_step: bool,
+        safety_weight: float,
+        aggression: float,
+        joint_command: CompleteJointCommand | None,
+    ) -> StepResult:
+        """Run physical events, then apply legacy hazard and utility policy."""
+
+        core = self._physical_step_core(
+            node=node,
+            action=action,
+            foods=foods,
+            viruses=viruses,
+            arena_size=arena_size,
+            first_step=first_step,
+            joint_command=joint_command,
+            collect_utility_metrics=self._uses_base_transition_score(),
+        )
+        return self._finalize_physical_step(
+            source_node=node,
+            action=action,
+            foods=foods,
+            arena_size=arena_size,
+            safety_weight=safety_weight,
+            aggression=aggression,
+            core=core,
+        )
+
+    def _physical_step_core(
+        self,
+        *,
+        node: SearchNode,
+        action: Action,
+        foods: tuple[FoodModel, ...],
+        viruses: tuple[VirusModel, ...],
+        arena_size: float,
+        first_step: bool,
+        joint_command: CompleteJointCommand | None,
+        collect_utility_metrics: bool,
+    ) -> PhysicalStepCoreResult:
+        """Apply only movement and engine-ordered world events.
+
+        ``joint_command=None`` preserves the historical per-fragment opponent
+        projection used by search ranking.  Supplying a complete command uses
+        one legal command per player while retaining identical event order.
+        Risk, fatality, position value, and turn costs are finalized elsewhere.
+        """
+
         direction = normalise(action.direction)
         own_blobs = list(node.own_blobs)
-        score = node.score
-        base_score = self._uses_base_transition_score()
+        split_penalty = 0.0
+        food_reward = 0.0
+        pre_split_radius_by_id = {blob.blob_id: blob.radius for blob in own_blobs}
         if action.split:
             own_blobs = self._apply_split(own_blobs, direction, arena_size)
-            if base_score:
-                score -= (
+            if collect_utility_metrics:
+                split_penalty = (
                     6.0
                     + max(
                         0,
@@ -1484,22 +1864,51 @@ class ThreatAwareRecedingHorizonStrategy:
                     )
                     * 1.5
                 )
-        split_blob_ids = {blob.blob_id for blob in own_blobs} if action.split else set()
+        split_blob_ids = (
+            {
+                blob.blob_id
+                for blob in own_blobs
+                if blob.blob_id not in pre_split_radius_by_id
+                or blob.radius < pre_split_radius_by_id[blob.blob_id]
+            }
+            if action.split
+            else set()
+        )
 
         movement = self._move_own_blobs(
             own_blobs,
             direction,
             arena_size,
-            calculate_blocked=base_score,
-            calculate_efficiency=not base_score and not action.split,
+            calculate_blocked=collect_utility_metrics,
+            calculate_efficiency=not collect_utility_metrics and not action.split,
         )
         own_blobs = list(movement.blobs)
-        enemies = self._move_enemies(node.enemies, own_blobs, arena_size)
+        if joint_command is None:
+            enemies = self._move_enemies(node.enemies, own_blobs, arena_size)
+        else:
+            live_player_ids = {
+                self._own_player_id,
+                *(enemy.player_id for enemy in node.enemies),
+            }
+            if joint_command.player_ids != live_player_ids:
+                raise ValueError("joint command does not match the live world")
+            own_command = joint_command.for_player(self._own_player_id)
+            if (
+                own_command.unit != direction
+                or own_command.split != action.split
+            ):
+                raise ValueError("joint own command must match the root action")
+            enemies = self._move_enemy_players_with_joint_command(
+                node.enemies,
+                joint_command,
+                arena_size,
+            )
 
         eaten_food_ids = set(node.eaten_food_ids)
         consumed_virus_ids = set(node.consumed_virus_ids)
         projected_food = node.projected_food
         projected_captures = node.projected_captures
+        projected_viruses = node.projected_viruses
 
         own_blobs = [
             replace(blob, radius=_decayed_radius(blob.radius)) for blob in own_blobs
@@ -1512,16 +1921,15 @@ class ThreatAwareRecedingHorizonStrategy:
         # consumption threshold or preserve a pre-pop large cell.
         pre_virus_own = own_blobs
         pre_virus_enemies = enemies
-        own_blobs, enemies, virus_penalty = self._resolve_own_viruses(
+        own_blobs, enemies, virus_penalty, own_viruses = self._resolve_own_viruses(
             own_blobs=own_blobs,
             enemies=enemies,
             viruses=viruses,
             consumed_virus_ids=consumed_virus_ids,
             arena_size=arena_size,
-            calculate_penalty=base_score,
+            calculate_penalty=collect_utility_metrics,
         )
-        if base_score:
-            score -= virus_penalty * safety_weight
+        projected_viruses += own_viruses
         if own_blobs is not pre_virus_own or enemies is not pre_virus_enemies:
             own_blobs = self._stabilise_own_blobs(own_blobs, arena_size)
             enemies = self._stabilise_enemy_blobs(enemies, arena_size)
@@ -1557,8 +1965,8 @@ class ThreatAwareRecedingHorizonStrategy:
             eaten_food_ids.add(food.food_id)
             if key[0] == self._own_player_id:
                 projected_food += 1
-                if base_score:
-                    score += 7.0
+                if collect_utility_metrics:
+                    food_reward += 7.0
 
         own_blobs = [
             blob
@@ -1577,14 +1985,12 @@ class ThreatAwareRecedingHorizonStrategy:
             own_blobs,
             enemies,
             arena_size,
-            calculate_score=base_score,
+            calculate_score=collect_utility_metrics,
         )
         split_lost_fragment = bool(
             split_blob_ids - {blob.blob_id for blob in own_blobs}
         )
         projected_captures += captures
-        if base_score:
-            score += interaction_score * aggression
         if (
             consumed_food
             or len(own_blobs) != pre_interaction_own_count
@@ -1597,7 +2003,7 @@ class ThreatAwareRecedingHorizonStrategy:
                 node=node,
                 own_blobs=(),
                 enemies=enemies,
-                score=score - 100_000.0,
+                score=node.score,
                 direction=direction,
                 action=action,
                 first_step=first_step,
@@ -1605,38 +2011,25 @@ class ThreatAwareRecedingHorizonStrategy:
                 consumed_virus_ids=consumed_virus_ids,
                 projected_food=projected_food,
                 projected_captures=projected_captures,
-                min_safety_margin=-math.inf,
+                projected_viruses=projected_viruses,
+                min_safety_margin=node.min_safety_margin,
             )
-            return StepResult(
-                dead,
-                fatal=True,
+            return PhysicalStepCoreResult(
+                node=dead,
                 movement_efficiency=movement.efficiency,
+                blocked_distance=movement.blocked_distance,
+                split_lost_fragment=split_lost_fragment,
+                split_penalty=split_penalty,
+                virus_penalty=virus_penalty,
+                food_reward=food_reward,
+                interaction_score=interaction_score,
             )
-
-        risk_penalty, min_margin, unavoidable, hazard_summary = self._risk_analysis(
-            own_blobs,
-            enemies,
-            safety_weight,
-            arena_size,
-        )
-        if base_score:
-            score -= risk_penalty
-            score += self._position_value(
-                own_blobs,
-                enemies,
-                foods,
-                eaten_food_ids,
-                aggression,
-            )
-            score -= movement.blocked_distance * BLOCKED_MOVEMENT_COST
-            score -= self._turn_cost(node.last_direction, direction)
-            score -= max(0, len(own_blobs) - 1) * 0.65
 
         next_node = self._replace_node(
             node=node,
             own_blobs=tuple(own_blobs),
             enemies=enemies,
-            score=score,
+            score=node.score,
             direction=direction,
             action=action,
             first_step=first_step,
@@ -1644,16 +2037,115 @@ class ThreatAwareRecedingHorizonStrategy:
             consumed_virus_ids=consumed_virus_ids,
             projected_food=projected_food,
             projected_captures=projected_captures,
-            min_safety_margin=min(node.min_safety_margin, min_margin),
+            projected_viruses=projected_viruses,
+            min_safety_margin=node.min_safety_margin,
         )
-        # A split is admissible only when every resulting fragment survives the
-        # immediate interaction pass and remains outside adversarial split reach.
-        unsafe_split = action.split and (split_lost_fragment or min_margin <= 0.0)
+        return PhysicalStepCoreResult(
+            node=next_node,
+            movement_efficiency=movement.efficiency,
+            blocked_distance=movement.blocked_distance,
+            split_lost_fragment=split_lost_fragment,
+            split_penalty=split_penalty,
+            virus_penalty=virus_penalty,
+            food_reward=food_reward,
+            interaction_score=interaction_score,
+        )
+
+    def _finalize_physical_step(
+        self,
+        *,
+        source_node: SearchNode,
+        action: Action,
+        foods: tuple[FoodModel, ...],
+        arena_size: float,
+        safety_weight: float,
+        aggression: float,
+        core: PhysicalStepCoreResult,
+    ) -> StepResult:
+        """Attach legacy risk and utility semantics to one physical result."""
+
+        score = core.node.score
+        uses_base_score = self._uses_base_transition_score()
+        if uses_base_score:
+            score -= core.split_penalty
+            score -= core.virus_penalty * safety_weight
+            score += core.food_reward
+            score += core.interaction_score * aggression
+        if not core.node.own_blobs:
+            return StepResult(
+                replace(
+                    core.node,
+                    score=score - 100_000.0,
+                    min_safety_margin=-math.inf,
+                ),
+                fatal=True,
+                movement_efficiency=core.movement_efficiency,
+            )
+
+        own_blobs = core.node.own_blobs
+        enemies = core.node.enemies
+        risk_penalty, min_margin, unavoidable, hazard_summary = self._risk_analysis(
+            own_blobs,
+            enemies,
+            safety_weight,
+            arena_size,
+        )
+        if uses_base_score:
+            score -= risk_penalty
+            score += self._position_value(
+                own_blobs,
+                enemies,
+                foods,
+                set(core.node.eaten_food_ids),
+                aggression,
+            )
+            score -= core.blocked_distance * BLOCKED_MOVEMENT_COST
+            score -= self._turn_cost(source_node.last_direction, core.node.last_direction)
+            score -= max(0, len(own_blobs) - 1) * 0.65
+
+        next_node = replace(
+            core.node,
+            score=score,
+            min_safety_margin=min(source_node.min_safety_margin, min_margin),
+        )
+        unsafe_split = action.split and (
+            core.split_lost_fragment or min_margin <= 0.0
+        )
         return StepResult(
             next_node,
             fatal=unavoidable or unsafe_split,
-            movement_efficiency=movement.efficiency,
+            movement_efficiency=core.movement_efficiency,
             hazard_summary=hazard_summary,
+        )
+
+    def _joint_physical_step(
+        self,
+        *,
+        node: SearchNode,
+        action: Action,
+        foods: tuple[FoodModel, ...],
+        viruses: tuple[VirusModel, ...],
+        arena_size: float,
+        first_step: bool,
+        joint_command: CompleteJointCommand,
+    ) -> JointPhysicalTransition[SearchNode]:
+        """Expose legal-response physics without StepResult policy semantics."""
+
+        result = self._physical_step_core(
+            node=node,
+            action=action,
+            foods=foods,
+            viruses=viruses,
+            arena_size=arena_size,
+            first_step=first_step,
+            joint_command=joint_command,
+            collect_utility_metrics=False,
+        )
+        return JointPhysicalTransition(
+            state=result.node,
+            final_own_mass=result.node.total_mass if result.node.own_blobs else 0.0,
+            dead=not result.node.own_blobs,
+            movement_efficiency=result.movement_efficiency,
         )
 
     def _resolve_own_viruses(
@@ -1665,13 +2157,14 @@ class ThreatAwareRecedingHorizonStrategy:
         consumed_virus_ids: set[int],
         arena_size: float,
         calculate_penalty: bool = True,
-    ) -> tuple[list[OwnBlob], tuple[EnemyBlob, ...], float]:
+    ) -> tuple[list[OwnBlob], tuple[EnemyBlob, ...], float, int]:
         """Apply the public engine's touching-blob virus transition.
 
         The physical state transition is shared. The returned controllability
         penalty is used only by policies that retain the base transition score.
         """
         penalty = 0.0
+        own_consumed = 0
         for virus in viruses:
             if virus.virus_id in consumed_virus_ids:
                 continue
@@ -1687,9 +2180,10 @@ class ThreatAwareRecedingHorizonStrategy:
             own_blobs, enemies, origin = collision
             if origin is None:
                 continue
+            own_consumed += 1
             if calculate_penalty:
                 penalty += 240.0 + origin.mass * 18.0
-        return own_blobs, enemies, penalty
+        return own_blobs, enemies, penalty, own_consumed
 
     def _apply_virus_collision(
         self,
@@ -1791,11 +2285,8 @@ class ThreatAwareRecedingHorizonStrategy:
                     y=_clamp(y, piece_radius, arena_size - piece_radius),
                     radius=piece_radius,
                     merge_cooldown=SPLIT_COOLDOWN_FRAMES,
-                    **(
-                        {"eject_vx": 0.0, "eject_vy": 0.0}
-                        if isinstance(origin, OwnBlob)
-                        else {}
-                    ),
+                    eject_vx=0.0,
+                    eject_vy=0.0,
                 )
             )
         return fragments
@@ -1806,6 +2297,7 @@ class ThreatAwareRecedingHorizonStrategy:
         direction: tuple[float, float],
         arena_size: float,
     ) -> list[OwnBlob]:
+        split_direction, split_ejection = _split_placement_and_ejection(direction)
         result = list(blobs)
         starting_ids = [
             blob.blob_id for blob in sorted(blobs, key=lambda blob: blob.blob_id)
@@ -1826,20 +2318,22 @@ class ThreatAwareRecedingHorizonStrategy:
                 blob_id=next_id,
                 x=_clamp(
                     blob.x
-                    + direction[0] * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
+                    + split_direction[0]
+                    * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
                     child_radius,
                     arena_size - child_radius,
                 ),
                 y=_clamp(
                     blob.y
-                    + direction[1] * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
+                    + split_direction[1]
+                    * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
                     child_radius,
                     arena_size - child_radius,
                 ),
                 radius=child_radius,
                 merge_cooldown=SPLIT_COOLDOWN_FRAMES,
-                eject_vx=direction[0] * SPLIT_EJECT_SPEED,
-                eject_vy=direction[1] * SPLIT_EJECT_SPEED,
+                eject_vx=split_ejection[0],
+                eject_vy=split_ejection[1],
             )
             by_id[blob_id] = parent
             by_id[next_id] = child
@@ -1847,10 +2341,18 @@ class ThreatAwareRecedingHorizonStrategy:
         return list(by_id.values())
 
     def _move_own(
-        self, blob: OwnBlob, direction: tuple[float, float], arena_size: float
+        self,
+        blob: OwnBlob,
+        direction: tuple[float, float],
+        arena_size: float,
+        *,
+        speed: float | None = None,
     ) -> OwnBlob:
-        x = blob.x + direction[0] * player_speed(blob.radius) + blob.eject_vx
-        y = blob.y + direction[1] * player_speed(blob.radius) + blob.eject_vy
+        """Move one blob using a caller-prepared radius-dependent speed."""
+
+        speed = player_speed(blob.radius) if speed is None else speed
+        x = blob.x + direction[0] * speed + blob.eject_vx
+        y = blob.y + direction[1] * speed + blob.eject_vy
         return OwnBlob(
             blob_id=blob.blob_id,
             x=_clamp(x, blob.radius, arena_size - blob.radius),
@@ -1870,6 +2372,7 @@ class ThreatAwareRecedingHorizonStrategy:
         calculate_blocked: bool = True,
         calculate_efficiency: bool = True,
         profile_counter: str = "physics_own_blob_moves",
+        speed_cache: dict[float, float] | None = None,
     ) -> OwnMovement:
         """Move every blob once and derive both movement-cost measures."""
 
@@ -1881,9 +2384,21 @@ class ThreatAwareRecedingHorizonStrategy:
         expected_useful = 0.0
         actual_useful = 0.0
         for blob in blobs:
-            moved = self._move_own(blob, unit, arena_size)
+            if speed_cache is None:
+                speed = player_speed(blob.radius)
+            else:
+                try:
+                    speed = speed_cache[blob.radius]
+                except KeyError:
+                    speed = player_speed(blob.radius)
+                    speed_cache[blob.radius] = speed
+            moved = self._move_own(
+                blob,
+                unit,
+                arena_size,
+                speed=speed,
+            )
             moved_blobs.append(moved)
-            speed = player_speed(blob.radius)
             if calculate_blocked:
                 intended_dx = unit[0] * speed + blob.eject_vx
                 intended_dy = unit[1] * speed + blob.eject_vy
@@ -2148,23 +2663,146 @@ class ThreatAwareRecedingHorizonStrategy:
                 replace(
                     enemy,
                     x=_clamp(
-                        enemy.x + direction[0] * speed,
+                        enemy.x + direction[0] * speed + enemy.eject_vx,
                         enemy.radius,
                         arena_size - enemy.radius,
                     ),
                     y=_clamp(
-                        enemy.y + direction[1] * speed,
+                        enemy.y + direction[1] * speed + enemy.eject_vy,
                         enemy.radius,
                         arena_size - enemy.radius,
                     ),
                     radius=_decayed_radius(enemy.radius),
                     direction=direction,
                     merge_cooldown=max(0, enemy.merge_cooldown - 1),
+                    eject_vx=_damped(enemy.eject_vx),
+                    eject_vy=_damped(enemy.eject_vy),
                 )
             )
         return tuple(moved)
 
+    def _move_enemy_players_with_joint_command(
+        self,
+        enemies: tuple[EnemyBlob, ...],
+        joint_command: CompleteJointCommand,
+        arena_size: float,
+    ) -> tuple[EnemyBlob, ...]:
+        """Advance every enemy fragment with its player's single command."""
+
+        by_player: dict[int, list[EnemyBlob]] = {}
+        for enemy in enemies:
+            by_player.setdefault(enemy.player_id, []).append(enemy)
+
+        moved: list[EnemyBlob] = []
+        for player_id in sorted(by_player):
+            command = joint_command.for_player(player_id)
+            unit = command.unit
+            group = by_player[player_id]
+            if command.split:
+                group = self._apply_enemy_split(group, unit, arena_size)
+            for enemy in group:
+                speed = player_speed(enemy.radius)
+                moved.append(
+                    replace(
+                        enemy,
+                        x=_clamp(
+                            enemy.x + unit[0] * speed + enemy.eject_vx,
+                            enemy.radius,
+                            arena_size - enemy.radius,
+                        ),
+                        y=_clamp(
+                            enemy.y + unit[1] * speed + enemy.eject_vy,
+                            enemy.radius,
+                            arena_size - enemy.radius,
+                        ),
+                        radius=_decayed_radius(enemy.radius),
+                        direction=unit,
+                        merge_cooldown=max(0, enemy.merge_cooldown - 1),
+                        eject_vx=_damped(enemy.eject_vx),
+                        eject_vy=_damped(enemy.eject_vy),
+                    )
+                )
+        return tuple(moved)
+
+    @staticmethod
+    def _apply_enemy_split(
+        enemies: list[EnemyBlob],
+        direction: tuple[float, float],
+        arena_size: float,
+    ) -> list[EnemyBlob]:
+        """Apply one legal split command to a single player's fragments."""
+
+        split_direction, split_ejection = _split_placement_and_ejection(direction)
+        by_id = {enemy.blob_id: enemy for enemy in enemies}
+        starting_ids = sorted(by_id)
+        next_id = max(starting_ids, default=-1) + 1
+        for blob_id in starting_ids:
+            if len(by_id) >= MAX_BLOB_COUNT:
+                break
+            enemy = by_id.get(blob_id)
+            if enemy is None or enemy.mass < SPLIT_MIN_MASS:
+                continue
+            child_radius = enemy.radius / SQRT2
+            by_id[blob_id] = replace(
+                enemy,
+                radius=child_radius,
+                merge_cooldown=SPLIT_COOLDOWN_FRAMES,
+            )
+            by_id[next_id] = EnemyBlob(
+                player_id=enemy.player_id,
+                blob_id=next_id,
+                x=_clamp(
+                    enemy.x
+                    + split_direction[0]
+                    * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
+                    child_radius,
+                    arena_size - child_radius,
+                ),
+                y=_clamp(
+                    enemy.y
+                    + split_direction[1]
+                    * (2.0 * child_radius + SAME_PLAYER_OVERLAP_EPSILON),
+                    child_radius,
+                    arena_size - child_radius,
+                ),
+                radius=child_radius,
+                direction=direction,
+                stale_rounds=enemy.stale_rounds,
+                merge_cooldown=SPLIT_COOLDOWN_FRAMES,
+                eject_vx=split_ejection[0],
+                eject_vy=split_ejection[1],
+            )
+            next_id += 1
+        return [by_id[blob_id] for blob_id in sorted(by_id)]
+
     def _stabilise_enemy_blobs(
+        self,
+        enemies: tuple[EnemyBlob, ...],
+        arena_size: float,
+    ) -> tuple[EnemyBlob, ...]:
+        """Return the exact stabilised layout, memoized within one turn."""
+
+        key = (enemies, arena_size)
+        cached = self._enemy_stabilisation_cache.get(key)
+        if cached is not None:
+            return cached
+        by_player: dict[int, list[EnemyBlob]] = {}
+        for enemy in enemies:
+            by_player.setdefault(enemy.player_id, []).append(enemy)
+        rows: list[EnemyBlob] = []
+        for player_id in sorted(by_player):
+            group = tuple(by_player[player_id])
+            group_key = (group, arena_size)
+            stabilised = self._enemy_group_stabilisation_cache.get(group_key)
+            if stabilised is None:
+                stabilised = self._stabilise_enemy_group_uncached(group, arena_size)
+                self._enemy_group_stabilisation_cache[group_key] = stabilised
+            rows.extend(stabilised)
+        result = tuple(sorted(rows, key=lambda enemy: enemy.key))
+        self._enemy_stabilisation_cache[key] = result
+        return result
+
+    def _stabilise_enemy_blobs_uncached(
         self,
         enemies: tuple[EnemyBlob, ...],
         arena_size: float,
@@ -2177,17 +2815,38 @@ class ThreatAwareRecedingHorizonStrategy:
 
         result: list[EnemyBlob] = []
         for player_id in sorted(by_player):
-            group = by_player[player_id]
-            if len(group) == 1:
-                result.extend(group)
-                continue
-            group = list(self._apply_attraction(group, arena_size))
-            group = list(self._merge_enemy_blobs(tuple(group), arena_size))
-            group = list(self._separate_enemy_blobs(tuple(group), arena_size))
-            group = list(self._merge_enemy_blobs(tuple(group), arena_size))
-            group = list(self._separate_enemy_blobs(tuple(group), arena_size))
-            result.extend(group)
+            result.extend(
+                self._stabilise_enemy_group_uncached(
+                    tuple(by_player[player_id]),
+                    arena_size,
+                )
+            )
         return tuple(sorted(result, key=lambda enemy: enemy.key))
+
+    def _stabilise_enemy_group_uncached(
+        self,
+        enemies: tuple[EnemyBlob, ...],
+        arena_size: float,
+    ) -> tuple[EnemyBlob, ...]:
+        """Stabilise one player's fragments without consulting memo tables."""
+
+        if len(enemies) <= 1:
+            return enemies
+        group = list(self._apply_attraction(list(enemies), arena_size))
+        if all(enemy.merge_cooldown > 0 for enemy in group):
+            # Both merge passes are provable no-ops. The two consecutive
+            # four-iteration separation passes are therefore exactly one
+            # eight-iteration pass, avoiding an intermediate tuple plus a
+            # second set of materialised EnemyBlob replacements.
+            return self._separate_enemy_blobs(
+                tuple(group),
+                arena_size,
+                iterations=8,
+            )
+        group = list(self._merge_enemy_blobs(tuple(group), arena_size))
+        group = list(self._separate_enemy_blobs(tuple(group), arena_size))
+        group = list(self._merge_enemy_blobs(tuple(group), arena_size))
+        return self._separate_enemy_blobs(tuple(group), arena_size)
 
     def _merge_enemy_blobs(
         self,
@@ -2245,6 +2904,16 @@ class ThreatAwareRecedingHorizonStrategy:
                         direction=combined_direction,
                         stale_rounds=max(survivor.stale_rounds, consumed.stale_rounds),
                         merge_cooldown=0,
+                        eject_vx=(
+                            survivor.eject_vx * survivor.mass
+                            + consumed.eject_vx * consumed.mass
+                        )
+                        / combined_mass,
+                        eject_vy=(
+                            survivor.eject_vy * survivor.mass
+                            + consumed.eject_vy * consumed.mass
+                        )
+                        / combined_mass,
                     )
                     by_key[survivor.key] = combined
                     del by_key[consumed.key]
@@ -2261,20 +2930,29 @@ class ThreatAwareRecedingHorizonStrategy:
         arena_size: float,
         iterations: int = 4,
     ) -> tuple[EnemyBlob, ...]:
-        by_key = {enemy.key: enemy for enemy in enemies}
+        # Enemy-virus transitions can create four independent 16-fragment
+        # groups in one simulated root.  Replacing two frozen dataclasses for
+        # every overlapping pair made this otherwise small relaxation allocate
+        # thousands of short-lived objects.  Keep the exact key/pair/iteration
+        # order and arithmetic, but mutate only turn-local x/y work rows; one
+        # final replace materialises each blob after the relaxation converges.
+        work = {
+            enemy.key: [enemy, enemy.x, enemy.y, enemy.radius, enemy.mass]
+            for enemy in enemies
+        }
         for _ in range(iterations):
             changed = False
-            keys = sorted(by_key)
+            keys = sorted(work)
             for index, first_key in enumerate(keys):
                 for second_key in keys[index + 1 :]:
                     if first_key[0] != second_key[0]:
                         continue
-                    first = by_key[first_key]
-                    second = by_key[second_key]
-                    dx = second.x - first.x
-                    dy = second.y - first.y
+                    first = work[first_key]
+                    second = work[second_key]
+                    dx = second[1] - first[1]
+                    dy = second[2] - first[2]
                     distance = math.hypot(dx, dy)
-                    minimum = first.radius + second.radius + SAME_PLAYER_OVERLAP_EPSILON
+                    minimum = first[3] + second[3] + SAME_PLAYER_OVERLAP_EPSILON
                     if distance >= minimum:
                         continue
                     if distance <= EPSILON:
@@ -2282,39 +2960,39 @@ class ThreatAwareRecedingHorizonStrategy:
                     else:
                         nx, ny = (dx / distance, dy / distance)
                     overlap = minimum - distance
-                    total_mass = first.mass + second.mass
-                    first_move = overlap * second.mass / total_mass
-                    second_move = overlap * first.mass / total_mass
-                    by_key[first_key] = replace(
-                        first,
-                        x=_clamp(
-                            first.x - nx * first_move,
-                            first.radius,
-                            arena_size - first.radius,
-                        ),
-                        y=_clamp(
-                            first.y - ny * first_move,
-                            first.radius,
-                            arena_size - first.radius,
-                        ),
+                    total_mass = first[4] + second[4]
+                    first_move = overlap * second[4] / total_mass
+                    second_move = overlap * first[4] / total_mass
+                    first[1] = _clamp(
+                        first[1] - nx * first_move,
+                        first[3],
+                        arena_size - first[3],
                     )
-                    by_key[second_key] = replace(
-                        second,
-                        x=_clamp(
-                            second.x + nx * second_move,
-                            second.radius,
-                            arena_size - second.radius,
-                        ),
-                        y=_clamp(
-                            second.y + ny * second_move,
-                            second.radius,
-                            arena_size - second.radius,
-                        ),
+                    first[2] = _clamp(
+                        first[2] - ny * first_move,
+                        first[3],
+                        arena_size - first[3],
+                    )
+                    second[1] = _clamp(
+                        second[1] + nx * second_move,
+                        second[3],
+                        arena_size - second[3],
+                    )
+                    second[2] = _clamp(
+                        second[2] + ny * second_move,
+                        second[3],
+                        arena_size - second[3],
                     )
                     changed = True
             if not changed:
                 break
-        return tuple(by_key[key] for key in sorted(by_key))
+        return tuple(
+            row[0]
+            if row[1] == row[0].x and row[2] == row[0].y
+            else replace(row[0], x=row[1], y=row[2])
+            for key in sorted(work)
+            for row in (work[key],)
+        )
 
     def _future_enemy_envelopes(
         self,
@@ -2862,6 +3540,7 @@ class ThreatAwareRecedingHorizonStrategy:
         consumed_virus_ids: set[int],
         projected_food: int,
         projected_captures: int,
+        projected_viruses: int,
         min_safety_margin: float,
     ) -> SearchNode:
         return SearchNode(
@@ -2876,6 +3555,7 @@ class ThreatAwareRecedingHorizonStrategy:
             consumed_virus_ids=frozenset(consumed_virus_ids),
             projected_food=projected_food,
             projected_captures=projected_captures,
+            projected_viruses=projected_viruses,
             min_safety_margin=min_safety_margin,
         )
 
@@ -2886,7 +3566,7 @@ class ThreatAwareRecedingHorizonStrategy:
         profile_prefix: str | None = None,
     ) -> tuple[Action, ...]:
         result: list[Action] = []
-        seen: set[tuple[int, bool]] = set()
+        seen: set[tuple[bool, int, bool]] = set()
         zero_drops = 0
         duplicate_drops = 0
         for action in actions:
@@ -3022,6 +3702,20 @@ def _split_chain_attack_reach(
     return reach
 
 
+def _split_placement_and_ejection(
+    direction: tuple[float, float],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Resolve the engine's distinct zero-command placement and launch rules."""
+
+    control_unit = normalise(direction)
+    if control_unit == (0.0, 0.0):
+        return (1.0, 0.0), (0.0, 0.0)
+    return control_unit, (
+        control_unit[0] * SPLIT_EJECT_SPEED,
+        control_unit[1] * SPLIT_EJECT_SPEED,
+    )
+
+
 def _damped(value: float) -> float:
     value *= SPLIT_EJECT_DRAG
     return 0.0 if abs(value) < 1e-4 else value
@@ -3065,6 +3759,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
     )
     _AUDIT_CACHE_NAMES = (*_TURN_CACHE_NAMES, "_virus_fragment_layout_cache")
     _MOVEMENT_INEFFICIENCY_PENALTY = 2.0
+    _VIRUS_FRAGMENT_LAYOUT_CACHE_LIMIT = 128
 
     def __init__(
         self,
@@ -6822,18 +7517,7 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                     ),
                 )
             )
-        layout_key = (piece_radius, piece_count)
-        offsets = self._virus_fragment_layout_cache.get(layout_key)
-        self._record_cache_access("virus_layout", hit=offsets is not None)
-        if offsets is None:
-            offsets = virus_replacement_positions(
-                center_x=0.0,
-                center_y=0.0,
-                piece_radius=piece_radius,
-                piece_count=piece_count,
-                overlap_epsilon=SAME_PLAYER_OVERLAP_EPSILON,
-            )
-            self._virus_fragment_layout_cache[layout_key] = offsets
+        offsets = self._virus_fragment_layout(piece_radius, piece_count)
         post_blobs = [
             (blob.x, blob.y, blob.radius, blob.mass)
             for blob in own_blobs
@@ -6914,6 +7598,34 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
             0.0,
             1.0,
         )
+
+    def _virus_fragment_layout(
+        self,
+        piece_radius: float,
+        piece_count: int,
+    ) -> tuple[tuple[float, float], ...]:
+        """Return deterministic offsets without retaining unbounded radii."""
+
+        layout_key = (piece_radius, piece_count)
+        offsets = self._virus_fragment_layout_cache.get(layout_key)
+        self._record_cache_access("virus_layout", hit=offsets is not None)
+        if offsets is not None:
+            return offsets
+        offsets = virus_replacement_positions(
+            center_x=0.0,
+            center_y=0.0,
+            piece_radius=piece_radius,
+            piece_count=piece_count,
+            overlap_epsilon=SAME_PLAYER_OVERLAP_EPSILON,
+        )
+        if len(self._virus_fragment_layout_cache) >= (
+            self._VIRUS_FRAGMENT_LAYOUT_CACHE_LIMIT
+        ):
+            self._virus_fragment_layout_cache.pop(
+                next(iter(self._virus_fragment_layout_cache))
+            )
+        self._virus_fragment_layout_cache[layout_key] = offsets
+        return offsets
 
     def _proxy_virus_actions(
         self,
