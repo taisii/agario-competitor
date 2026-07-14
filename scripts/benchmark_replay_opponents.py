@@ -1,4 +1,4 @@
-"""Benchmark one strategy against seven copies of every saved strategy.
+"""Benchmark one candidate strategy against every saved opponent.
 
 Each opponent is tested with the candidate in the first and last player slot.
 This is deliberately stricter than a mixed-field screen: a win means the
@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+import sys
 
 if __package__:
     from .benchmark_simulations import (
@@ -29,22 +30,20 @@ else:
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENTRIES = ROOT / "bots" / "entries"
-DEFAULT_OUTPUT = ROOT / ".agario" / "benchmarks" / "all-strategy-matrix"
-IGNORED_ENTRIES = {
-    "_runner",
-    "random_opponent",
-    "random_replay_opponent",
-}
+sys.path.insert(0, str(ROOT / "bots"))
+
+from strategies.replay_opponents import REPLAY_OPPONENT_SPECS  # noqa: E402
 
 
-def saved_strategy_names(candidate: str) -> tuple[str, ...]:
-    names = {
-        path.stem
-        for path in ENTRIES.glob("*.py")
-        if path.stem not in IGNORED_ENTRIES and path.stem != candidate
-    }
-    return tuple(sorted(names))
+DEFAULT_OUTPUT = ROOT / ".agario" / "benchmarks" / "all-opponent-matrix"
+
+
+def saved_opponent_names(candidate: str) -> tuple[str, ...]:
+    return tuple(
+        spec.name
+        for _, spec in sorted(REPLAY_OPPONENT_SPECS.items())
+        if spec.name != candidate
+    )
 
 
 def summarize_opponent_rows(
@@ -116,7 +115,7 @@ async def run_cell(
 
 
 async def run_matrix(args: argparse.Namespace) -> list[dict[str, object]]:
-    opponents = tuple(args.opponents or saved_strategy_names(args.candidate))
+    opponents = tuple(args.opponents or saved_opponent_names(args.candidate))
     layouts = (0,) if args.single_layout else (0, 7)
     semaphore = asyncio.Semaphore(max(1, args.jobs))
     args.output_root.mkdir(parents=True, exist_ok=True)

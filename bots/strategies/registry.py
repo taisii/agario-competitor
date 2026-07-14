@@ -141,37 +141,8 @@ _BUILT_IN_SPECS = (
     ),
 )
 
-REPLAY_TEAM_IDS = (
-    1, 2, 3, 4, 5, 6, 9, 10, 12, 13, 14, 15, 16, 17, 21, 22, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 34, 35, 38, 39, 44, 48, 49, 51, 53,
-    55, 56, 58, 59, 63, 68, 75, 77,
-)
-
-CUSTOM_REPLAY_TEAM_IDS = frozenset(
-    {1, 4, 13, 16, 22, 25, 29, 31, 35, 39, 44, 51, 53, 56, 68}
-)
-PROFILED_OPPONENT_TEAM_IDS = frozenset({2, 6, 27, 30, 38, 75})
-
-_REPLAY_SPECS = tuple(
-    _spec(
-        f"replay_team_{team_id}",
-        (
-            f"strategies.replay_team_{team_id}:ReplayTeam{team_id}Strategy"
-            if team_id in CUSTOM_REPLAY_TEAM_IDS
-            else (
-                "strategies.replay_opponent_policies:create_profiled_opponent_strategy"
-                if team_id in PROFILED_OPPONENT_TEAM_IDS
-                else "strategies.replay_imitation:create_profiled_replay_strategy"
-            )
-        ),
-        "replay_opponent",
-        factory_argument=None if team_id in CUSTOM_REPLAY_TEAM_IDS else team_id,
-    )
-    for team_id in REPLAY_TEAM_IDS
-)
-
 STRATEGY_SPECS: dict[str, StrategySpec] = {
-    spec.name: spec for spec in (*_BUILT_IN_SPECS, *_REPLAY_SPECS)
+    spec.name: spec for spec in _BUILT_IN_SPECS
 }
 
 # Old commands remain valid, but aliases are intentionally excluded from the
@@ -222,52 +193,6 @@ class RandomOpponentStrategy:
             selected_name = self._select_name(context.game.state.me.player_id)
             self._selected = create_strategy(selected_name)
             self.name = f"random_opponent:{selected_name}"
-        return self._selected.choose(context)
-
-
-def select_replay_team_id(
-    *,
-    player_id: int,
-    base_seed: int,
-    trial: int,
-    team_ids: tuple[int, ...] = REPLAY_TEAM_IDS,
-) -> int:
-    """Select a replay opponent reproducibly for one benchmark slot."""
-
-    if not team_ids:
-        raise ValueError("Random replay opponent requires at least one team")
-    seed = base_seed ^ ((trial + 1) * 0x9E3779B1) ^ ((player_id + 1) * 0x85EBCA77)
-    return random.Random(seed).choice(team_ids)
-
-
-class RandomReplayOpponentStrategy:
-    """Lazily choose a replay clone after the engine assigns a player slot."""
-
-    name = "random_replay_opponent"
-
-    def __init__(
-        self,
-        *,
-        base_seed: int,
-        trial: int,
-        on_selected: Callable[[str], None] | None = None,
-    ) -> None:
-        self._base_seed = base_seed
-        self._trial = trial
-        self._on_selected = on_selected
-        self._selected: Strategy | None = None
-
-    def choose(self, context):
-        if self._selected is None:
-            team_id = select_replay_team_id(
-                player_id=int(context.game.state.me.player_id),
-                base_seed=self._base_seed,
-                trial=self._trial,
-            )
-            self._selected = create_strategy(f"replay_team_{team_id}")
-            self.name = self._selected.name
-            if self._on_selected is not None:
-                self._on_selected(self.name)
         return self._selected.choose(context)
 
 
@@ -340,16 +265,3 @@ def create_random_opponent_strategy() -> Strategy:
     seed = int(os.environ.get("BOT_RANDOM_SEED", os.getpid() ^ time.time_ns()))
     trial = int(os.environ.get("BOT_BENCHMARK_TRIAL", "0"))
     return RandomOpponentStrategy(candidates, base_seed=seed, trial=trial)
-
-
-def create_random_replay_opponent_strategy(
-    *,
-    on_selected: Callable[[str], None] | None = None,
-) -> Strategy:
-    seed = int(os.environ.get("BOT_RANDOM_SEED", os.getpid() ^ time.time_ns()))
-    trial = int(os.environ.get("BOT_BENCHMARK_TRIAL", "0"))
-    return RandomReplayOpponentStrategy(
-        base_seed=seed,
-        trial=trial,
-        on_selected=on_selected,
-    )

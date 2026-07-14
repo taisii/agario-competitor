@@ -8,9 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts import benchmark_all_strategies  # noqa: E402
-from scripts.benchmark_all_strategies import (  # noqa: E402
+from scripts import benchmark_replay_opponents  # noqa: E402
+from scripts.benchmark_replay_opponents import (  # noqa: E402
     run_cell,
+    saved_opponent_names,
     summarize_opponent_rows,
 )
 
@@ -35,6 +36,12 @@ def test_summary_requires_every_match_to_finish_with_a_rank() -> None:
     assert summary["matches"] == 2
     assert summary["successful_matches"] == 1
     assert summary["passed"] is False
+
+
+def test_default_matrix_uses_only_the_curated_replay_panel() -> None:
+    assert saved_opponent_names("replay_dominance") == (
+        "replay_team_21",
+    )
 
 
 def test_summary_passes_only_a_majority_over_all_requested_matches() -> None:
@@ -62,13 +69,13 @@ def test_matrix_cell_reuses_match_runner_and_global_job_limit(
         captured.update(kwargs)
         return expected
 
-    monkeypatch.setattr(benchmark_all_strategies, "run_all", fake_run_all)
-    monkeypatch.setattr(benchmark_all_strategies, "write_outputs", lambda *_: None)
+    monkeypatch.setattr(benchmark_replay_opponents, "run_all", fake_run_all)
+    monkeypatch.setattr(benchmark_replay_opponents, "write_outputs", lambda *_: None)
 
     actual = asyncio.run(
         run_cell(
             candidate="replay_dominance",
-            opponent="replay_team_2",
+            opponent="replay_team_1",
             candidate_slot=7,
             trials=4,
             output_root=tmp_path,

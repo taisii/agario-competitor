@@ -20,7 +20,7 @@ from strategies.replay_imitation import (
     predict_split,
 )
 from strategies.replay_profiles import PROFILES
-from strategies.registry import REPLAY_TEAM_IDS
+from strategies.replay_opponents import OBSERVED_REPLAY_TEAM_IDS
 
 
 def _observation() -> ImitationObservation:
@@ -167,6 +167,6 @@ def test_probabilistic_angle_grid_with_full_rate_is_deterministic() -> None:
 
 
 def test_generated_profiles_cover_all_replay_opponents() -> None:
-    assert set(PROFILES) == set(REPLAY_TEAM_IDS)
+    assert set(PROFILES) == set(OBSERVED_REPLAY_TEAM_IDS)
     for profile in PROFILES.values():
         assert profile.source_matches

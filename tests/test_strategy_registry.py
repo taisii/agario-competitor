@@ -11,18 +11,23 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bots"))
 
-from strategies.registry import (  # noqa: E402
+from strategies.replay_opponents import (  # noqa: E402
     CUSTOM_REPLAY_TEAM_IDS,
+    REPLAY_OPPONENT_SPECS,
+    REPLAY_TEAM_IDS,
+    RandomReplayOpponent,
+    create_replay_opponent,
+    select_replay_team_id,
+)
+from strategies.registry import (  # noqa: E402
     STRATEGY_SPECS,
     RandomOpponentStrategy,
-    RandomReplayOpponentStrategy,
     available_strategy_names,
     create_strategy,
-    select_replay_team_id,
     submission_strategy_spec,
     submission_strategy_names,
 )
-import strategies.registry as registry  # noqa: E402
+import strategies.replay_opponents as replay_opponents  # noqa: E402
 
 
 def test_random_opponent_selection_is_paired_and_reproducible() -> None:
@@ -58,7 +63,28 @@ assert implementation_modules.isdisjoint(sys.modules)
     )
 
 
-def test_strategy_catalog_matches_custom_replay_modules_and_public_names() -> None:
+def test_replay_opponent_catalog_import_does_not_eagerly_import_opponents() -> None:
+    script = """
+import sys
+from strategies.replay_opponents import REPLAY_OPPONENT_SPECS
+
+assert REPLAY_OPPONENT_SPECS
+implementation_modules = {
+    "strategies.replay_imitation",
+    "strategies.replay_opponent_policies",
+    "strategies.replay_team_1",
+}
+assert implementation_modules.isdisjoint(sys.modules)
+"""
+    subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        env={"PYTHONPATH": str(ROOT / "bots")},
+        check=True,
+    )
+
+
+def test_strategy_and_replay_opponent_catalogs_have_distinct_public_names() -> None:
     modules = {
         int(path.stem.removeprefix("replay_team_"))
         for path in (ROOT / "bots" / "strategies").glob("replay_team_*.py")
@@ -66,6 +92,22 @@ def test_strategy_catalog_matches_custom_replay_modules_and_public_names() -> No
 
     assert modules == CUSTOM_REPLAY_TEAM_IDS
     assert tuple(sorted(STRATEGY_SPECS)) == available_strategy_names()
+    assert available_strategy_names() == (
+        "food_greedy",
+        "potential_field_hunter",
+        "potential_field_virus_farmer",
+        "replay_dominance",
+        "survival_greedy",
+        "threat_aware_receding_horizon",
+        "virus_hunter",
+    )
+    assert REPLAY_TEAM_IDS == (21,)
+    assert tuple(sorted(REPLAY_OPPONENT_SPECS)) == REPLAY_TEAM_IDS
+    entry_team_ids = {
+        int(path.stem.removeprefix("replay_team_"))
+        for path in (ROOT / "bots" / "entries").glob("replay_team_*.py")
+    }
+    assert entry_team_ids == set(REPLAY_TEAM_IDS)
     assert submission_strategy_names() == (
         "replay_dominance",
         "threat_aware_receding_horizon",
@@ -104,11 +146,11 @@ def test_random_replay_strategy_selects_lazily_and_reports_once(monkeypatch) -> 
             return "decision"
 
     monkeypatch.setattr(
-        registry,
-        "create_strategy",
-        lambda name: constructed_names.append(name) or StubStrategy(),
+        replay_opponents,
+        "create_replay_opponent",
+        lambda team_id: constructed_names.append(team_id) or StubStrategy(),
     )
-    strategy = RandomReplayOpponentStrategy(
+    strategy = RandomReplayOpponent(
         base_seed=20260712,
         trial=3,
         on_selected=selected_names.append,
@@ -118,7 +160,7 @@ def test_random_replay_strategy_selects_lazily_and_reports_once(monkeypatch) -> 
     )
     assert strategy.choose(context) == "decision"
     assert strategy.choose(context) == "decision"
-    assert constructed_names == [f"replay_team_{expected_team_id}"]
+    assert constructed_names == [expected_team_id]
     assert selected_names == [f"replay_team_{expected_team_id}"]
     assert decisions == [context, context]
 
@@ -128,9 +170,19 @@ def test_every_catalog_entry_constructs_the_declared_strategy() -> None:
         assert create_strategy(name).name == name
 
 
+def test_every_replay_opponent_constructs_the_declared_team() -> None:
+    for team_id, spec in REPLAY_OPPONENT_SPECS.items():
+        assert create_replay_opponent(team_id).name == spec.name
+
+
 def test_unknown_strategy_fails_explicitly() -> None:
     with pytest.raises(ValueError, match="Unknown strategy"):
         create_strategy("removed_strategy")
+
+
+def test_replay_opponent_is_not_presented_as_a_candidate_strategy() -> None:
+    with pytest.raises(ValueError, match="Unknown strategy"):
+        create_strategy("replay_team_2")
 
 
 def test_random_replay_selection_is_paired_per_trial_and_slot() -> None:
@@ -152,4 +204,4 @@ def test_random_replay_selection_is_paired_per_trial_and_slot() -> None:
     ]
 
     assert first == second
-    assert len(set(first)) > 1
+    assert set(first) == set(REPLAY_TEAM_IDS)

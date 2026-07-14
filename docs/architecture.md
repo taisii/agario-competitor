@@ -33,8 +33,9 @@ Game query
 
 - Engine rules have one authoritative implementation. A policy must not carry
   a private variation of food, virus, split, merge, or visibility semantics.
-- Public strategy names and legacy aliases are declared in the strategy
-  catalog. Importing the catalog must not import every implementation.
+- Public candidate strategy names and legacy aliases are declared in the
+  strategy catalog. Replay-derived opponents have a separate catalog keyed by
+  official team ID. Importing either catalog must not import every implementation.
 - Simulator entry files are declarative adapters. The query loop exists only
   in the runtime.
 - Replay opponents may share implementation and differ by immutable profiles,
@@ -46,7 +47,8 @@ Game query
 
 1. Reuse the shared state and simulation layers.
 2. Implement only the policy-specific candidate or evaluation behavior.
-3. Add a catalog entry with its category and submission capability.
+3. Add a strategy-catalog entry with its category and submission capability.
+   Add replay-derived behavior to the opponent catalog instead.
 4. Test shared policy behavior once. Add strategy-specific tests only for new
    behavior that is not covered by the catalog or engine contracts.
 5. Compare it against the current candidate using immutable benchmark runs.

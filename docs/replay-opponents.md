@@ -5,9 +5,11 @@ The 20 official replay files under
 appears exactly once in every match and is treated as this repository's team.
 The remaining 140 slots collapse to 42 stable opponent `team_id` values.
 Replay files do not include public team names, so clone names intentionally use
-those stable IDs: `replay_team_<id>`.
+those stable IDs: `replay_team_<id>`. Historical profiles remain available for
+analysis, while only a curated high-pressure panel is exposed as runnable
+opponents.
 
-Each opponent has a runnable simulator entry:
+Each active opponent has a runnable simulator entry:
 
 - `bots/entries/replay_team_<id>.py`: a simulator entry point that runs that
   policy directly and does not depend on global environment configuration.
@@ -24,22 +26,16 @@ circle visibility, food/virus lifecycle, player blobs, and mass rankings.
 
 ## Run a local panel
 
-Select any seven opponent entries alongside the bot under development. Counts
-must sum to eight:
+Use the active opponent entry alongside the bot under development. Repeat it
+to fill the seven opponent slots; counts must sum to eight:
 
 ```bash
 uv run simulation \
   1:bots/my_bot.py \
-  1:bots/entries/replay_team_2.py \
-  1:bots/entries/replay_team_13.py \
-  1:bots/entries/replay_team_17.py \
-  1:bots/entries/replay_team_22.py \
-  1:bots/entries/replay_team_25.py \
-  1:bots/entries/replay_team_35.py \
-  1:bots/entries/replay_team_44.py
+  7:bots/entries/replay_team_21.py
 ```
 
-Smoke-test every available clone in mixed 8-player matches:
+Smoke-test every active clone in mixed 8-player matches:
 
 ```bash
 uv run python scripts/simulate_replay_opponents.py
@@ -107,13 +103,49 @@ headings or sparse split decisions that cannot be inferred from observable
 state. Such clones reproduce the observed movement style and event frequency,
 but are not mislabeled as exact behavioral copies.
 
-## Per-opponent verdicts
+## Active high-pressure panel
 
-All 42 entries construct through the shared strategy catalog and finish mixed
-local simulations without a ban or timeout. Eleven pass the full-data autonomous
-shadow gate. Nine also pass the stronger match-held-out gate. `Style only`
-means the clone reproduces observed direction grids, inertia, target priority,
-or split frequency, but not the exact hidden random sequence or split timing.
+The active panel has two gates. The official-results gate requires at least
+three completed matches, mean final rank at most 4.0, top-three rate at least
+one third, mean kills at least 4.0, and mean splits at least 1.0. The activity
+gates prevent passive food-only policies from entering on a favourable
+placement sample alone.
+
+The clone-runtime gate then runs every official qualifier in a deterministic,
+slot-rotated league. Every clone must first complete an 8-clone liveness match,
+then complete all eight league appearances, with mean league rank at most 4.5
+and a top-three rate of at least 25%. This measures the executable clone, not
+just the historical team that inspired it.
+
+The current report records 11 liveness successes and selects this runnable
+opponent:
+
+| Team | League appearances | Completion | Mean rank | Top-three rate |
+|---:|---:|---:|---:|---:|
+| 21 | 8 | 100% | 3.625 | 75.0% |
+
+Regenerate the report and review the proposed set when a new replay cohort is
+available:
+
+```bash
+uv run python scripts/rank_replay_opponents.py \
+  --replay-dir .agario/replays/official/submission-4 \
+  --replay-dir .agario/replays/official/submission-4-extra \
+  --verify-catalog
+```
+
+Before that verification, regenerate the clone measurement:
+
+```bash
+uv run python scripts/benchmark_replay_clone_strength.py
+```
+
+## Archived reproduction verdicts
+
+The table below covers all 42 observed teams, including profiles retained only
+for replay analysis. `Style only` means the clone reproduces observed direction
+grids, inertia, target priority, or split frequency, but not the exact hidden
+random sequence or split timing.
 
 | Team | Shadow | LOMO | Reconstructed behavior |
 |---:|:---:|:---:|---|

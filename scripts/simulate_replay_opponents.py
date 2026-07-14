@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
-import re
+import sys
 
 if __package__:
     from .benchmark_simulations import parse_outcome
@@ -15,15 +15,19 @@ else:
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENTRY_PATTERN = re.compile(r"replay_team_(\d+)\.py$")
+sys.path.insert(0, str(ROOT / "bots"))
+
+from strategies.replay_opponents import REPLAY_TEAM_IDS, replay_opponent_name  # noqa: E402
 
 
 def discover_entries() -> dict[int, Path]:
-    entries: dict[int, Path] = {}
-    for path in (ROOT / "bots/entries").glob("replay_team_*.py"):
-        match = ENTRY_PATTERN.fullmatch(path.name)
-        if match:
-            entries[int(match.group(1))] = path
+    entries = {
+        team_id: ROOT / "bots" / "entries" / f"{replay_opponent_name(team_id)}.py"
+        for team_id in REPLAY_TEAM_IDS
+    }
+    missing = [team_id for team_id, path in entries.items() if not path.is_file()]
+    if missing:
+        raise RuntimeError(f"Missing replay opponent entries for teams: {missing}")
     return entries
 
 

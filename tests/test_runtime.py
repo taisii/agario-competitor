@@ -153,3 +153,14 @@ def test_strategy_environment_defaults_are_scoped_to_one_run(monkeypatch) -> Non
     assert len(seen) == 1
     assert seen[0][1] == "temporary"
     assert "BOT_SCOPED_OPTION" not in runtime.os.environ
+
+
+def test_replay_opponent_runtime_uses_the_opponent_catalog(monkeypatch) -> None:
+    factories = []
+    monkeypatch.setattr(runtime, "run_bot", lambda factory: factories.append(factory))
+
+    runtime.run_replay_opponent(25)
+
+    assert len(factories) == 1
+    monkeypatch.setattr(runtime, "create_replay_opponent", lambda team_id: team_id)
+    assert factories[0]() == 25
