@@ -815,14 +815,13 @@ class ThreatAwareRecedingHorizonStrategy:
         if not own_blobs:
             return None
 
-        self._read_public_moves(context)
         arena_size = float(state.map.size or ARENA_SIZE)
         viruses = tuple(state.visible_viruses)
-        tracked_enemies = self._update_enemy_memory(
+        planning_enemies = self._planning_enemies(
             context,
             own_blobs,
             arena_size,
-            viruses=viruses,
+            viruses,
         )
         center = _mass_center(own_blobs)
         foods = tuple(
@@ -834,7 +833,7 @@ class ThreatAwareRecedingHorizonStrategy:
         exposed_own_radii = self._exposed_own_radii(own_blobs)
         enemies = tuple(
             sorted(
-                tracked_enemies,
+                planning_enemies,
                 key=lambda enemy: self._enemy_priority(
                     enemy,
                     own_blobs,
@@ -1159,6 +1158,50 @@ class ThreatAwareRecedingHorizonStrategy:
                 )
                 exposed.append((own, virus_piece_radius))
         return tuple(exposed)
+
+    @staticmethod
+    def _visible_enemies(visible_blobs) -> tuple[EnemyBlob, ...]:
+        """Canonicalise one observation without trusting per-query blob IDs."""
+
+        ordered = sorted(
+            visible_blobs,
+            key=lambda blob: (
+                int(blob.player_id),
+                float(blob.pos[0]),
+                float(blob.pos[1]),
+                float(blob.radius),
+                int(blob.merge_cooldown),
+            ),
+        )
+        next_id_by_player: dict[int, int] = {}
+        enemies: list[EnemyBlob] = []
+        for blob in ordered:
+            player_id = int(blob.player_id)
+            ephemeral_id = next_id_by_player.get(player_id, 0)
+            next_id_by_player[player_id] = ephemeral_id + 1
+            enemies.append(
+                EnemyBlob(
+                    player_id=player_id,
+                    blob_id=ephemeral_id,
+                    x=float(blob.pos[0]),
+                    y=float(blob.pos[1]),
+                    radius=float(blob.radius),
+                    merge_cooldown=int(blob.merge_cooldown),
+                )
+            )
+        return tuple(enemies)
+
+    def _planning_enemies(
+        self,
+        context: StrategyContext,
+        own_blobs: tuple[OwnBlob, ...],
+        arena_size: float,
+        viruses: tuple[VirusModel, ...],
+    ) -> tuple[EnemyBlob, ...]:
+        """Use only the current anonymous view for the default planner."""
+
+        del own_blobs, arena_size, viruses
+        return self._visible_enemies(context.game.state.visible_blobs)
 
     def _update_enemy_memory(
         self,

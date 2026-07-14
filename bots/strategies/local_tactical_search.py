@@ -337,6 +337,23 @@ class LocalTacticalSearchStrategy(ExpectedFinalMassStrategy):
             viruses=viruses,
         )
 
+    def _planning_enemies(
+        self,
+        context: StrategyContext,
+        own_blobs: tuple[OwnBlob, ...],
+        arena_size: float,
+        viruses: tuple[VirusModel, ...],
+    ) -> tuple[EnemyBlob, ...]:
+        """Use geometric belief memory only for the local tactical planner."""
+
+        self._read_public_moves(context)
+        return self._update_enemy_memory(
+            context,
+            own_blobs,
+            arena_size,
+            viruses=viruses,
+        )
+
     def _prepare_turn(self, context: StrategyContext) -> PlanningTurn | None:
         turn = super()._prepare_turn(context)
         self._advisor_planning_turn = turn

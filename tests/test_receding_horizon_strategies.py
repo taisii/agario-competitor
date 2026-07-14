@@ -1029,6 +1029,50 @@ def test_enemy_memory_predicts_every_track_once_before_authoritative_overwrite(
     assert enemies[0].pos == visible.pos
 
 
+def test_replay_dominance_planning_uses_only_the_current_anonymous_view() -> None:
+    strategy = ReplayDominanceStrategy()
+    strategy.enemy_tracks[(1, 42)] = EnemyTrack(
+        player_id=1,
+        blob_id=42,
+        x=10.0,
+        y=10.0,
+        radius=4.0,
+        direction=(1.0, 0.0),
+        last_seen_round=4,
+    )
+    visible = SimpleNamespace(
+        player_id=2,
+        blob_id=99,
+        pos=(20.0, 30.0),
+        radius=2.0,
+        merge_cooldown=3,
+    )
+    context = SimpleNamespace(
+        game=SimpleNamespace(
+            state=SimpleNamespace(visible_blobs=(visible,)),
+        )
+    )
+
+    enemies = strategy._planning_enemies(
+        context,
+        (OwnBlob(blob_id=0, x=30.0, y=30.0, radius=1.0),),
+        60.0,
+        (),
+    )
+
+    assert enemies == (
+        EnemyBlob(
+            player_id=2,
+            blob_id=0,
+            x=20.0,
+            y=30.0,
+            radius=2.0,
+            merge_cooldown=3,
+        ),
+    )
+    assert set(strategy.enemy_tracks) == {(1, 42)}
+
+
 def test_replay_dominance_does_not_reorder_by_semantic_family() -> None:
     strategy = ReplayDominanceStrategy()
     ordered = strategy._order_root_actions(
