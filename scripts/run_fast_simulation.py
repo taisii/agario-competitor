@@ -47,6 +47,9 @@ def forward_engine_overrides(
     for key in (
         "AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS",
         "AGARIO_LOCAL_TURN_TIMEOUT_SECONDS",
+        "AGARIO_LOCAL_RELAXED_PLAYER_IDS",
+        "AGARIO_STRICT_CUMULATIVE_TIMEOUT_SECONDS",
+        "AGARIO_STRICT_TURN_TIMEOUT_SECONDS",
     ):
         if key in source:
             env[key] = source[key]

@@ -15,8 +15,8 @@ BOTS = ROOT / "bots"
 sys.path.insert(0, str(BOTS))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from calibrate_expected_responses import extract_frames  # noqa: E402
 from compare_strategy_decisions import _angle_degrees, _context  # noqa: E402
+from replay_frames import extract_frames  # noqa: E402
 from lib.config.player import FOOD_RADIUS  # noqa: E402
 from strategies.receding_horizon import ReplayDominanceStrategy  # noqa: E402
 from strategies.semantic_potential import SemanticPotentialStrategy  # noqa: E402

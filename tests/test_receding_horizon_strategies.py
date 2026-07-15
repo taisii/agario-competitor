@@ -46,9 +46,13 @@ from strategies.world_transition import (  # noqa: E402
 from lib.config.player import MASS_DECAY_RATE, SAME_PLAYER_OVERLAP_EPSILON  # noqa: E402
 
 
-def test_legacy_receding_horizon_names_resolve_without_duplicate_list_entries() -> None:
-    assert create_strategy("champion").name == "threat_aware_receding_horizon"
-    assert "champion" not in available_strategy_names()
+def test_removed_legacy_receding_horizon_name_fails_explicitly() -> None:
+    try:
+        create_strategy("champion")
+    except ValueError as error:
+        assert "Unknown strategy" in str(error)
+    else:
+        raise AssertionError("removed aliases must not silently select another policy")
 
 
 def test_replay_dominance_is_a_distinct_registered_strategy() -> None:

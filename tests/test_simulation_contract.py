@@ -35,14 +35,12 @@ from simulation.rules import (  # noqa: E402
 )
 from strategies.base import StrategyContext  # noqa: E402
 from strategies.features import can_consume_virus as feature_can_consume_virus  # noqa: E402
-from strategies.potential_field import player_speed as potential_field_speed  # noqa: E402
 from strategies.receding_horizon import (  # noqa: E402
     EnemyBlob,
     EnemyTrack,
     OwnBlob,
     ThreatAwareRecedingHorizonStrategy,
 )
-from strategies.virus_farming import VirusHunterStrategy  # noqa: E402
 
 
 def _engine_state(*, own_radius: float, enemy_radius: float) -> GameState:
@@ -92,9 +90,6 @@ def test_shared_physics_primitives_match_installed_engine() -> None:
         )
         == expected_speed
     )
-    assert potential_field_speed(radius) == expected_speed
-    assert VirusHunterStrategy()._speed(radius) == expected_speed
-
     expected_can_consume = mutator._can_consume_virus(
         authoritative.players[0].blobs[0],
         virus_radius,

@@ -25,7 +25,7 @@ BOTS = ROOT / "bots"
 sys.path.insert(0, str(BOTS))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from calibrate_expected_responses import (  # noqa: E402
+from replay_frames import (  # noqa: E402
     ReplayFrame,
     _circle_visible,
     _mass_center,

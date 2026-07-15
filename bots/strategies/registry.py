@@ -97,78 +97,15 @@ def _submission(
 
 
 _BUILT_IN_SPECS = (
-    _spec("food_greedy", "strategies.greedy:FoodGreedyStrategy", "baseline"),
     _spec(
         "event_driven_static_search",
         "strategies.event_driven:EventDrivenStaticSearchStrategy",
         "search",
         submission=_submission(
             "EventDrivenStaticSearchStrategy",
-            "bots/strategies/greedy.py",
             "bots/strategies/receding_horizon.py",
             "bots/strategies/event_driven.py",
-            local_only_classes=frozenset(),
         ),
-    ),
-    _spec(
-        "expected_final_mass",
-        "strategies.expected_final_mass:ExpectedFinalMassStrategy",
-        "search",
-        submission=_submission(
-            "ExpectedFinalMassStrategy",
-            "bots/strategies/randomness.py",
-            "bots/strategies/replay_imitation.py",
-            "bots/strategies/replay_profiles.py",
-            "bots/strategies/receding_horizon.py",
-            "bots/strategies/expected_final_mass.py",
-        ),
-    ),
-    _spec(
-        "local_tactical_search",
-        "strategies.local_tactical_search:LocalTacticalSearchStrategy",
-        "search",
-        submission=_submission(
-            "LocalTacticalSearchStrategy",
-            "bots/strategies/randomness.py",
-            "bots/strategies/replay_imitation.py",
-            "bots/strategies/replay_profiles.py",
-            "bots/strategies/receding_horizon.py",
-            "bots/strategies/expected_final_mass.py",
-            "bots/strategies/local_tactical_search.py",
-        ),
-    ),
-    _spec(
-        "local_tactical_search_reference",
-        "strategies.local_tactical_search:LocalTacticalSearchReferenceStrategy",
-        "reference",
-    ),
-    _spec(
-        "potential_field_hunter",
-        "strategies.potential_field:PotentialFieldHunterStrategy",
-        "potential_field",
-    ),
-    _spec(
-        "potential_tactical_hybrid",
-        "strategies.potential_tactical_hybrid:PotentialTacticalHybridStrategy",
-        "search",
-        submission=_submission(
-            "PotentialTacticalHybridStrategy",
-            "bots/strategies/randomness.py",
-            "bots/strategies/replay_imitation.py",
-            "bots/strategies/replay_profiles.py",
-            "bots/strategies/receding_horizon.py",
-            "bots/strategies/expected_final_mass.py",
-            "bots/strategies/local_tactical_search.py",
-            after_features_modules=(
-                "bots/strategies/potential_field.py",
-                "bots/strategies/potential_tactical_hybrid.py",
-            ),
-        ),
-    ),
-    _spec(
-        "potential_field_virus_farmer",
-        "strategies.virus_farming:PotentialFieldVirusFarmerStrategy",
-        "potential_field",
     ),
     _spec(
         "replay_dominance",
@@ -177,6 +114,15 @@ _BUILT_IN_SPECS = (
         submission=_submission(
             "ReplayDominanceStrategy",
             "bots/strategies/receding_horizon.py",
+        ),
+    ),
+    _spec(
+        "semantic_lookahead",
+        "strategies.semantic_potential:SemanticLookaheadStrategy",
+        "search",
+        submission=_submission(
+            "SemanticLookaheadStrategy",
+            "bots/strategies/semantic_potential.py",
         ),
     ),
     _spec(
@@ -198,20 +144,6 @@ _BUILT_IN_SPECS = (
         ),
     ),
     _spec(
-        "static_option_growth",
-        "strategies.virus_farming:StaticOptionGrowthStrategy",
-        "potential_field",
-        submission=_submission(
-            "StaticOptionGrowthStrategy",
-            "bots/strategies/greedy.py",
-            "bots/strategies/potential_field.py",
-            "bots/strategies/receding_horizon.py",
-            "bots/strategies/virus_farming.py",
-            local_only_classes=frozenset({"ReplayDominanceStrategy"}),
-        ),
-    ),
-    _spec("survival_greedy", "strategies.greedy:SurvivalGreedyStrategy", "baseline"),
-    _spec(
         "threat_aware_receding_horizon",
         "strategies.receding_horizon:ThreatAwareRecedingHorizonStrategy",
         "search",
@@ -221,37 +153,21 @@ _BUILT_IN_SPECS = (
             local_only_classes=frozenset({"ReplayDominanceStrategy"}),
         ),
     ),
-    _spec(
-        "virus_hunter",
-        "strategies.virus_farming:VirusHunterStrategy",
-        "potential_field",
-        submission=_submission(
-            "VirusHunterStrategy",
-            "bots/strategies/greedy.py",
-            "bots/strategies/receding_horizon.py",
-            "bots/strategies/virus_farming.py",
-            local_only_classes=frozenset(
-                {"PotentialFieldVirusFarmerStrategy", "ReplayDominanceStrategy"}
-            ),
-        ),
-    ),
 )
 
 STRATEGY_SPECS: dict[str, StrategySpec] = {spec.name: spec for spec in _BUILT_IN_SPECS}
 
-# Old commands remain valid, but aliases are intentionally excluded from the
-# public strategy list so every behavior appears exactly once.
-LEGACY_STRATEGY_ALIASES = {
-    "champion": "threat_aware_receding_horizon",
-    "p3_virus_farmer": "potential_field_virus_farmer",
-    "potential_hunter": "potential_field_hunter",
-}
+# Removed strategies deliberately have no compatibility aliases. A stale
+# benchmark command should fail rather than silently exercising another policy.
+LEGACY_STRATEGY_ALIASES: dict[str, str] = {}
 
 DEFAULT_RANDOM_OPPONENT_STRATEGIES = (
-    "food_greedy",
-    "survival_greedy",
-    "potential_field_hunter",
-    "potential_field_virus_farmer",
+    "semantic_lookahead",
+    "semantic_potential",
+    "replay_dominance",
+    "threat_aware_receding_horizon",
+    "event_driven_static_search",
+    "static_retained_growth",
 )
 
 
@@ -275,12 +191,16 @@ class RandomOpponentStrategy:
         self._selected: Strategy | None = None
 
     def _select_name(self, player_id: int) -> str:
+        # Shuffle once per paired trial, then cycle by slot. With the standard
+        # candidate-at-slot-zero layout, opponent slots 1..7 always cover all
+        # six policies; only the duplicated policy and placement vary.
         seed = (
             self._base_seed
             ^ ((self._trial + 1) * 0x9E3779B1)
-            ^ ((player_id + 1) * 0x85EBCA77)
         )
-        return random.Random(seed).choice(self._candidates)
+        shuffled = list(self._candidates)
+        random.Random(seed).shuffle(shuffled)
+        return shuffled[(player_id - 1) % len(shuffled)]
 
     def choose(self, context):
         if self._selected is None:

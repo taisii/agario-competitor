@@ -80,11 +80,17 @@ def test_fast_runner_forwards_local_timeout_override() -> None:
         {
             "AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS": "60",
             "AGARIO_LOCAL_TURN_TIMEOUT_SECONDS": "10",
+            "AGARIO_LOCAL_RELAXED_PLAYER_IDS": "1,2,3,4,5,6,7",
+            "AGARIO_STRICT_CUMULATIVE_TIMEOUT_SECONDS": "8",
+            "AGARIO_STRICT_TURN_TIMEOUT_SECONDS": "1",
         },
     )
 
     assert env["AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS"] == "60"
     assert env["AGARIO_LOCAL_TURN_TIMEOUT_SECONDS"] == "10"
+    assert env["AGARIO_LOCAL_RELAXED_PLAYER_IDS"] == "1,2,3,4,5,6,7"
+    assert env["AGARIO_STRICT_CUMULATIVE_TIMEOUT_SECONDS"] == "8"
+    assert env["AGARIO_STRICT_TURN_TIMEOUT_SECONDS"] == "1"
 
 
 def test_local_turn_timeout_override_is_explicit(monkeypatch) -> None:
@@ -94,3 +100,46 @@ def test_local_turn_timeout_override_is_explicit(monkeypatch) -> None:
     run_seeded_engine.configure_local_turn_timeout()
 
     assert run_seeded_engine.player_connection.TIMEOUT_SECONDS == 10
+
+
+def test_player_specific_timeout_keeps_candidate_strict(monkeypatch) -> None:
+    observed = []
+
+    def query(connection, *_args, **_kwargs):
+        observed.append(
+            (
+                connection.player_id,
+                run_seeded_engine.player_connection.TIMEOUT_SECONDS,
+                run_seeded_engine.player_connection.CUMULATIVE_TIMEOUT_SECONDS,
+            )
+        )
+
+    monkeypatch.setattr(
+        run_seeded_engine.player_connection.PlayerConnection,
+        "_query_move",
+        query,
+    )
+    monkeypatch.setattr(
+        run_seeded_engine.player_connection.PlayerConnection,
+        "_query_move_union",
+        query,
+    )
+    monkeypatch.setenv("AGARIO_LOCAL_RELAXED_PLAYER_IDS", "1,2,3,4,5,6,7")
+    monkeypatch.setenv("AGARIO_LOCAL_TURN_TIMEOUT_SECONDS", "10")
+    monkeypatch.setenv("AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS", "60")
+    monkeypatch.setenv("AGARIO_STRICT_TURN_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("AGARIO_STRICT_CUMULATIVE_TIMEOUT_SECONDS", "8")
+
+    assert run_seeded_engine.configure_local_player_timeouts()
+    candidate = run_seeded_engine.player_connection.PlayerConnection.__new__(
+        run_seeded_engine.player_connection.PlayerConnection
+    )
+    candidate.player_id = 0
+    opponent = run_seeded_engine.player_connection.PlayerConnection.__new__(
+        run_seeded_engine.player_connection.PlayerConnection
+    )
+    opponent.player_id = 5
+    candidate._query_move(None, None, None)
+    opponent._query_move(None, None, None)
+
+    assert observed == [(0, 1, 8.0), (5, 10, 60.0)]

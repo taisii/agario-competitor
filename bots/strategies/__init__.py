@@ -8,15 +8,12 @@ from strategies.base import Strategy, StrategyContext, StrategyDecision
 
 
 _LAZY_EXPORTS = {
-    "FoodGreedyStrategy": "strategies.greedy",
     "EventDrivenStaticSearchStrategy": "strategies.event_driven",
-    "PotentialFieldHunterStrategy": "strategies.potential_field",
     "ReplayDominanceStrategy": "strategies.receding_horizon",
-    "StaticOptionGrowthStrategy": "strategies.virus_farming",
+    "SemanticLookaheadStrategy": "strategies.semantic_potential",
+    "SemanticPotentialStrategy": "strategies.semantic_potential",
     "StaticRetainedGrowthStrategy": "strategies.retained_growth",
-    "SurvivalGreedyStrategy": "strategies.greedy",
     "ThreatAwareRecedingHorizonStrategy": "strategies.receding_horizon",
-    "VirusHunterStrategy": "strategies.virus_farming",
 }
 
 
@@ -31,16 +28,13 @@ def __getattr__(name: str):
 
 
 __all__ = [
-    "FoodGreedyStrategy",
     "EventDrivenStaticSearchStrategy",
-    "PotentialFieldHunterStrategy",
     "ReplayDominanceStrategy",
-    "StaticOptionGrowthStrategy",
+    "SemanticLookaheadStrategy",
+    "SemanticPotentialStrategy",
     "StaticRetainedGrowthStrategy",
     "Strategy",
     "StrategyContext",
     "StrategyDecision",
-    "SurvivalGreedyStrategy",
     "ThreatAwareRecedingHorizonStrategy",
-    "VirusHunterStrategy",
 ]
