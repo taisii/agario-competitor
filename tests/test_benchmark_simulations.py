@@ -22,6 +22,7 @@ def _row(variant: str, trial: int, mass: float, result: str = "SUCCESS"):
         "return_code": 0,
         "result_type": result,
         "tracked_mass_sum": mass,
+        "tracked_peak_mass_sum": mass,
     }
 
 
@@ -39,6 +40,23 @@ def test_paired_mass_comparison_uses_trial_differences() -> None:
     assert comparison["variant_mass_mean"] == 19.0
     assert comparison["paired_differences"] == [3.0, 5.0]
     assert comparison["one_sided_95_lower_bound"] == 3.0
+    assert comparison["passed"] is True
+
+
+def test_paired_mass_comparison_uses_final_not_peak_mass() -> None:
+    baseline = _row("current", 0, 20.0)
+    candidate = _row("candidate", 0, 25.0)
+    baseline["tracked_peak_mass_sum"] = 100.0
+    candidate["tracked_peak_mass_sum"] = 10.0
+
+    comparison = paired_mass_comparisons(
+        [baseline, candidate],
+        bootstrap_samples=100,
+    )[0]
+
+    assert comparison["baseline_mass_mean"] == 20.0
+    assert comparison["variant_mass_mean"] == 25.0
+    assert comparison["paired_mean_difference"] == 5.0
     assert comparison["passed"] is True
 
 
@@ -130,12 +148,25 @@ def test_parse_factorial_cells_requires_four_distinct_variants() -> None:
 def test_summarize_metrics_reads_engine_end_to_end_response_time(tmp_path) -> None:
     output = tmp_path / "output"
     output.mkdir()
-    (output / "response_timings.json").write_text(
-        '{"0": 0.75, "1": 1.25, "2": 9.0}\n'
-    )
+    (output / "response_timings.json").write_text('{"0": 0.75, "1": 1.25, "2": 9.0}\n')
 
     summary = summarize_metrics(tmp_path, (0, 1))
 
     assert summary["response_cumulative_sum_seconds"] == 2.0
     assert summary["response_cumulative_mean_seconds"] == 1.0
     assert summary["response_cumulative_max_seconds"] == 1.25
+
+
+def test_summarize_metrics_reports_peak_mass_for_each_tracked_slot(tmp_path) -> None:
+    for slot, masses in ((0, (1.0, 5.0, 3.0)), (1, (2.0, 7.0))):
+        submission = tmp_path / f"submission{slot}"
+        submission.mkdir()
+        (submission / "bot_metrics.jsonl").write_text(
+            "".join(f'{{"my_mass":{mass}}}\n' for mass in masses)
+        )
+
+    summary = summarize_metrics(tmp_path, (0, 1))
+
+    assert summary["tracked_peak_mass_sum"] == 12.0
+    assert summary["tracked_peak_mass_mean"] == 6.0
+    assert summary["tracked_peak_mass_max"] == 7.0

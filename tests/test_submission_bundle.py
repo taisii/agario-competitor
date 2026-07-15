@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+from io import StringIO
 import math
 import subprocess
 import sys
@@ -24,6 +25,13 @@ from strategies.receding_horizon import (  # noqa: E402
 )
 
 
+class _ShortReader(StringIO):
+    """Exercise framed reads that return less than the requested body."""
+
+    def read(self, size: int = -1) -> str:
+        return super().read(min(size, 2) if size > 1 else size)
+
+
 def test_submission_bundle_is_single_file_without_local_imports() -> None:
     with tempfile.TemporaryDirectory() as directory:
         output, digest = build_submission(Path(directory) / "my_bot.py")
@@ -40,6 +48,41 @@ def test_submission_bundle_is_single_file_without_local_imports() -> None:
                 "strategies",
                 "telemetry",
             }
+
+
+def test_submission_fast_query_reader_preserves_framing_and_direct_validation() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "semantic_potential.py",
+            strategy_name="semantic_potential",
+        )
+        module_name = "semantic_fast_input_test"
+        spec = importlib.util.spec_from_file_location(module_name, output)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(module_name, None)
+
+    payload = '{"query_type":"move_player"}'
+    connection = SimpleNamespace(
+        _from_engine_pipe=_ShortReader(f"{len(payload)},{payload}")
+    )
+
+    class FakeQuery:
+        @classmethod
+        def model_validate_json(cls, raw: str) -> str:
+            return raw
+
+    module.QueryMovePlayer = FakeQuery
+    game = SimpleNamespace(connection=connection)
+    module._install_fast_query_reader(game)
+
+    assert connection.get_next_query() == payload
 
 
 def test_virus_hunter_submission_contains_only_required_strategy_classes() -> None:

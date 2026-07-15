@@ -41,8 +41,55 @@ HEADER = '''from __future__ import annotations
 
 ENTRYPOINT_TEMPLATE = '''
 
+def _read_framed_message(connection) -> str:
+    """Read the starter-kit length-prefixed JSON without 1 KiB recopy loops."""
+
+    prefix: list[str] = []
+    for _ in range(8):  # Seven size digits plus the comma delimiter.
+        character = connection._from_engine_pipe.read(1)
+        if character == "":
+            raise EOFError("Engine closed the pipe.")
+        if character == ",":
+            break
+        if not character.isdecimal():
+            raise RuntimeError("Invalid engine message size prefix.")
+        prefix.append(character)
+    else:
+        raise RuntimeError("Invalid engine message size prefix.")
+
+    if not prefix:
+        raise RuntimeError("Invalid engine message size prefix.")
+    size = int("".join(prefix))
+    if size > 1_000_000:
+        raise RuntimeError("Engine message exceeds the starter-kit limit.")
+
+    chunks: list[str] = []
+    remaining = size
+    while remaining:
+        chunk = connection._from_engine_pipe.read(remaining)
+        if chunk == "":
+            raise EOFError("Engine closed the pipe.")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return "".join(chunks)
+
+
+def _install_fast_query_reader(game: Game) -> None:
+    """Skip the one-member query union and decode its concrete model."""
+
+    connection = game.connection
+
+    def get_next_query() -> QueryMovePlayer:
+        return QueryMovePlayer.model_validate_json(
+            _read_framed_message(connection)
+        )
+
+    connection.get_next_query = get_next_query
+
+
 def main() -> None:
     game = Game()
+    _install_fast_query_reader(game)
     strategy = __STRATEGY_CLASS__()
 
     while True:

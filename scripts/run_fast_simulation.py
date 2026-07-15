@@ -4,8 +4,9 @@ from __future__ import annotations
 
 This runner is only for high-throughput strategy experiments.  It uses the
 same installed engine and submission processes as ``simulation``, but does not
-record ``game.json`` or render a review video.  Final candidates must still be
-checked with the official ``simulation --headless`` process layout.
+record ``game.json`` by default. Pass ``--record`` when a deterministic
+benchmark divergence needs replay-level diagnosis. Final candidates must still
+be checked with the official ``simulation --headless`` process layout.
 """
 
 import argparse
@@ -29,6 +30,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("submission", nargs="+")
     parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help="Preserve game.json and visualiser events for replay diagnosis.",
+    )
     return parser.parse_args()
 
 
@@ -89,8 +95,11 @@ def main() -> None:
             engine_log_path.open("w") as engine_log,
             engine_err_path.open("w") as engine_err,
         ):
+            engine_command = [sys.executable, str(seeded_engine)]
+            if not args.record:
+                engine_command.append("--no-recording")
             engine = subprocess.Popen(
-                [sys.executable, str(seeded_engine), "--no-recording"],
+                engine_command,
                 cwd=workspace,
                 env=env,
                 stdout=subprocess.PIPE,

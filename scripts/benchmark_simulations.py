@@ -80,11 +80,7 @@ def main() -> None:
         )
         print_factorial_mass_analysis(factorial)
     if args.require_mass_improvement:
-        failed = [
-            row["variant"]
-            for row in comparisons
-            if not row["passed"]
-        ]
+        failed = [row["variant"] for row in comparisons if not row["passed"]]
         if failed:
             raise SystemExit(
                 "Mean-final-mass gate failed for: "
@@ -96,7 +92,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Agar.io simulations in parallel and aggregate outcomes."
     )
-    parser.add_argument("--trials", type=int, default=4, help="Number of matches per variant.")
+    parser.add_argument(
+        "--trials", type=int, default=4, help="Number of matches per variant."
+    )
     parser.add_argument(
         "--jobs",
         type=int,
@@ -111,8 +109,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=["current"],
         help=(
-            "Variant names. Built-in: current. "
-            "Custom form: name:KEY=VALUE,OTHER=VALUE"
+            "Variant names. Built-in: current. Custom form: name:KEY=VALUE,OTHER=VALUE"
         ),
     )
     parser.add_argument(
@@ -203,7 +200,9 @@ def parse_variant(value: str) -> Variant:
 
     if ":" not in value:
         known = ", ".join(sorted(BUILT_IN_VARIANTS))
-        raise ValueError(f"Unknown variant '{value}'. Use one of {known}, or name:KEY=VALUE.")
+        raise ValueError(
+            f"Unknown variant '{value}'. Use one of {known}, or name:KEY=VALUE."
+        )
 
     name, raw_env = value.split(":", 1)
     env: dict[str, str] = {}
@@ -237,7 +236,9 @@ def write_run_config(
     config = {
         "trials": args.trials,
         "jobs": args.jobs,
-        "variants": [{"name": variant.name, "env": variant.env} for variant in variants],
+        "variants": [
+            {"name": variant.name, "env": variant.env} for variant in variants
+        ],
         "submission": args.submission,
         "tracked_slots": tracked_slots,
         "metrics_every_n": args.metrics_every_n,
@@ -292,7 +293,11 @@ async def run_all(
     for task in asyncio.as_completed(tasks):
         result = await task
         results.append(result)
-        status = result["result_type"] if result["return_code"] == 0 else f"exit {result['return_code']}"
+        status = (
+            result["result_type"]
+            if result["return_code"] == 0
+            else f"exit {result['return_code']}"
+        )
         print(
             f"[{result['variant']} #{result['trial']:03d}] {status} "
             f"elapsed={result['elapsed_seconds']:.1f}s workspace={result['workspace']}",
@@ -379,7 +384,9 @@ async def run_match(
             **score_outcome(outcome, tracked_slots),
             **metrics,
         }
-        (run_dir / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        (run_dir / "result.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n"
+        )
         return result
 
 
@@ -409,25 +416,35 @@ def parse_outcome(log_path: Path) -> dict[str, Any]:
     return result
 
 
-def score_outcome(outcome: dict[str, Any], tracked_slots: tuple[int, ...]) -> dict[str, Any]:
+def score_outcome(
+    outcome: dict[str, Any], tracked_slots: tuple[int, ...]
+) -> dict[str, Any]:
     ranking = outcome.get("ranking") or []
     final_masses = outcome.get("final_masses") or {}
     rank_by_slot = {slot: index + 1 for index, slot in enumerate(ranking)}
-    tracked_ranks = [rank_by_slot[slot] for slot in tracked_slots if slot in rank_by_slot]
-    tracked_masses = [final_masses[slot] for slot in tracked_slots if slot in final_masses]
+    tracked_ranks = [
+        rank_by_slot[slot] for slot in tracked_slots if slot in rank_by_slot
+    ]
+    tracked_masses = [
+        final_masses[slot] for slot in tracked_slots if slot in final_masses
+    ]
     return {
         "tracked_ranks": tracked_ranks,
         "tracked_best_rank": min(tracked_ranks) if tracked_ranks else None,
         "tracked_mean_rank": mean(tracked_ranks) if tracked_ranks else None,
         "tracked_top1": bool(ranking and ranking[0] in tracked_slots),
-        "tracked_top4_count": sum(1 for slot in tracked_slots if rank_by_slot.get(slot, 99) <= 4),
+        "tracked_top4_count": sum(
+            1 for slot in tracked_slots if rank_by_slot.get(slot, 99) <= 4
+        ),
         "tracked_mass_sum": sum(tracked_masses),
         "tracked_mass_mean": mean(tracked_masses) if tracked_masses else None,
         "tracked_mass_max": max(tracked_masses) if tracked_masses else None,
     }
 
 
-def summarize_metrics(workspace: Path, tracked_slots: tuple[int, ...]) -> dict[str, Any]:
+def summarize_metrics(
+    workspace: Path, tracked_slots: tuple[int, ...]
+) -> dict[str, Any]:
     elapsed_ms: list[float] = []
     competition_remaining_ms: list[float] = []
     competition_remaining_last_ms: list[float] = []
@@ -453,10 +470,18 @@ def summarize_metrics(workspace: Path, tracked_slots: tuple[int, ...]) -> dict[s
         for slot in tracked_slots
         if str(slot) in response_timings
     ]
+    tracked_peak_masses: list[float] = []
 
     for slot in tracked_slots:
         path = workspace / f"submission{slot}" / "bot_metrics.jsonl"
         rows = read_jsonl(path)
+        slot_masses = [
+            float(row["my_mass"])
+            for row in rows
+            if isinstance(row.get("my_mass"), (int, float))
+        ]
+        if slot_masses:
+            tracked_peak_masses.append(max(slot_masses))
         samples += len(rows)
         elapsed_ms.extend(row.get("decision_elapsed_ms", 0.0) for row in rows)
         slot_remaining: list[float] = []
@@ -500,6 +525,15 @@ def summarize_metrics(workspace: Path, tracked_slots: tuple[int, ...]) -> dict[s
                 dots_predator_2.append(dot)
 
     return {
+        "tracked_peak_mass_sum": (
+            sum(tracked_peak_masses) if tracked_peak_masses else None
+        ),
+        "tracked_peak_mass_mean": (
+            mean(tracked_peak_masses) if tracked_peak_masses else None
+        ),
+        "tracked_peak_mass_max": (
+            max(tracked_peak_masses) if tracked_peak_masses else None
+        ),
         "response_cumulative_sum_seconds": sum(tracked_response_seconds),
         "response_cumulative_mean_seconds": (
             mean(tracked_response_seconds) if tracked_response_seconds else None
@@ -594,6 +628,9 @@ def write_outputs(workspace_root: Path, results: list[dict[str, Any]]) -> None:
         "tracked_mass_sum",
         "tracked_mass_mean",
         "tracked_mass_max",
+        "tracked_peak_mass_sum",
+        "tracked_peak_mass_mean",
+        "tracked_peak_mass_max",
         "response_cumulative_sum_seconds",
         "response_cumulative_mean_seconds",
         "response_cumulative_max_seconds",
@@ -647,9 +684,7 @@ def paired_mass_comparisons(
         (str(row["variant"]), int(row["trial"])): row for row in results
     }
     baseline_trials = sorted(
-        trial
-        for variant, trial in by_variant_trial
-        if variant == baseline
+        trial for variant, trial in by_variant_trial if variant == baseline
     )
     if not baseline_trials:
         return []
@@ -658,9 +693,7 @@ def paired_mass_comparisons(
     variants = sorted({str(row["variant"]) for row in results} - {baseline})
     for variant in variants:
         paired_trials = [
-            trial
-            for trial in baseline_trials
-            if (variant, trial) in by_variant_trial
+            trial for trial in baseline_trials if (variant, trial) in by_variant_trial
         ]
         differences: list[float] = []
         baseline_masses: list[float] = []
@@ -672,14 +705,10 @@ def paired_mass_comparisons(
             baseline_valid = _successful_mass_row(baseline_row)
             variant_valid = _successful_mass_row(variant_row)
             baseline_mass = (
-                float(baseline_row["tracked_mass_sum"])
-                if baseline_valid
-                else 0.0
+                float(baseline_row["tracked_mass_sum"]) if baseline_valid else 0.0
             )
             variant_mass = (
-                float(variant_row["tracked_mass_sum"])
-                if variant_valid
-                else 0.0
+                float(variant_row["tracked_mass_sum"]) if variant_valid else 0.0
             )
             valid_pairs += baseline_valid and variant_valid
             baseline_masses.append(baseline_mass)
@@ -755,11 +784,7 @@ def two_factor_mass_analysis(
         (str(row["variant"]), int(row["trial"])): row for row in results
     }
     trials_by_cell = {
-        cell: {
-            trial
-            for variant, trial in by_variant_trial
-            if variant == variant_name
-        }
+        cell: {trial for variant, trial in by_variant_trial if variant == variant_name}
         for cell, variant_name in cells.items()
     }
     paired_trials = sorted(set.intersection(*trials_by_cell.values()))
@@ -879,9 +904,7 @@ def print_factorial_mass_analysis(analysis: dict[str, Any]) -> None:
     effects = analysis["mean_effects"]
     print("\nPaired two-factor final-mass analysis (failures count as zero)")
     print(
-        "cells: "
-        f"base={cells['base']}  A={cells['a']}  "
-        f"B={cells['b']}  AB={cells['ab']}"
+        f"cells: base={cells['base']}  A={cells['a']}  B={cells['b']}  AB={cells['ab']}"
     )
     print(
         f"paired trials: {analysis['paired_trials']}  "
@@ -916,12 +939,16 @@ def print_summary(
     print(f"Tracked slots: {','.join(str(slot) for slot in tracked_slots)}")
     print(
         "variant  matches  success  top1_rate  avg_best_rank  avg_mean_rank  "
-        "avg_mass_sum  response_s  total_ms  p99_ms  min_remaining_ms  "
+        "avg_peak_mass  response_s  total_ms  p99_ms  min_remaining_ms  "
         "pred2_rev_rate"
     )
     for variant in sorted({result["variant"] for result in results}):
         rows = [result for result in results if result["variant"] == variant]
-        successes = [row for row in rows if row["return_code"] == 0 and row["result_type"] == "SUCCESS"]
+        successes = [
+            row
+            for row in rows
+            if row["return_code"] == 0 and row["result_type"] == "SUCCESS"
+        ]
         pred2_pairs = sum(row.get("predator2_direction_pairs") or 0 for row in rows)
         pred2_reversals = sum(row.get("predator2_reversals") or 0 for row in rows)
         print(
@@ -931,7 +958,7 @@ def print_summary(
             f"{avg_bool(rows, 'tracked_top1'):>9.3f} "
             f"{avg_number(rows, 'tracked_best_rank'):>13.3f} "
             f"{avg_number(rows, 'tracked_mean_rank'):>13.3f} "
-            f"{avg_number(rows, 'tracked_mass_sum'):>12.3f} "
+            f"{avg_number(rows, 'tracked_peak_mass_sum'):>13.3f} "
             f"{avg_number(rows, 'response_cumulative_mean_seconds'):>10.3f} "
             f"{avg_number(rows, 'decision_total_ms'):>8.1f} "
             f"{max_number(rows, 'decision_p99_ms'):>7.3f} "

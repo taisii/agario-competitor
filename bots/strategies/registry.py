@@ -180,6 +180,15 @@ _BUILT_IN_SPECS = (
         ),
     ),
     _spec(
+        "semantic_potential",
+        "strategies.semantic_potential:SemanticPotentialStrategy",
+        "potential_field",
+        submission=_submission(
+            "SemanticPotentialStrategy",
+            "bots/strategies/semantic_potential.py",
+        ),
+    ),
+    _spec(
         "static_retained_growth",
         "strategies.retained_growth:StaticRetainedGrowthStrategy",
         "potential_field",

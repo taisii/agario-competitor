@@ -101,9 +101,75 @@ global parallel-job limit, run:
 uv run python scripts/benchmark_replay_opponents.py --trials 2 --jobs 1
 ```
 
+To compare `semantic_potential` and `replay_dominance` on the exact same
+observations from a local `game.json`, without adding any oracle work to the
+submitted bot, run:
+
+```bash
+uv run python scripts/compare_strategy_decisions.py \
+  .agario/simulation/output/game.json \
+  --player 0 \
+  --output .agario/comparisons/semantic-vs-replay.json
+```
+
+The report separates direction/split agreement from `proxy_regret`, which is
+the advantage of replay-dominance's action when both actions are evaluated by
+the same offline replay proxy. A difference is an adoption candidate only when
+the actions differ materially and the replay action also clears the configured
+proxy-regret threshold. Per-strategy decision timings are reported alongside
+quality so a closer imitation cannot hide a production cost regression.
+Background and food-only disagreements are diagnostic only: adoption is driven
+by threat, enemy-capture, and virus contexts, then accepted or rejected by
+paired mean final mass, which is the leaderboard objective.
+
+To attribute a strong replay player's gross mass gains and measure whether
+`semantic_potential` matched the action that preceded each gain, run:
+
+```bash
+uv run python scripts/analyze_mass_gain_sources.py \
+  .agario/simulation/output/game.json \
+  --player 1 \
+  --output .agario/comparisons/winner-mass-gains.json
+```
+
+The attribution follows engine event order and reports enemy, virus, and food
+mass separately. `semantic_potential` evaluates those sources in the same mass
+unit: food contributes `FOOD_RADIUS²`, a virus contributes `radius²`, and an
+enemy fragment contributes its captured `radius²`. Directional potential is a
+four-turn fan of reachable mass discounted by contact time. The food part is
+bounded to the nearest eight pellets because two concrete food candidates are
+already scored separately; enemy and virus sources remain uncapped. Split
+candidates and virus-target candidates receive a bounded visible-state
+one-turn transition in engine order (decay, virus, food, player eating), so
+topology changes cannot be scored using the safer pre-command blobs. When
+consecutive observations reveal the selected prey's motion, its next center is
+projected; other enemy centers remain fixed because their next commands are
+not observable.
+
+The submission runtime gate profiles the same 1,007 reconstructed observations
+before a build. Bounded food sources, cached movement speeds, and lazy wall
+projection reduced profiled strategy time from 249 ms to 186 ms per replay.
+Peak mass remains a diagnostic, but acceptance is gated on paired final mass.
+In the final 48-match screen against seven `replay_dominance` opponents, mean
+cumulative query/response time was 0.797 s, p95 was 1.097 s, and the maximum
+was 1.194 s against the engine's authoritative 8 s cumulative limit. Over the
+same two independent seed sets, mean final mass improved from 36.19 to 52.29.
+
+The standalone builder also replaces the starter kit's one-member query-union
+wrapper and 1 KiB bytearray receive loop with direct `QueryMovePlayer`
+validation and a length-preserving string reader. A full-process profile moved
+JSON validation from 64.3 ms to 59.7 ms and framed-message assembly from 20.3
+ms to 8.6 ms over 1,400 turns. Four paired simulations all improved cumulative
+response time (321 ms mean to 314 ms) with byte-for-byte identical match
+results. The remaining gap is principally pipe wake-up and process scheduling,
+which is outside the submitted Python process's controllable CPU work.
+
 The matrix uses the no-recording fast runner by default. Add `--official` for a
 final process-layout and recording check after narrowing the candidates; it is
-substantially slower and is not intended for the exhaustive screen.
+substantially slower and is not intended for the exhaustive screen. For a
+deterministic fast-runner divergence, pass `--record` directly to
+`scripts/run_fast_simulation.py` to preserve `game.json` without changing the
+seeded engine path.
 
 The active replay panel contains only empirically strong, tactically active
 opponents. Re-evaluate it after importing new official replays:
