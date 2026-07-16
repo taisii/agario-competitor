@@ -104,6 +104,54 @@ def test_semantic_lookahead_submission_is_self_contained() -> None:
             }
 
 
+def test_outcome_teacher_hybrid_submission_is_self_contained() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "outcome_teacher_hybrid.py",
+            strategy_name="outcome_teacher_hybrid",
+        )
+        source = output.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+    assert "class OutcomeTeacherHybridStrategy" in source
+    assert "strategy = OutcomeTeacherHybridStrategy()" in source
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert node.module.split(".", 1)[0] not in {
+                "strategies",
+                "telemetry",
+            }
+
+
+def test_replay_distilled_submission_is_self_contained() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "replay_distilled.py",
+            strategy_name="replay_distilled",
+        )
+        source = output.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        module_name = "replay_distilled_submission_test"
+        spec = importlib.util.spec_from_file_location(module_name, output)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(module_name, None)
+
+    assert "class ReplayDistilledStrategy" in source
+    assert "strategy = ReplayDistilledStrategy()" in source
+    assert module.ReplayDistilledStrategy.name == "replay_distilled"
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert node.module.split(".", 1)[0] not in {
+                "strategies",
+                "telemetry",
+            }
+
+
 def test_virus_hunter_submission_contains_only_required_strategy_classes() -> None:
     with tempfile.TemporaryDirectory() as directory:
         output, _ = build_submission(

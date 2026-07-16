@@ -4793,6 +4793,12 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
                         reason="prey",
                     )
                 )
+        actions.extend(
+            self._additional_proxy_actions(
+                node=node,
+                first_step=first_step,
+            )
+        )
         # Split feasibility is not ordered by the same quantity as ordinary
         # pursuit. A smaller fourth prey can be capturable when the three
         # higher-value prey are too large for the child fragment, so inspect
@@ -5047,6 +5053,16 @@ class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy):
         result = tuple(action for action, _ in scored)
         self._record_profile("candidate", profile_started)
         return result
+
+    def _additional_proxy_actions(
+        self,
+        *,
+        node: SearchNode,
+        first_step: bool,
+    ) -> tuple[Action, ...]:
+        """Return extra proposals that still use the replay proxy evaluator."""
+
+        return ()
 
     @staticmethod
     def _action_family(action: Action) -> str:

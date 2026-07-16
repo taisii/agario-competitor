@@ -12,7 +12,6 @@ sys.path.insert(0, str(ROOT / "bots"))
 
 from strategies.local_tactical_search import (  # noqa: E402
     LocalRolloutState,
-    LocalTacticalSearchReferenceStrategy,
     LocalTacticalSearchStrategy,
 )
 from strategies.features import can_eat_player_blob, player_speed  # noqa: E402
@@ -52,51 +51,6 @@ def test_local_tactical_search_is_a_separate_submission_strategy() -> None:
         submission_strategy_spec("local_tactical_search").submission.strategy_class
         == "LocalTacticalSearchStrategy"
     )
-
-
-def test_reference_planner_keeps_the_widest_two_step_search() -> None:
-    strategy = create_strategy("local_tactical_search_reference")
-
-    assert isinstance(strategy, LocalTacticalSearchReferenceStrategy)
-    assert strategy.depth == 1
-    assert strategy.width == 32
-    assert strategy._actions_per_node_limit(0) == 64
-    assert strategy._LOCAL_ROOT_LIMIT == 32
-    assert strategy._TARGET_DIRECTION_LIMIT == 12
-    assert strategy.proxy_refine_limit == 32
-    assert strategy.proxy_min_refine == 32
-    assert strategy.local_continuation_prior == 4.0
-    assert math.isinf(strategy.proxy_coarse_after_seconds)
-    assert not strategy._competition_coarse_mode
-    assert not strategy._uses_compute_time_bank()
-
-
-def test_reference_locally_scores_twenty_distinct_roots() -> None:
-    strategy = LocalTacticalSearchReferenceStrategy()
-    actions = tuple(
-        Action(
-            (math.cos(index * math.tau / 10), math.sin(index * math.tau / 10)),
-            split=split,
-            reason=f"probe_{int(split)}_{index}",
-        )
-        for split in (False, True)
-        for index in range(10)
-    )
-
-    ranked = strategy._rank_roots_by_local_dp(
-        node=_node(),
-        actions=actions,
-        foods=(),
-        viruses=(),
-        arena_size=60.0,
-        targets=(),
-    )
-
-    assert len(strategy._local_root_scores) == 20
-    assert {
-        strategy._action_key(action) for action, _ in strategy._local_root_scores
-    } == {strategy._action_key(action) for action in actions}
-    assert len(ranked) == 20
 
 
 def test_turn_cost_only_discourages_movement_with_a_backward_component() -> None:

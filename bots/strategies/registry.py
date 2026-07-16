@@ -138,9 +138,15 @@ _BUILT_IN_SPECS = (
         ),
     ),
     _spec(
-        "local_tactical_search_reference",
-        "strategies.local_tactical_search:LocalTacticalSearchReferenceStrategy",
-        "reference",
+        "outcome_teacher_hybrid",
+        "strategies.outcome_teacher_hybrid:OutcomeTeacherHybridStrategy",
+        "search",
+        submission=_submission(
+            "OutcomeTeacherHybridStrategy",
+            "bots/strategies/receding_horizon.py",
+            "bots/strategies/semantic_potential.py",
+            "bots/strategies/outcome_teacher_hybrid.py",
+        ),
     ),
     _spec(
         "potential_field_hunter",
@@ -177,6 +183,16 @@ _BUILT_IN_SPECS = (
         submission=_submission(
             "ReplayDominanceStrategy",
             "bots/strategies/receding_horizon.py",
+        ),
+    ),
+    _spec(
+        "replay_distilled",
+        "strategies.replay_distilled:ReplayDistilledStrategy",
+        "potential_field",
+        submission=_submission(
+            "ReplayDistilledStrategy",
+            "bots/strategies/semantic_potential.py",
+            "bots/strategies/replay_distilled.py",
         ),
     ),
     _spec(

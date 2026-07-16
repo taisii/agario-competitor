@@ -8,6 +8,7 @@ import json
 import os
 import random
 import re
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -406,9 +407,7 @@ async def run_match(
                 throughput=throughput,
             )
             command = [
-                "uv",
-                "run",
-                "python",
+                sys.executable,
                 "scripts/run_fast_simulation.py",
                 *submissions,
             ]
