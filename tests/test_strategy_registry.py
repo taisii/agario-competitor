@@ -13,8 +13,10 @@ sys.path.insert(0, str(ROOT / "bots"))
 
 from strategies.replay_opponents import (  # noqa: E402
     CUSTOM_REPLAY_TEAM_IDS,
+    OBSERVED_REPLAY_TEAM_IDS,
     REPLAY_OPPONENT_SPECS,
     REPLAY_TEAM_IDS,
+    RANDOM_REPLAY_TEAM_IDS,
     RandomReplayOpponent,
     create_replay_opponent,
     select_replay_team_id,
@@ -162,7 +164,7 @@ def test_random_replay_strategy_selects_lazily_and_reports_once(monkeypatch) -> 
 
     monkeypatch.setattr(
         replay_opponents,
-        "create_replay_opponent",
+        "create_replay_candidate",
         lambda team_id: constructed_names.append(team_id) or StubStrategy(),
     )
     strategy = RandomReplayOpponent(
@@ -219,4 +221,20 @@ def test_random_replay_selection_is_paired_per_trial_and_slot() -> None:
     ]
 
     assert first == second
-    assert set(first) == set(REPLAY_TEAM_IDS)
+    assert set(first) <= set(RANDOM_REPLAY_TEAM_IDS)
+    assert len(set(first)) > 1
+
+
+def test_random_replay_pool_covers_every_observed_enemy() -> None:
+    selected = {
+        select_replay_team_id(
+            player_id=slot,
+            base_seed=20260712,
+            trial=trial,
+        )
+        for trial in range(256)
+        for slot in range(1, 8)
+    }
+
+    assert RANDOM_REPLAY_TEAM_IDS == OBSERVED_REPLAY_TEAM_IDS
+    assert selected == set(OBSERVED_REPLAY_TEAM_IDS)

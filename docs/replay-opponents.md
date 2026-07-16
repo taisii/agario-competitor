@@ -6,8 +6,14 @@ appears exactly once in every match and is treated as this repository's team.
 The remaining 140 slots collapse to 42 stable opponent `team_id` values.
 Replay files do not include public team names, so clone names intentionally use
 those stable IDs: `replay_team_<id>`. Historical profiles remain available for
-analysis, while only a curated high-pressure panel is exposed as runnable
-opponents.
+analysis, while only a curated high-pressure panel is exposed through dedicated
+per-team entries.
+
+`random_replay_opponent.py` deliberately uses a broader pool: all 42 observed
+enemy team IDs are eligible. A custom policy is constructed when one exists;
+otherwise the saved fitted profile is used. Selection remains deterministic for
+the same base seed, benchmark trial, and player slot. The curated panel is kept
+separate because its validation status should not limit random sparring variety.
 
 The current focused study of teams `1`, `9`, and `35`, including chronological
 holdouts and offline launch commands, is documented in
@@ -31,6 +37,15 @@ circle visibility, per-query public IDs, food/virus lifecycle, player blobs,
 and mass rankings.
 
 ## Run a local panel
+
+To fill the opponent slots from all observed replay enemies:
+
+```bash
+uv run simulation \
+  1:bots/my_bot.py \
+  7:bots/entries/random_replay_opponent.py \
+  --headless
+```
 
 Use the active opponent entry alongside the bot under development. Repeat it
 to fill the seven opponent slots; counts must sum to eight:
