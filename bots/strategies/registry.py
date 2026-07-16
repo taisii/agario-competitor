@@ -208,6 +208,16 @@ _BUILT_IN_SPECS = (
         ),
     ),
     _spec(
+        "semantic_offensive_beam",
+        "strategies.semantic_offensive_beam:SemanticOffensiveBeamStrategy",
+        "search",
+        submission=_submission(
+            "SemanticOffensiveBeamStrategy",
+            "bots/strategies/semantic_potential.py",
+            "bots/strategies/semantic_offensive_beam.py",
+        ),
+    ),
+    _spec(
         "static_retained_growth",
         "strategies.retained_growth:StaticRetainedGrowthStrategy",
         "potential_field",

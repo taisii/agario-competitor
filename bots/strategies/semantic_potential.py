@@ -57,6 +57,8 @@ LOOKAHEAD_ADJUSTMENT_SCALE = 0.10
 LOOKAHEAD_MAX_ADJUSTMENT = 0.015
 LOOKAHEAD_CONTENDER_MARGIN = 0.06
 LOOKAHEAD_ROOT_LIMIT = 4
+LOOKAHEAD_DEFAULT_WORK_BUDGET = 800
+LOOKAHEAD_ESTIMATED_CHILDREN = 4
 LARGE_MASS_FOOD_REFERENCE = 35.0
 LARGE_MASS_FOOD_FLOOR = 0.65
 
@@ -700,6 +702,10 @@ class SemanticLookaheadStrategy(SemanticPotentialStrategy):
         self._food_scaling_enabled = _environment_enabled(
             "SEMANTIC_LARGE_MASS_FOOD_SCALE"
         )
+        self._lookahead_work_budget = _environment_nonnegative_int(
+            "SEMANTIC_LOOKAHEAD_WORK_BUDGET",
+            LOOKAHEAD_DEFAULT_WORK_BUDGET,
+        )
         self._lookahead_diagnostics: dict[str, object] = {
             "enabled": False,
             "searched_roots": 0,
@@ -724,15 +730,35 @@ class SemanticLookaheadStrategy(SemanticPotentialStrategy):
             for candidate, score in scored
         )
         self._lookahead_by_root = {}
+        estimated_root_work = _lookahead_root_work(
+            own=own,
+            foods=all_foods,
+            viruses=all_viruses,
+            enemies=enemies,
+        )
+        root_limit = min(
+            LOOKAHEAD_ROOT_LIMIT,
+            self._lookahead_work_budget // max(estimated_root_work, 1),
+        )
         should_search = _lookahead_relevant(
             adjusted,
             own=own,
             viruses=all_viruses,
         )
-        if not self._search_enabled or not should_search:
+        if not self._search_enabled or not should_search or root_limit == 0:
+            if not self._search_enabled:
+                skipped_reason = "disabled"
+            elif not should_search:
+                skipped_reason = "irrelevant"
+            else:
+                skipped_reason = "work_budget"
             self._lookahead_diagnostics = {
                 "enabled": False,
                 "searched_roots": 0,
+                "root_limit": root_limit,
+                "estimated_root_work": estimated_root_work,
+                "work_budget": self._lookahead_work_budget,
+                "skipped_reason": skipped_reason,
                 "food_scale": (
                     _food_value_scale(own) if self._food_scaling_enabled else 1.0
                 ),
@@ -756,7 +782,7 @@ class SemanticLookaheadStrategy(SemanticPotentialStrategy):
                 ),
                 key=lambda item: item[1].total,
                 reverse=True,
-            )[:LOOKAHEAD_ROOT_LIMIT]
+            )[:root_limit]
         }
         refined: list[tuple[DirectionCandidate, PotentialScore]] = []
         searched_roots = 0
@@ -833,6 +859,10 @@ class SemanticLookaheadStrategy(SemanticPotentialStrategy):
         self._lookahead_diagnostics = {
             "enabled": True,
             "searched_roots": searched_roots,
+            "root_limit": root_limit,
+            "estimated_root_work": estimated_root_work,
+            "work_budget": self._lookahead_work_budget,
+            "skipped_reason": None,
             "food_scale": (
                 _food_value_scale(own) if self._food_scaling_enabled else 1.0
             ),
@@ -984,14 +1014,22 @@ def _environment_enabled(name: str) -> bool:
     }
 
 
+def _environment_nonnegative_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = int(raw)
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
+
+
 def _lookahead_relevant(
     scored: tuple[tuple[DirectionCandidate, PotentialScore], ...],
     *,
     own: tuple[BlobModel, ...],
     viruses: tuple[VirusModel, ...],
 ) -> bool:
-    if len(own) > 1:
-        return True
     if any(
         candidate.family in {"escape", "wall_avoidance"}
         or candidate.split
@@ -1010,6 +1048,31 @@ def _lookahead_relevant(
         for blob in own
         for virus in viruses
     )
+
+
+def _lookahead_root_work(
+    *,
+    own: tuple[BlobModel, ...],
+    foods: tuple[FoodModel, ...],
+    viruses: tuple[VirusModel, ...],
+    enemies: tuple[VisibleBlobModel, ...],
+) -> int:
+    local_blob_count = len(own) + len(enemies)
+    stationary_count = len(foods) + len(viruses)
+    exact_transition_work = (
+        local_blob_count * stationary_count
+        + local_blob_count * local_blob_count
+    )
+    bounded_child_sources = (
+        min(len(foods), MAX_DIRECTIONAL_FOODS)
+        + min(len(viruses), 2)
+        + len(enemies)
+        + 1
+    )
+    child_scoring_work = (
+        LOOKAHEAD_ESTIMATED_CHILDREN * len(own) * bounded_child_sources
+    )
+    return exact_transition_work + child_scoring_work
 
 
 def _food_value_scale(own: tuple[BlobModel, ...]) -> float:
@@ -1138,9 +1201,14 @@ def _nearest_items_with_sources(
 ) -> tuple[tuple[FoodModel | VirusModel, BlobModel], ...]:
     rows: list[tuple[float, int, FoodModel | VirusModel, BlobModel]] = []
     for order, item in enumerate(items):
-        distance_squared, source = min(
-            (squared_distance(blob.pos, item.pos), blob) for blob in own
+        source = min(
+            own,
+            key=lambda blob: (
+                squared_distance(blob.pos, item.pos),
+                blob.blob_id,
+            ),
         )
+        distance_squared = squared_distance(source.pos, item.pos)
         rows.append((distance_squared, order, item, source))
     rows.sort(key=lambda row: (row[0], row[1]))
     return tuple((item, source) for _, _, item, source in rows[:limit])
@@ -2160,18 +2228,22 @@ def _project_one_step_outcome(
 
     enemy_mass_gained = 0.0
     own_mass_lost = 0.0
+    living_by_identity = {id(blob): blob for blob in local}
     changed = True
     while changed:
         changed = False
         living = sorted(
-            local,
+            living_by_identity.values(),
             key=lambda blob: (-blob.radius, blob.owner_id, blob.blob_id),
         )
         for eater in living:
-            if eater not in local:
+            if id(eater) not in living_by_identity:
                 continue
             for target in living:
-                if target not in local or eater.owner_id == target.owner_id:
+                if (
+                    id(target) not in living_by_identity
+                    or eater.owner_id == target.owner_id
+                ):
                     continue
                 if not _can_local_blob_eat(
                     eater.pos,
@@ -2182,7 +2254,7 @@ def _project_one_step_outcome(
                     continue
                 target_mass = target.radius * target.radius
                 eater.radius = math.sqrt(eater.radius * eater.radius + target_mass)
-                local.remove(target)
+                del living_by_identity[id(target)]
                 if eater.is_own and not target.is_own:
                     enemy_mass_gained += target_mass
                 elif not eater.is_own and target.is_own:
@@ -2191,6 +2263,8 @@ def _project_one_step_outcome(
                 break
             if changed:
                 break
+
+    local = list(living_by_identity.values())
 
     return OneStepOutcome(
         own=tuple(

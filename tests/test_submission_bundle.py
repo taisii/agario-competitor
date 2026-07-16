@@ -121,6 +121,30 @@ def test_semantic_lookahead_submission_is_self_contained() -> None:
             }
 
 
+def test_semantic_offensive_beam_submission_flattens_parent_strategies() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "semantic_offensive_beam.py",
+            strategy_name="semantic_offensive_beam",
+        )
+        source = output.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+    assert "class SemanticPotentialStrategy" in source
+    assert "class SemanticLookaheadStrategy(SemanticPotentialStrategy)" in source
+    assert (
+        "class SemanticOffensiveBeamStrategy(SemanticLookaheadStrategy)"
+        in source
+    )
+    assert "strategy = SemanticOffensiveBeamStrategy()" in source
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert node.module.split(".", 1)[0] not in {
+                "strategies",
+                "telemetry",
+            }
+
+
 def test_virus_hunter_submission_contains_only_required_strategy_classes() -> None:
     with tempfile.TemporaryDirectory() as directory:
         output, _ = build_submission(
