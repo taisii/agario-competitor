@@ -189,6 +189,15 @@ _BUILT_IN_SPECS = (
         ),
     ),
     _spec(
+        "semantic_lookahead",
+        "strategies.semantic_potential:SemanticLookaheadStrategy",
+        "search",
+        submission=_submission(
+            "SemanticLookaheadStrategy",
+            "bots/strategies/semantic_potential.py",
+        ),
+    ),
+    _spec(
         "static_retained_growth",
         "strategies.retained_growth:StaticRetainedGrowthStrategy",
         "potential_field",
@@ -248,10 +257,12 @@ LEGACY_STRATEGY_ALIASES = {
 }
 
 DEFAULT_RANDOM_OPPONENT_STRATEGIES = (
-    "food_greedy",
-    "survival_greedy",
-    "potential_field_hunter",
-    "potential_field_virus_farmer",
+    "semantic_lookahead",
+    "semantic_potential",
+    "replay_dominance",
+    "threat_aware_receding_horizon",
+    "event_driven_static_search",
+    "static_retained_growth",
 )
 
 
@@ -275,12 +286,16 @@ class RandomOpponentStrategy:
         self._selected: Strategy | None = None
 
     def _select_name(self, player_id: int) -> str:
+        # Shuffle once per paired trial, then cycle by slot. With the standard
+        # candidate-at-slot-zero layout, opponent slots 1..7 cover all six
+        # policies; only the duplicated policy and placement vary.
         seed = (
             self._base_seed
             ^ ((self._trial + 1) * 0x9E3779B1)
-            ^ ((player_id + 1) * 0x85EBCA77)
         )
-        return random.Random(seed).choice(self._candidates)
+        shuffled = list(self._candidates)
+        random.Random(seed).shuffle(shuffled)
+        return shuffled[(player_id - 1) % len(shuffled)]
 
     def choose(self, context):
         if self._selected is None:

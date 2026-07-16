@@ -14,7 +14,10 @@ from lib.models.virus_model import VirusModel  # noqa: E402
 from strategies.base import StrategyContext  # noqa: E402
 import strategies.semantic_potential as semantic_module  # noqa: E402
 from strategies.semantic_potential import (  # noqa: E402
+    SemanticLookaheadStrategy,
     SemanticPotentialStrategy,
+    TargetMemory,
+    _continuation_candidate,
     _fan_weight,
     _project_action_blobs,
     _project_one_step_outcome,
@@ -111,6 +114,135 @@ def test_field_can_prefer_second_food_leading_to_a_dense_region() -> None:
     assert decision.target_id == "2"
     assert decision.direction[0] > 0.0
     assert decision.diagnostics["selected_components"]["food"] > 0.0
+
+
+def test_lookahead_keeps_quiet_small_mass_food_collection_one_ply() -> None:
+    strategy = SemanticLookaheadStrategy()
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.0),)
+    foods = (FoodModel(food_id=1, pos=(33.0, 30.0)),)
+
+    decision = strategy.choose(_context(own, foods=foods))
+
+    assert decision.reason == "nearest_food"
+    assert decision.diagnostics["lookahead"] == {
+        "enabled": False,
+        "searched_roots": 0,
+        "food_scale": 1.0,
+        "search_configured": True,
+        "food_scaling_configured": True,
+        "selected": None,
+    }
+
+
+def test_lookahead_continuation_falls_back_after_root_consumes_target() -> None:
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=2.0),)
+
+    candidate = _continuation_candidate(
+        own=own,
+        foods=(),
+        viruses=(),
+        memory=TargetMemory(kind="food", pos=(31.0, 30.0)),
+        fallback=(0.0, 1.0),
+    )
+
+    assert candidate.family == "continue"
+    assert candidate.target_kind == "momentum"
+    assert candidate.direction == (0.0, 1.0)
+
+
+def test_lookahead_searches_every_bounded_root_in_tactical_position() -> None:
+    strategy = SemanticLookaheadStrategy()
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=3.0),)
+    prey = _enemy(player_id=1, pos=(35.0, 30.0), radius=1.0)
+
+    decision = strategy.choose(_context(own, enemies=(prey,)))
+
+    lookahead = decision.diagnostics["lookahead"]
+    assert lookahead["enabled"]
+    assert 1 <= lookahead["searched_roots"] <= min(
+        4,
+        decision.diagnostics["candidate_count"],
+    )
+    assert lookahead["selected"]["child_count"] >= 1
+    assert lookahead["selected"]["scenario_count"] in {1, 2}
+
+
+def test_lookahead_ignores_visible_enemy_outside_tactical_horizon() -> None:
+    strategy = SemanticLookaheadStrategy()
+    own = (BlobModel(blob_id=0, pos=(10.0, 10.0), radius=2.0),)
+    distant_prey = _enemy(player_id=1, pos=(50.0, 50.0), radius=1.0)
+
+    decision = strategy.choose(_context(own, enemies=(distant_prey,)))
+
+    assert not decision.diagnostics["lookahead"]["enabled"]
+    assert decision.diagnostics["lookahead"]["searched_roots"] == 0
+
+
+def test_lookahead_refreshes_consumed_root_target_before_second_ply() -> None:
+    strategy = SemanticLookaheadStrategy()
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=2.0),)
+    food = FoodModel(food_id=1, pos=(32.0, 30.0))
+    nearby_enemy = _enemy(player_id=1, pos=(35.0, 30.0), radius=1.0)
+
+    decision = strategy.choose(
+        _context(own, foods=(food,), enemies=(nearby_enemy,))
+    )
+
+    assert decision.diagnostics["lookahead"]["enabled"]
+    assert decision.diagnostics["lookahead"]["searched_roots"] >= 1
+
+
+def test_lookahead_reduces_food_routing_value_only_at_large_mass() -> None:
+    foods = (
+        FoodModel(food_id=1, pos=(34.0, 30.0)),
+        FoodModel(food_id=2, pos=(35.0, 30.0)),
+        FoodModel(food_id=3, pos=(36.0, 30.0)),
+    )
+    small = SemanticLookaheadStrategy().choose(
+        _context(
+            (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=2.0),),
+            foods=foods,
+        )
+    )
+    large = SemanticLookaheadStrategy().choose(
+        _context(
+            (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=7.0),),
+            foods=foods,
+        )
+    )
+    unscaled_large = SemanticPotentialStrategy().choose(
+        _context(
+            (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=7.0),),
+            foods=foods,
+        )
+    )
+
+    assert small.diagnostics["lookahead"]["food_scale"] == 1.0
+    assert 0.65 <= large.diagnostics["lookahead"]["food_scale"] < 0.75
+    assert (
+        large.diagnostics["selected_components"]["intent"]
+        < unscaled_large.diagnostics["selected_components"]["intent"]
+    )
+
+
+def test_lookahead_features_can_be_ablated_independently(monkeypatch) -> None:
+    monkeypatch.setenv("SEMANTIC_LOOKAHEAD_SEARCH", "0")
+    monkeypatch.setenv("SEMANTIC_LARGE_MASS_FOOD_SCALE", "0")
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=7.0),)
+    food = FoodModel(food_id=1, pos=(34.0, 30.0))
+    prey = _enemy(player_id=1, pos=(38.0, 30.0), radius=1.0)
+
+    baseline = SemanticPotentialStrategy().choose(
+        _context(own, foods=(food,), enemies=(prey,))
+    )
+    ablated = SemanticLookaheadStrategy().choose(
+        _context(own, foods=(food,), enemies=(prey,))
+    )
+
+    assert ablated.reason == baseline.reason
+    assert ablated.score == baseline.score
+    assert not ablated.diagnostics["lookahead"]["search_configured"]
+    assert not ablated.diagnostics["lookahead"]["food_scaling_configured"]
 
 
 def test_immediate_predator_excludes_catastrophic_resource_direction() -> None:
