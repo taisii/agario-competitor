@@ -55,7 +55,7 @@ OBSERVED_REPLAY_TEAM_IDS = (
 )
 
 CUSTOM_REPLAY_TEAM_IDS = frozenset(
-    {1, 4, 13, 16, 22, 25, 29, 31, 35, 39, 44, 51, 53, 56, 68}
+    {1, 4, 9, 13, 16, 22, 25, 29, 31, 35, 39, 44, 51, 53, 56, 68}
 )
 PROFILED_OPPONENT_TEAM_IDS = frozenset({2, 6, 27, 30, 38, 75})
 

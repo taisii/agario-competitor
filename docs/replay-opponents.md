@@ -9,6 +9,11 @@ those stable IDs: `replay_team_<id>`. Historical profiles remain available for
 analysis, while only a curated high-pressure panel is exposed as runnable
 opponents.
 
+The current focused study of teams `1`, `9`, and `35`, including chronological
+holdouts and offline launch commands, is documented in
+[Replay candidates 1, 9, and 35](replay-candidate-clones.md). Those three are
+unverified candidates for the strong observed bot, not a public-name mapping.
+
 Each active opponent has a runnable simulator entry:
 
 - `bots/entries/replay_team_<id>.py`: a simulator entry point that runs that
@@ -143,6 +148,9 @@ uv run python scripts/benchmark_replay_clone_strength.py
 
 ## Archived reproduction verdicts
 
+This section preserves earlier cohort-wide verdicts. For teams `1`, `9`, and
+`35`, use the newer focused study linked above for current rules and metrics.
+
 The table below covers all 42 observed teams, including profiles retained only
 for replay analysis. `Style only` means the clone reproduces observed direction
 grids, inertia, target priority, or split frequency, but not the exact hidden
@@ -150,13 +158,13 @@ random sequence or split timing.
 
 | Team | Shadow | LOMO | Reconstructed behavior |
 |---:|:---:|:---:|---|
-| 1 | FAIL | FAIL | Regime-fitted direction; geometric prey split gate |
+| 1 | FAIL | FAIL | Resource-first direction; resource split with 15-round re-arm |
 | 2 | PASS | PASS | Nearest food from the nearest real fragment; no split |
 | 3 | FAIL | FAIL | Stateful field mixture; close-prey split with 18-round re-arm |
 | 4 | FAIL | FAIL | Field movement; sparse high-mass farming split |
 | 5 | FAIL | FAIL | Inertial field mixture; sparse split |
 | 6 | Style only | FAIL | Hidden-RNG 16-direction random walk; rare split |
-| 9 | FAIL | FAIL | Inertial field movement; safe-prey split with 90-round re-arm |
+| 9 | FAIL | FAIL | Fitted field movement; prey geometry with 15-round re-arm |
 | 10 | FAIL | FAIL | Regime-fitted direction; unstable split timing |
 | 12 | FAIL | FAIL | Food/escape/inertia; close-prey split with 15-round re-arm |
 | 13 | PASS | FAIL | Food/inertia movement; uniquely identified prey split |
@@ -176,7 +184,7 @@ random sequence or split timing.
 | 31 | FAIL | FAIL | 16-direction inertia; burst prey splitting |
 | 32 | FAIL | FAIL | Mixed food/prey/wall/predator field policy |
 | 34 | FAIL | N/A | Single-trace fitted movement and split policy |
-| 35 | PASS | FAIL | Regime-fitted movement; highly precise prey split gate |
+| 35 | PASS | FAIL | Regime-fitted movement; aligned prey split with 18-round re-arm |
 | 38 | Style only | FAIL | Hidden-RNG 16-direction random walk; rare split |
 | 39 | Style only | FAIL | Persistent random heading, wall reflection, predator avoidance |
 | 44 | FAIL | FAIL | 32-direction inertia; tactical prey/virus/farming split |
@@ -194,6 +202,10 @@ random sequence or split timing.
 | 77 | FAIL | FAIL | Food-led regime policy; no split |
 
 ## Top-ten reproduction target
+
+The remainder of this section is a chronological record of earlier cohorts;
+the focused three-candidate study linked above supersedes its team `1`, `9`,
+and `35` implementation details.
 
 The public leaderboard and replay payload expose different identifiers. The
 leaderboard currently starts with `team`, `Banana`, `Decay Rate`, `Bot
