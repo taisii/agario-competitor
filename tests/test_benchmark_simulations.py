@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.benchmark_simulations import (  # noqa: E402
     apply_benchmark_timeout_environment,
+    apply_reproducibility_environment,
     paired_mass_comparisons,
     parse_factorial_cells,
     resolve_jobs,
@@ -49,6 +50,16 @@ def test_fast_validation_relaxes_only_untracked_players() -> None:
 
     assert env["AGARIO_LOCAL_RELAXED_PLAYER_IDS"] == "1,2,4,5,6,7"
     assert env["AGARIO_STRICT_TURN_TIMEOUT_SECONDS"] == "1"
+
+
+def test_benchmark_fixes_python_hash_seed_without_overriding_explicit_value() -> None:
+    env = {}
+    apply_reproducibility_environment(env)
+    assert env["PYTHONHASHSEED"] == "0"
+
+    explicit = {"PYTHONHASHSEED": "17"}
+    apply_reproducibility_environment(explicit)
+    assert explicit["PYTHONHASHSEED"] == "17"
 
 
 def _row(variant: str, trial: int, mass: float, result: str = "SUCCESS"):

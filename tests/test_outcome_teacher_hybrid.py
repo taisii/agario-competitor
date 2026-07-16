@@ -12,6 +12,7 @@ from lib.models.blob_model import BlobModel, VisibleBlobModel  # noqa: E402
 from strategies.base import StrategyContext, StrategyDecision  # noqa: E402
 from strategies.outcome_teacher_hybrid import (  # noqa: E402
     _semantic_capture_proposal,
+    _semantic_proposal_scene,
 )
 
 
@@ -19,6 +20,7 @@ def _context(
     *,
     own: tuple[BlobModel, ...],
     enemies: tuple[VisibleBlobModel, ...],
+    round_number: int = 300,
 ) -> StrategyContext:
     return StrategyContext(
         game=SimpleNamespace(
@@ -27,7 +29,7 @@ def _context(
                     blobs={blob.blob_id: blob for blob in own},
                 ),
                 visible_blobs=list(enemies),
-                round=300,
+                round=round_number,
                 max_rounds=1400,
             )
         ),
@@ -94,3 +96,36 @@ def test_rejects_capture_proposal_when_a_third_player_is_visible() -> None:
 
     assert proposal is None
     assert not diagnostics["checks"]["isolated_prey"]
+
+
+def test_prefilter_skips_semantic_when_more_than_one_enemy_is_visible() -> None:
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=2.0),)
+    prey = _enemy(player_id=1, radius=1.0)
+    third_player = _enemy(player_id=2, radius=1.1)
+
+    assert not _semantic_proposal_scene(
+        _context(own=own, enemies=(prey, third_player))
+    )
+
+
+def test_prefilter_allows_isolated_edible_target() -> None:
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=2.0),)
+    prey = _enemy(player_id=1, radius=1.0)
+
+    assert _semantic_proposal_scene(_context(own=own, enemies=(prey,)))
+
+
+def test_prefilter_skips_semantic_after_middle_game() -> None:
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=2.0),)
+    prey = _enemy(player_id=1, radius=1.0)
+
+    assert not _semantic_proposal_scene(
+        _context(own=own, enemies=(prey,), round_number=700)
+    )
+
+
+def test_prefilter_skips_semantic_after_building_large_mass() -> None:
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=3.0),)
+    prey = _enemy(player_id=1, radius=1.0)
+
+    assert not _semantic_proposal_scene(_context(own=own, enemies=(prey,)))

@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 from strategies.base import StrategyContext, StrategyDecision
+from strategies.features import can_eat_player_blob
 from strategies.receding_horizon import Action, ReplayDominanceStrategy, SearchNode
 from strategies.semantic_potential import SemanticLookaheadStrategy
 
 
-SEMANTIC_PROPOSAL_MAX_ROUND_FRACTION = 0.65
+SEMANTIC_PROPOSAL_MAX_ROUND_FRACTION = 0.45
+SEMANTIC_PROPOSAL_MAX_OWN_MASS = 8.0
 SEMANTIC_PROPOSAL_MAX_CONTACT_TURNS = 4.0
 SEMANTIC_PROPOSAL_MIN_TARGET_MASS = 0.5
 SEMANTIC_PROPOSAL_MIN_MASS_SHARE = 0.12
@@ -27,11 +29,18 @@ class OutcomeTeacherHybridStrategy(ReplayDominanceStrategy):
         self._semantic_proposal_diagnostics: dict[str, object] = {}
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
-        semantic = self._semantic.choose(context)
-        (
-            self._semantic_proposal,
-            self._semantic_proposal_diagnostics,
-        ) = _semantic_capture_proposal(context, semantic=semantic)
+        if _semantic_proposal_scene(context):
+            semantic = self._semantic.choose(context)
+            (
+                self._semantic_proposal,
+                self._semantic_proposal_diagnostics,
+            ) = _semantic_capture_proposal(context, semantic=semantic)
+        else:
+            self._semantic_proposal = None
+            self._semantic_proposal_diagnostics = {
+                "proposal_offered": False,
+                "prefilter_passed": False,
+            }
         decision = super().choose(context)
         diagnostics = dict(decision.diagnostics)
         diagnostics["outcome_teacher"] = {
@@ -49,6 +58,36 @@ class OutcomeTeacherHybridStrategy(ReplayDominanceStrategy):
         if not first_step or self._semantic_proposal is None:
             return ()
         return (self._semantic_proposal,)
+
+
+def _semantic_proposal_scene(context: StrategyContext) -> bool:
+    """Reject ordinary turns before paying for the second policy."""
+
+    state = context.game.state
+    own = tuple(state.me.blobs.values())
+    enemies = tuple(state.visible_blobs)
+    round_number = int(getattr(state, "round", 0))
+    max_rounds = max(1, int(getattr(state, "max_rounds", 1400)))
+    if (
+        len(own) != 1
+        or len(enemies) != 1
+        or round_number >= max_rounds * SEMANTIC_PROPOSAL_MAX_ROUND_FRACTION
+    ):
+        return False
+    blob = own[0]
+    enemy = enemies[0]
+    own_mass = blob.radius * blob.radius
+    target_mass = enemy.radius * enemy.radius
+    return (
+        own_mass <= SEMANTIC_PROPOSAL_MAX_OWN_MASS
+        and can_eat_player_blob(
+            blob.radius,
+            enemy.radius,
+            radius_margin=1.03,
+        )
+        and target_mass >= SEMANTIC_PROPOSAL_MIN_TARGET_MASS
+        and target_mass / own_mass >= SEMANTIC_PROPOSAL_MIN_MASS_SHARE
+    )
 
 
 def _semantic_capture_proposal(
@@ -79,6 +118,7 @@ def _semantic_capture_proposal(
         ),
         "non_split": not semantic.split,
         "single_blob": len(own) == 1,
+        "low_capital": own_mass <= SEMANTIC_PROPOSAL_MAX_OWN_MASS,
         "early_or_middle": (
             round_number
             < max_rounds * SEMANTIC_PROPOSAL_MAX_ROUND_FRACTION
@@ -108,6 +148,7 @@ def _semantic_capture_proposal(
         ),
         {
             "proposal_offered": offered,
+            "prefilter_passed": True,
             "checks": checks,
             "round_fraction": round_number / max_rounds,
             "target_mass": target_mass,

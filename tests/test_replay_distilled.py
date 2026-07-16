@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bots"))
 
 from strategies.replay_distilled import (  # noqa: E402
+    DEFAULT_MAX_TEACHER_CORRECTION_DEGREES,
     REPLAY_BASE_FEATURE_COUNT,
     REPLAY_DIRECTION_WEIGHTS,
     REPLAY_REGIME_DIRECTION_WEIGHTS,
@@ -49,6 +50,7 @@ def test_distilled_weight_shapes_match_runtime_features() -> None:
         for weights in REPLAY_REGIME_DIRECTION_WEIGHTS
     )
     assert len(REPLAY_TEACHER_SOURCE_MATCHES) == 31
+    assert DEFAULT_MAX_TEACHER_CORRECTION_DEGREES == 2.5
 
 
 def test_submission_safe_features_match_training_features() -> None:

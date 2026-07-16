@@ -239,6 +239,12 @@ def apply_benchmark_timeout_environment(
     env.setdefault("AGARIO_STRICT_TURN_TIMEOUT_SECONDS", "1")
 
 
+def apply_reproducibility_environment(env: dict[str, str]) -> None:
+    """Keep independent Python processes on the same deterministic hash stream."""
+
+    env.setdefault("PYTHONHASHSEED", "0")
+
+
 def resolve_workspace_root(repo_root: Path, workspace_root: str | None) -> Path:
     if workspace_root:
         return Path(workspace_root).expanduser().resolve()
@@ -389,6 +395,7 @@ async def run_match(
         run_dir.mkdir(parents=True, exist_ok=True)
         log_path = run_dir / "simulation.log"
         env = os.environ.copy()
+        apply_reproducibility_environment(env)
         env["BOT_BENCHMARK_TRIAL"] = str(trial)
         env["BOT_RANDOM_SEED"] = str(random_seed)
         env["AGARIO_ENGINE_RANDOM_SEED"] = str(random_seed + trial)
