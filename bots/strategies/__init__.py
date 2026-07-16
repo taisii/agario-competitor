@@ -10,8 +10,10 @@ from strategies.base import Strategy, StrategyContext, StrategyDecision
 _LAZY_EXPORTS = {
     "FoodGreedyStrategy": "strategies.greedy",
     "EventDrivenStaticSearchStrategy": "strategies.event_driven",
+    "OutcomeTeacherHybridStrategy": "strategies.outcome_teacher_hybrid",
     "PotentialFieldHunterStrategy": "strategies.potential_field",
     "ReplayDominanceStrategy": "strategies.receding_horizon",
+    "ReplayDistilledStrategy": "strategies.replay_distilled",
     "SemanticLookaheadStrategy": "strategies.semantic_potential",
     "SemanticPotentialStrategy": "strategies.semantic_potential",
     "StaticOptionGrowthStrategy": "strategies.virus_farming",
@@ -35,8 +37,10 @@ def __getattr__(name: str):
 __all__ = [
     "FoodGreedyStrategy",
     "EventDrivenStaticSearchStrategy",
+    "OutcomeTeacherHybridStrategy",
     "PotentialFieldHunterStrategy",
     "ReplayDominanceStrategy",
+    "ReplayDistilledStrategy",
     "SemanticLookaheadStrategy",
     "SemanticPotentialStrategy",
     "StaticOptionGrowthStrategy",

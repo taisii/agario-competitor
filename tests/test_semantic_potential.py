@@ -47,6 +47,8 @@ def _context(
     viruses: tuple[VirusModel, ...] = (),
     enemies: tuple[VisibleBlobModel, ...] = (),
     arena_size: float = 60.0,
+    round_number: int = 0,
+    max_rounds: int = 1400,
 ) -> StrategyContext:
     state = SimpleNamespace(
         me=SimpleNamespace(player_id=0, blobs={blob.blob_id: blob for blob in own}),
@@ -54,6 +56,8 @@ def _context(
         visible_viruses=list(viruses),
         visible_blobs=list(enemies),
         map=SimpleNamespace(size=arena_size),
+        round=round_number,
+        max_rounds=max_rounds,
     )
     return StrategyContext(
         game=SimpleNamespace(state=state),
@@ -127,11 +131,41 @@ def test_lookahead_keeps_quiet_small_mass_food_collection_one_ply() -> None:
     assert decision.diagnostics["lookahead"] == {
         "enabled": False,
         "searched_roots": 0,
+        "root_limit": 4,
+        "estimated_root_work": 10,
+        "work_budget": 800,
+        "skipped_reason": "irrelevant",
         "food_scale": 1.0,
         "search_configured": True,
         "food_scaling_configured": True,
         "selected": None,
     }
+
+
+def test_lookahead_skips_expensive_fragmented_tactical_position() -> None:
+    strategy = SemanticLookaheadStrategy()
+    own = tuple(
+        BlobModel(
+            blob_id=index,
+            pos=(20.0 + (index % 4), 20.0 + (index // 4)),
+            radius=1.0,
+        )
+        for index in range(16)
+    )
+    prey = _enemy(player_id=1, pos=(25.0, 25.0), radius=0.5)
+    foods = tuple(
+        FoodModel(food_id=index, pos=(30.0 + index * 0.1, 30.0))
+        for index in range(40)
+    )
+
+    decision = strategy.choose(_context(own, foods=foods, enemies=(prey,)))
+
+    lookahead = decision.diagnostics["lookahead"]
+    assert not lookahead["enabled"]
+    assert lookahead["searched_roots"] == 0
+    assert lookahead["root_limit"] == 0
+    assert lookahead["estimated_root_work"] > lookahead["work_budget"]
+    assert lookahead["skipped_reason"] == "work_budget"
 
 
 def test_lookahead_continuation_falls_back_after_root_consumes_target() -> None:

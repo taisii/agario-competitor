@@ -42,7 +42,7 @@ from lib.models.virus_model import VirusModel  # noqa: E402
 from strategies.base import StrategyContext, StrategyDecision  # noqa: E402
 from strategies.features import can_consume_virus, can_eat_player_blob  # noqa: E402
 from strategies.receding_horizon import Action, ReplayDominanceStrategy  # noqa: E402
-from strategies.semantic_potential import SemanticPotentialStrategy  # noqa: E402
+from strategies.registry import create_strategy  # noqa: E402
 
 
 ADOPTION_ANGLE_DEGREES = 30.0
@@ -261,12 +261,13 @@ def compare(
     replay_path: Path,
     *,
     player_id: int,
+    strategy_name: str = "semantic_potential",
     every_n: int = 1,
     max_samples: int | None = None,
 ) -> tuple[list[ComparisonSample], dict[str, object]]:
     started = json.loads(replay_path.read_text(encoding="utf-8"))[0]
     max_rounds = int(started.get("max_rounds", 1400))
-    semantic = SemanticPotentialStrategy()
+    semantic = create_strategy(strategy_name)
     replay = ReplayDominanceStrategy()
     scorer = ReplayDominanceStrategy()
     samples: list[ComparisonSample] = []
@@ -437,6 +438,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("replay", type=Path, help="Local output/game.json replay")
     parser.add_argument("--player", type=int, default=0)
+    parser.add_argument(
+        "--strategy",
+        default="semantic_potential",
+        help="Candidate strategy to compare with replay_dominance.",
+    )
     parser.add_argument("--every-n", type=int, default=1)
     parser.add_argument("--max-samples", type=int)
     parser.add_argument("--output", type=Path)
@@ -450,12 +456,14 @@ def main() -> None:
     samples, summary = compare(
         args.replay.resolve(),
         player_id=args.player,
+        strategy_name=args.strategy,
         every_n=args.every_n,
         max_samples=args.max_samples,
     )
     report = {
         "replay": str(args.replay.resolve()),
         "player_id": args.player,
+        "strategy": args.strategy,
         "thresholds": {
             "angle_degrees": ADOPTION_ANGLE_DEGREES,
             "proxy_regret": ADOPTION_PROXY_REGRET,
