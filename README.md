@@ -186,8 +186,9 @@ uv run python scripts/rank_replay_opponents.py \
 
 ## Building the official submission
 
-The 2026 submission portal accepts one `.py` file. Keep the modular strategy
-sources for development and generate the upload artifact with:
+The 2026 submission portal accepts one `.py` file. The default candidate is
+`semantic_lookahead`; keep the modular strategy sources for development and
+generate the upload artifact with:
 
 ```bash
 uv run python scripts/build_submission.py
@@ -195,10 +196,11 @@ uv run python -m py_compile dist/my_bot.py
 uv run simulation 1:dist/my_bot.py 7:bots/entries/random_opponent.py --headless
 ```
 
-Build a different supported submission strategy with `--strategy`, for example:
+Build a different supported submission strategy with `--strategy`. The previous
+`replay_dominance` candidate remains available for an immediate rollback:
 
 ```bash
-uv run python scripts/build_submission.py --strategy virus_hunter
+uv run python scripts/build_submission.py --strategy replay_dominance
 ```
 
 Upload `dist/my_bot.py` at `https://syncs.org.au/competition2026/game`.
@@ -211,9 +213,11 @@ and at least five submissions by that team. The portal submission history is
 the authoritative count; keep the hash and successful portal status for each
 meaningful iteration.
 
-`random_opponent` samples from `food_greedy`, `survival_greedy`,
-`potential_field_hunter`, and `potential_field_virus_farmer` by default;
-override it with `BOT_RANDOM_STRATEGIES=a,b,c`.
+`random_opponent` shuffles a six-policy pool (`semantic_lookahead`,
+`semantic_potential`, `replay_dominance`, `threat_aware_receding_horizon`,
+`event_driven_static_search`, and `static_retained_growth`) per paired trial.
+Opponent slots 1–7 cover every policy, with one duplicated; override the pool
+with `BOT_RANDOM_STRATEGIES=a,b,c`.
 
 Example strategy screen:
 

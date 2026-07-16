@@ -8,11 +8,47 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.benchmark_simulations import (  # noqa: E402
+    apply_benchmark_timeout_environment,
     paired_mass_comparisons,
     parse_factorial_cells,
+    resolve_jobs,
     summarize_metrics,
     two_factor_mass_analysis,
 )
+
+
+def test_throughput_jobs_are_cpu_aware_but_memory_bounded() -> None:
+    assert resolve_jobs(None, throughput=False, cpu_count=10) == 1
+    assert resolve_jobs(None, throughput=True, cpu_count=10) == 4
+    assert resolve_jobs(None, throughput=True, cpu_count=2) == 1
+    assert resolve_jobs(8, throughput=True, cpu_count=10) == 8
+
+
+def test_throughput_relaxes_every_player_without_strict_slot_override() -> None:
+    env = {"AGARIO_LOCAL_RELAXED_PLAYER_IDS": "1,2,3"}
+
+    apply_benchmark_timeout_environment(
+        env,
+        tracked_slots=(0,),
+        throughput=True,
+    )
+
+    assert "AGARIO_LOCAL_RELAXED_PLAYER_IDS" not in env
+    assert env["AGARIO_LOCAL_TURN_TIMEOUT_SECONDS"] == "60"
+    assert env["AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS"] == "600"
+
+
+def test_fast_validation_relaxes_only_untracked_players() -> None:
+    env = {}
+
+    apply_benchmark_timeout_environment(
+        env,
+        tracked_slots=(0, 3),
+        throughput=False,
+    )
+
+    assert env["AGARIO_LOCAL_RELAXED_PLAYER_IDS"] == "1,2,4,5,6,7"
+    assert env["AGARIO_STRICT_TURN_TIMEOUT_SECONDS"] == "1"
 
 
 def _row(variant: str, trial: int, mass: float, result: str = "SUCCESS"):

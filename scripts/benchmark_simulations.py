@@ -18,6 +18,7 @@ from typing import Any
 
 BUILT_IN_VARIANTS = {"current": {}}
 DEFAULT_RANDOM_SEED = 20260712
+AUTO_JOB_CAP = 4
 
 OUTCOME_RE = re.compile(
     r"outcome was \{result_type='(?P<result_type>[^']+)' "
@@ -39,6 +40,9 @@ class Variant:
 
 def main() -> None:
     args = parse_args()
+    args.jobs = resolve_jobs(args.jobs, throughput=args.throughput)
+    fast = args.fast or args.throughput
+    args.fast = fast
     repo_root = Path(__file__).resolve().parents[1]
     workspace_root = resolve_workspace_root(repo_root, args.workspace_root)
     tracked_slots = parse_slots(args.tracked_slots)
@@ -59,7 +63,8 @@ def main() -> None:
             metrics_every_n=args.metrics_every_n,
             random_seed=args.random_seed,
             headless=not args.no_headless,
-            fast=args.fast,
+            fast=fast,
+            throughput=args.throughput,
         )
     )
     write_outputs(workspace_root, results)
@@ -98,10 +103,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--jobs",
         type=int,
-        default=1,
+        default=None,
         help=(
-            "Concurrent matches. Each match already launches the engine and eight "
-            "bots; raise only after verifying the submissions are lightweight."
+            "Concurrent matches. Defaults to 1 normally and an automatic "
+            "CPU-aware value in --throughput mode."
         ),
     )
     parser.add_argument(
@@ -115,12 +120,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--submission",
         nargs="+",
-        default=["4:bots/entries/food_greedy.py", "4:bots/entries/survival_greedy.py"],
-        help="Simulation submission specs. Counts must sum to 8.",
+        default=["1:bots/my_bot.py", "7:bots/entries/random_opponent.py"],
+        help=(
+            "Simulation submission specs. Counts must sum to 8. The default "
+            "runs the candidate against the six-policy randomized sparring pool."
+        ),
     )
     parser.add_argument(
         "--tracked-slots",
-        default="4,5,6,7",
+        default="0",
         help="Comma-separated player slots to score as the strategy under test.",
     )
     parser.add_argument(
@@ -155,6 +163,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--throughput",
+        action="store_true",
+        help=(
+            "Run the fast engine, relax timeouts for every player, and choose "
+            "parallel jobs automatically unless --jobs is specified. Use for "
+            "large statistical experiments, not submission-time validation."
+        ),
+    )
+    parser.add_argument(
         "--baseline-variant",
         default="current",
         help="Variant used for paired final-mass differences.",
@@ -178,6 +195,47 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     return parser.parse_args()
+
+
+def resolve_jobs(
+    requested: int | None,
+    *,
+    throughput: bool,
+    cpu_count: int | None = None,
+) -> int:
+    if requested is not None:
+        if requested <= 0:
+            raise ValueError("--jobs must be positive")
+        return requested
+    if not throughput:
+        return 1
+    available = cpu_count if cpu_count is not None else os.cpu_count()
+    return min(AUTO_JOB_CAP, max(1, (available or 1) - 1))
+
+
+def apply_benchmark_timeout_environment(
+    env: dict[str, str],
+    *,
+    tracked_slots: tuple[int, ...],
+    throughput: bool,
+) -> None:
+    """Separate high-throughput experiments from candidate timeout checks."""
+
+    if throughput:
+        env.pop("AGARIO_LOCAL_RELAXED_PLAYER_IDS", None)
+        env.setdefault("AGARIO_LOCAL_TURN_TIMEOUT_SECONDS", "60")
+        env.setdefault("AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS", "600")
+        return
+
+    relaxed_slots = tuple(slot for slot in range(8) if slot not in tracked_slots)
+    if not relaxed_slots:
+        return
+    env["AGARIO_LOCAL_RELAXED_PLAYER_IDS"] = ",".join(
+        str(slot) for slot in relaxed_slots
+    )
+    env.setdefault("AGARIO_LOCAL_TURN_TIMEOUT_SECONDS", "10")
+    env.setdefault("AGARIO_LOCAL_CUMULATIVE_TIMEOUT_SECONDS", "60")
+    env.setdefault("AGARIO_STRICT_TURN_TIMEOUT_SECONDS", "1")
 
 
 def resolve_workspace_root(repo_root: Path, workspace_root: str | None) -> Path:
@@ -245,6 +303,7 @@ def write_run_config(
         "random_seed": args.random_seed,
         "headless": not args.no_headless,
         "fast": args.fast,
+        "throughput": args.throughput,
         "factorial_cells": args.factorial_cells,
     }
     (workspace_root / "run_config.json").write_text(
@@ -265,6 +324,7 @@ async def run_all(
     random_seed: int,
     headless: bool,
     fast: bool,
+    throughput: bool = False,
     semaphore: asyncio.Semaphore | None = None,
 ) -> list[dict[str, Any]]:
     if semaphore is None:
@@ -286,6 +346,7 @@ async def run_all(
                         random_seed=random_seed,
                         headless=headless,
                         fast=fast,
+                        throughput=throughput,
                     )
                 )
             )
@@ -319,6 +380,7 @@ async def run_match(
     random_seed: int,
     headless: bool,
     fast: bool = False,
+    throughput: bool = False,
 ) -> dict[str, Any]:
     async with semaphore:
         run_dir = workspace_root / variant.name / f"run_{trial:03d}"
@@ -337,6 +399,11 @@ async def run_match(
             env["BOT_BENCHMARK_VARIANT_ENV_JSON"] = json.dumps(variant.env)
             env["BOT_BENCHMARK_VARIANT_SLOTS"] = ",".join(
                 str(slot) for slot in tracked_slots
+            )
+            apply_benchmark_timeout_environment(
+                env,
+                tracked_slots=tracked_slots,
+                throughput=throughput,
             )
             command = [
                 "uv",

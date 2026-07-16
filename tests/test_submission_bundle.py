@@ -39,8 +39,8 @@ def test_submission_bundle_is_single_file_without_local_imports() -> None:
         tree = ast.parse(source)
 
     assert len(digest) == 64
-    assert "class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy)" in source
-    assert "strategy = ReplayDominanceStrategy()" in source
+    assert "class SemanticLookaheadStrategy" in source
+    assert "strategy = SemanticLookaheadStrategy()" in source
     assert 'if __name__ == "__main__":' in source
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
@@ -100,6 +100,25 @@ def test_semantic_exploration_submission_flattens_parent_strategy() -> None:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
             assert node.module.split(".", 1)[0] not in {"strategies", "telemetry"}
+
+
+def test_semantic_lookahead_submission_is_self_contained() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "semantic_lookahead.py",
+            strategy_name="semantic_lookahead",
+        )
+        source = output.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+    assert "class SemanticLookaheadStrategy" in source
+    assert "strategy = SemanticLookaheadStrategy()" in source
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert node.module.split(".", 1)[0] not in {
+                "strategies",
+                "telemetry",
+            }
 
 
 def test_virus_hunter_submission_contains_only_required_strategy_classes() -> None:

@@ -9,8 +9,9 @@ answers *where could we intentionally go?* while the field answers *which of
 those intentions fits the wider visible position?*
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
+import os
 
 from lib.config.arena import ARENA_SIZE, MAX_BLOB_COUNT
 from lib.config.player import (
@@ -52,6 +53,12 @@ FUTURE_MASS_DISCOUNT = 0.70
 MAX_DIRECTIONAL_FOODS = 8
 BOUNDARY_STALL_PROGRESS_RATIO = 0.10
 EPSILON = 1.0e-9
+LOOKAHEAD_ADJUSTMENT_SCALE = 0.10
+LOOKAHEAD_MAX_ADJUSTMENT = 0.015
+LOOKAHEAD_CONTENDER_MARGIN = 0.06
+LOOKAHEAD_ROOT_LIMIT = 4
+LARGE_MASS_FOOD_REFERENCE = 35.0
+LARGE_MASS_FOOD_FLOOR = 0.65
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +260,8 @@ class SemanticPotentialStrategy:
             prey=prey,
             nearest_foods=nearest_foods[:2],
             nearest_viruses=nearest_viruses,
+            target_memory=self._target_memory,
+            fallback_direction=self._last_direction,
         )
         scored = tuple(
             (
@@ -269,9 +278,19 @@ class SemanticPotentialStrategy:
                     routing_blob_ids=routing_blob_ids,
                     escape_direction=escape_direction,
                     previous_directions=previous_directions,
+                    previous_own_direction=self._last_direction,
                 ),
             )
             for candidate in candidates
+        )
+        scored = self._refine_scored_candidates(
+            scored=scored,
+            own=own,
+            all_foods=all_foods,
+            all_viruses=all_viruses,
+            enemies=enemies,
+            arena_size=arena_size,
+            previous_directions=previous_directions,
         )
         current_safety_margin = _minimum_threat_margin(own, enemies)
         safe = tuple(item for item in scored if not item[1].catastrophic)
@@ -332,6 +351,41 @@ class SemanticPotentialStrategy:
         elif selected.target_kind in {"escape", "wall", "prey"}:
             self._target_memory = None
 
+        diagnostics = {
+            "candidate_count": len(candidates),
+            "safe_candidate_count": len(safe),
+            "unreachable_stationary_resources": (
+                len(all_foods)
+                + len(all_viruses)
+                - len(foods)
+                - len(viruses)
+            ),
+            "current_safety_margin": _finite_or_none(current_safety_margin),
+            "selected_safety_margin": _finite_or_none(score.safety_margin),
+            "mass_phase": mass_phase,
+            "split_depth": selected.split_depth,
+            "candidate_scores": {
+                candidate.family: round(candidate_score.total, 6)
+                for candidate, candidate_score in scored
+            },
+            "selected_components": {
+                "threat": score.threat,
+                "food": score.food,
+                "prey": score.prey,
+                "virus": score.virus,
+                "wall": score.wall,
+                "corridor": score.corridor,
+                "inertia": score.inertia,
+                "intent": score.intent,
+            },
+            "secured_one_step_mass": {
+                "enemy": score.secured_enemy_mass,
+                "virus": score.secured_virus_mass,
+                "food": score.secured_food_mass,
+                "lost": score.own_mass_lost,
+            },
+        }
+        diagnostics.update(self._decision_diagnostics(selected))
         return StrategyDecision(
             direction=selected.direction,
             split=selected.split,
@@ -339,38 +393,29 @@ class SemanticPotentialStrategy:
             target_id=selected.target_id,
             reason=selected.family,
             score=score.total,
-            diagnostics={
-                "candidate_count": len(candidates),
-                "safe_candidate_count": len(safe),
-                "unreachable_stationary_resources": (
-                    len(all_foods) + len(all_viruses) - len(foods) - len(viruses)
-                ),
-                "current_safety_margin": _finite_or_none(current_safety_margin),
-                "selected_safety_margin": _finite_or_none(score.safety_margin),
-                "mass_phase": mass_phase,
-                "split_depth": selected.split_depth,
-                "candidate_scores": {
-                    candidate.family: round(candidate_score.total, 6)
-                    for candidate, candidate_score in scored
-                },
-                "selected_components": {
-                    "threat": score.threat,
-                    "food": score.food,
-                    "prey": score.prey,
-                    "virus": score.virus,
-                    "wall": score.wall,
-                    "corridor": score.corridor,
-                    "inertia": score.inertia,
-                    "intent": score.intent,
-                },
-                "secured_one_step_mass": {
-                    "enemy": score.secured_enemy_mass,
-                    "virus": score.secured_virus_mass,
-                    "food": score.secured_food_mass,
-                    "lost": score.own_mass_lost,
-                },
-            },
+            diagnostics=diagnostics,
         )
+
+    def _refine_scored_candidates(
+        self,
+        *,
+        scored: tuple[tuple[DirectionCandidate, PotentialScore], ...],
+        own: tuple[BlobModel, ...],
+        all_foods: tuple[FoodModel, ...],
+        all_viruses: tuple[VirusModel, ...],
+        enemies: tuple[VisibleBlobModel, ...],
+        arena_size: float,
+        previous_directions: dict[tuple[int, int], tuple[float, float]],
+    ) -> tuple[tuple[DirectionCandidate, PotentialScore], ...]:
+        """Allow bounded planners to refine the submitted one-ply ranking."""
+
+        return scored
+
+    def _decision_diagnostics(
+        self,
+        selected: DirectionCandidate,
+    ) -> dict[str, object]:
+        return {}
 
     def _candidates(
         self,
@@ -385,13 +430,15 @@ class SemanticPotentialStrategy:
         prey: CaptureRoute | None,
         nearest_foods: tuple[tuple[FoodModel | VirusModel, BlobModel], ...],
         nearest_viruses: tuple[tuple[FoodModel | VirusModel, BlobModel], ...],
+        target_memory: TargetMemory | None,
+        fallback_direction: tuple[float, float],
     ) -> tuple[DirectionCandidate, ...]:
         continuation = _continuation_candidate(
             own=own,
             foods=foods,
             viruses=viruses,
-            memory=self._target_memory,
-            fallback=self._last_direction,
+            memory=target_memory,
+            fallback=fallback_direction,
         )
         progress_ratio = _movement_progress_ratio(
             own,
@@ -425,7 +472,7 @@ class SemanticPotentialStrategy:
                     direction=_direction_or_fallback(
                         source.pos,
                         food.pos,
-                        self._last_direction,
+                        fallback_direction,
                     ),
                     target_kind="food",
                     target_id=str(food.food_id),
@@ -440,7 +487,7 @@ class SemanticPotentialStrategy:
                     direction=_direction_or_fallback(
                         source.pos,
                         virus.pos,
-                        self._last_direction,
+                        fallback_direction,
                     ),
                     target_kind="virus",
                     target_id=str(virus.virus_id),
@@ -457,7 +504,7 @@ class SemanticPotentialStrategy:
                     direction=_direction_or_fallback(
                         prey.hunter.pos,
                         prey.target_pos,
-                        self._last_direction,
+                        fallback_direction,
                     ),
                     target_kind="prey",
                     target_id=f"{prey.enemy.player_id}:{prey.enemy.blob_id}",
@@ -471,7 +518,7 @@ class SemanticPotentialStrategy:
             _split_capture_candidates(
                 own=own,
                 enemies=enemies,
-                fallback=self._last_direction,
+                fallback=fallback_direction,
                 arena_size=arena_size,
                 previous_directions=previous_directions,
             )
@@ -518,6 +565,7 @@ class SemanticPotentialStrategy:
         routing_blob_ids: frozenset[int],
         escape_direction: tuple[float, float],
         previous_directions: dict[tuple[int, int], tuple[float, float]],
+        previous_own_direction: tuple[float, float],
     ) -> PotentialScore:
         outcome = None
         scoring_enemies = enemies
@@ -587,7 +635,7 @@ class SemanticPotentialStrategy:
                 arena_size,
             )
         corridor = 0.0
-        inertia = 0.002 * _dot(candidate.direction, self._last_direction)
+        inertia = 0.002 * _dot(candidate.direction, previous_own_direction)
         target_opportunity = _target_mass_opportunity(
             candidate=candidate,
             own=one_step,
@@ -632,6 +680,454 @@ class SemanticPotentialStrategy:
             secured_food_mass=(0.0 if outcome is None else outcome.food_mass_gained),
             own_mass_lost=(0.0 if outcome is None else outcome.own_mass_lost),
         )
+
+
+class SemanticLookaheadStrategy(SemanticPotentialStrategy):
+    """Refine bounded semantic roots with one additional semantic decision.
+
+    The broad potential remains the candidate generator and cheap first pass.
+    Only positions with an opponent, consumable virus, or multiple own fragments
+    pay for the second ply.  This keeps quiet food collection as cheap as the
+    baseline while letting split, chase, escape, and virus choices account for
+    the position they hand to the next command.
+    """
+
+    name = "semantic_lookahead"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._search_enabled = _environment_enabled("SEMANTIC_LOOKAHEAD_SEARCH")
+        self._food_scaling_enabled = _environment_enabled(
+            "SEMANTIC_LARGE_MASS_FOOD_SCALE"
+        )
+        self._lookahead_diagnostics: dict[str, object] = {
+            "enabled": False,
+            "searched_roots": 0,
+        }
+        self._lookahead_by_root: dict[
+            tuple[str, str | None, bool, int], dict[str, object]
+        ] = {}
+
+    def _refine_scored_candidates(
+        self,
+        *,
+        scored: tuple[tuple[DirectionCandidate, PotentialScore], ...],
+        own: tuple[BlobModel, ...],
+        all_foods: tuple[FoodModel, ...],
+        all_viruses: tuple[VirusModel, ...],
+        enemies: tuple[VisibleBlobModel, ...],
+        arena_size: float,
+        previous_directions: dict[tuple[int, int], tuple[float, float]],
+    ) -> tuple[tuple[DirectionCandidate, PotentialScore], ...]:
+        adjusted = tuple(
+            (candidate, self._adjust_food(candidate, score, own))
+            for candidate, score in scored
+        )
+        self._lookahead_by_root = {}
+        should_search = _lookahead_relevant(
+            adjusted,
+            own=own,
+            viruses=all_viruses,
+        )
+        if not self._search_enabled or not should_search:
+            self._lookahead_diagnostics = {
+                "enabled": False,
+                "searched_roots": 0,
+                "food_scale": (
+                    _food_value_scale(own) if self._food_scaling_enabled else 1.0
+                ),
+                "search_configured": self._search_enabled,
+                "food_scaling_configured": self._food_scaling_enabled,
+            }
+            return adjusted
+
+        selectable = tuple(
+            item for item in adjusted if not item[1].catastrophic
+        ) or adjusted
+        best_root_score = max(item[1].total for item in selectable)
+        contender_keys = {
+            _candidate_key(candidate)
+            for candidate, _ in sorted(
+                (
+                    item
+                    for item in selectable
+                    if item[1].total
+                    >= best_root_score - LOOKAHEAD_CONTENDER_MARGIN
+                ),
+                key=lambda item: item[1].total,
+                reverse=True,
+            )[:LOOKAHEAD_ROOT_LIMIT]
+        }
+        refined: list[tuple[DirectionCandidate, PotentialScore]] = []
+        searched_roots = 0
+        for candidate, root_score in adjusted:
+            if _candidate_key(candidate) not in contender_keys:
+                refined.append((candidate, root_score))
+                continue
+            searched_roots += 1
+            scenarios = _lookahead_enemy_scenarios(
+                candidate=candidate,
+                own=own,
+                enemies=enemies,
+                arena_size=arena_size,
+                previous_directions=previous_directions,
+            )
+            expected_child_value = 0.0
+            best_child_family = "none"
+            best_weighted_child = -math.inf
+            child_count = 0
+            for weight, projected_enemies in scenarios:
+                outcome = _project_one_step_outcome(
+                    own=own,
+                    direction=candidate.direction,
+                    split=candidate.split,
+                    foods=all_foods,
+                    viruses=all_viruses,
+                    enemies=projected_enemies,
+                    arena_size=arena_size,
+                )
+                if not outcome.own:
+                    expected_child_value -= weight * sum(
+                        blob.radius * blob.radius for blob in own
+                    )
+                    continue
+                child, child_score, available_children = self._best_child(
+                    root=candidate,
+                    outcome=outcome,
+                    arena_size=arena_size,
+                    previous_directions=previous_directions,
+                )
+                child_count = max(child_count, available_children)
+                expected_child_value += weight * child_score.total
+                weighted_child = weight * child_score.total
+                if weighted_child > best_weighted_child:
+                    best_weighted_child = weighted_child
+                    best_child_family = child.family
+
+            lookahead_adjustment = _clamp(
+                (expected_child_value - root_score.total)
+                * LOOKAHEAD_ADJUSTMENT_SCALE,
+                -LOOKAHEAD_MAX_ADJUSTMENT,
+                LOOKAHEAD_MAX_ADJUSTMENT,
+            )
+            total = root_score.total + lookahead_adjustment
+            root_key = _candidate_key(candidate)
+            self._lookahead_by_root[root_key] = {
+                "child": best_child_family,
+                "child_count": child_count,
+                "root_score": root_score.total,
+                "expected_child_score": expected_child_value,
+                "adjustment": lookahead_adjustment,
+                "refined_score": total,
+                "scenario_count": len(scenarios),
+            }
+            refined.append(
+                (
+                    candidate,
+                    replace(
+                        root_score,
+                        total=total,
+                    ),
+                )
+            )
+        self._lookahead_diagnostics = {
+            "enabled": True,
+            "searched_roots": searched_roots,
+            "food_scale": (
+                _food_value_scale(own) if self._food_scaling_enabled else 1.0
+            ),
+            "search_configured": self._search_enabled,
+            "food_scaling_configured": self._food_scaling_enabled,
+        }
+        return tuple(refined)
+
+    def _best_child(
+        self,
+        *,
+        root: DirectionCandidate,
+        outcome: OneStepOutcome,
+        arena_size: float,
+        previous_directions: dict[tuple[int, int], tuple[float, float]],
+    ) -> tuple[DirectionCandidate, PotentialScore, int]:
+        foods = _reachable_stationary_resources(
+            outcome.own,
+            outcome.foods,
+            arena_size=arena_size,
+        )
+        viruses = _reachable_stationary_resources(
+            outcome.own,
+            outcome.viruses,
+            arena_size=arena_size,
+        )
+        nearest_foods = _nearest_items_with_sources(
+            outcome.own,
+            foods,
+            limit=MAX_DIRECTIONAL_FOODS,
+        )
+        nearest_viruses = _nearest_items_with_sources(
+            outcome.own,
+            viruses,
+            limit=2,
+        )
+        escape_direction = _escape_direction(outcome.own, outcome.enemies)
+        requested_memory = (
+            TargetMemory(kind=root.target_kind, pos=root.target_pos)
+            if root.target_kind in {"food", "virus"} and root.target_pos is not None
+            else None
+        )
+        target_memory = _refresh_target_memory(
+            requested_memory,
+            foods=foods,
+            viruses=viruses,
+        )
+        prey = _best_capture_target(
+            outcome.own,
+            outcome.enemies,
+            previous_directions=previous_directions,
+            arena_size=arena_size,
+        )
+        children = self._candidates(
+            own=outcome.own,
+            foods=foods,
+            viruses=viruses,
+            enemies=outcome.enemies,
+            arena_size=arena_size,
+            previous_directions=previous_directions,
+            escape_direction=escape_direction,
+            prey=prey,
+            nearest_foods=nearest_foods[:2],
+            nearest_viruses=nearest_viruses,
+            target_memory=target_memory,
+            fallback_direction=root.direction,
+        )
+        routing_blob_ids = frozenset(
+            blob.blob_id for blob in _routing_blobs(outcome.own, limit=4)
+        )
+        directional_foods = tuple(item for item, _ in nearest_foods)
+        scored_children = tuple(
+            (
+                child,
+                self._adjust_food(
+                    child,
+                    self._score_candidate(
+                        candidate=child,
+                        own=outcome.own,
+                        foods=directional_foods,
+                        all_foods=outcome.foods,
+                        viruses=viruses,
+                        all_viruses=outcome.viruses,
+                        enemies=outcome.enemies,
+                        arena_size=arena_size,
+                        routing_blob_ids=routing_blob_ids,
+                        escape_direction=escape_direction,
+                        previous_directions=previous_directions,
+                        previous_own_direction=root.direction,
+                    ),
+                    outcome.own,
+                ),
+            )
+            for child in children
+        )
+        safe = tuple(item for item in scored_children if not item[1].catastrophic)
+        if safe:
+            selected = max(safe, key=lambda item: item[1].total)
+        else:
+            non_split = tuple(
+                item for item in scored_children if not item[0].split
+            ) or scored_children
+            selected = max(
+                non_split,
+                key=lambda item: (item[1].threat, item[1].total),
+            )
+        return selected[0], selected[1], len(children)
+
+    def _adjust_food(
+        self,
+        candidate: DirectionCandidate,
+        score: PotentialScore,
+        own: tuple[BlobModel, ...],
+    ) -> PotentialScore:
+        if not self._food_scaling_enabled:
+            return score
+        return _scale_food_for_mass(candidate, score, own)
+
+    def _decision_diagnostics(
+        self,
+        selected: DirectionCandidate,
+    ) -> dict[str, object]:
+        selected_search = self._lookahead_by_root.get(_candidate_key(selected))
+        return {
+            "lookahead": {
+                **self._lookahead_diagnostics,
+                "selected": selected_search,
+            }
+        }
+
+
+def _candidate_key(
+    candidate: DirectionCandidate,
+) -> tuple[str, str | None, bool, int]:
+    return (
+        candidate.family,
+        candidate.target_id,
+        candidate.split,
+        candidate.split_depth,
+    )
+
+
+def _environment_enabled(name: str) -> bool:
+    return os.environ.get(name, "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def _lookahead_relevant(
+    scored: tuple[tuple[DirectionCandidate, PotentialScore], ...],
+    *,
+    own: tuple[BlobModel, ...],
+    viruses: tuple[VirusModel, ...],
+) -> bool:
+    if len(own) > 1:
+        return True
+    if any(
+        candidate.family in {"escape", "wall_avoidance"}
+        or candidate.split
+        or (
+            candidate.target_kind == "prey"
+            and candidate.contact_turns is not None
+            and candidate.contact_turns <= DIRECTIONAL_HORIZON
+        )
+        for candidate, _ in scored
+    ):
+        return True
+    return any(
+        can_consume_virus(blob.radius, virus.radius)
+        and max(0.0, math.dist(blob.pos, virus.pos) - blob.radius)
+        <= player_speed(blob.radius) * 2.0
+        for blob in own
+        for virus in viruses
+    )
+
+
+def _food_value_scale(own: tuple[BlobModel, ...]) -> float:
+    """Reduce route-level pellet attraction as its share of mass vanishes."""
+
+    total_mass = sum(blob.radius * blob.radius for blob in own)
+    if total_mass <= LARGE_MASS_FOOD_REFERENCE:
+        return 1.0
+    return max(
+        LARGE_MASS_FOOD_FLOOR,
+        LARGE_MASS_FOOD_REFERENCE / total_mass,
+    )
+
+
+def _scale_food_for_mass(
+    candidate: DirectionCandidate,
+    score: PotentialScore,
+    own: tuple[BlobModel, ...],
+) -> PotentialScore:
+    """Keep secured mass valuable but stop large blobs routing for tiny pellets."""
+
+    scale = _food_value_scale(own)
+    if scale >= 1.0:
+        return score
+    scaled_intent = (
+        score.intent * scale if candidate.target_kind == "food" else score.intent
+    )
+    return replace(
+        score,
+        total=(
+            score.total
+            - score.intent
+            + scaled_intent
+        ),
+        intent=scaled_intent,
+    )
+
+
+def _lookahead_enemy_scenarios(
+    *,
+    candidate: DirectionCandidate,
+    own: tuple[BlobModel, ...],
+    enemies: tuple[VisibleBlobModel, ...],
+    arena_size: float,
+    previous_directions: dict[tuple[int, int], tuple[float, float]],
+) -> tuple[tuple[float, tuple[VisibleBlobModel, ...]], ...]:
+    """Project observed motion and an evasive prey response for the next turn."""
+
+    inertial = _project_enemies(
+        enemies,
+        arena_size=arena_size,
+        directions=previous_directions,
+    )
+    if candidate.target_kind != "prey" or candidate.target_id is None:
+        return ((1.0, inertial),)
+
+    target_player = int(candidate.target_id.partition(":")[0])
+    total_mass = sum(blob.radius * blob.radius for blob in own)
+    own_center = (
+        sum(blob.pos[0] * blob.radius * blob.radius for blob in own) / total_mass,
+        sum(blob.pos[1] * blob.radius * blob.radius for blob in own) / total_mass,
+    )
+    evasive_directions = dict(previous_directions)
+    for enemy in enemies:
+        if int(enemy.player_id) != target_player:
+            continue
+        evasive_directions[(int(enemy.player_id), enemy.blob_id)] = normalise(
+            (
+                enemy.pos[0] - own_center[0],
+                enemy.pos[1] - own_center[1],
+            )
+        )
+    evasive = _project_enemies(
+        enemies,
+        arena_size=arena_size,
+        directions=evasive_directions,
+    )
+    return ((0.65, inertial), (0.35, evasive))
+
+
+def _project_enemies(
+    enemies: tuple[VisibleBlobModel, ...],
+    *,
+    arena_size: float,
+    directions: dict[tuple[int, int], tuple[float, float]],
+) -> tuple[VisibleBlobModel, ...]:
+    return tuple(
+        VisibleBlobModel(
+            player_id=enemy.player_id,
+            team_id=enemy.team_id,
+            blob_id=enemy.blob_id,
+            pos=(
+                _clamp(
+                    enemy.pos[0]
+                    + directions.get(
+                        (int(enemy.player_id), enemy.blob_id),
+                        (0.0, 0.0),
+                    )[0]
+                    * player_speed(enemy.radius),
+                    enemy.radius,
+                    arena_size - enemy.radius,
+                ),
+                _clamp(
+                    enemy.pos[1]
+                    + directions.get(
+                        (int(enemy.player_id), enemy.blob_id),
+                        (0.0, 0.0),
+                    )[1]
+                    * player_speed(enemy.radius),
+                    enemy.radius,
+                    arena_size - enemy.radius,
+                ),
+            ),
+            radius=enemy.radius,
+            merge_cooldown=enemy.merge_cooldown,
+        )
+        for enemy in enemies
+    )
 
 
 def _nearest_items_with_sources(
@@ -994,6 +1490,15 @@ def _continuation_candidate(
         )
     resources: tuple[FoodModel, ...] | tuple[VirusModel, ...]
     resources = foods if memory.kind == "food" else viruses
+    if not resources:
+        # A projected child can consume the resource selected at the root.
+        # Continuing that intent must then degrade to momentum, not crash the
+        # entire bot process while evaluating the next ply.
+        return DirectionCandidate(
+            family="continue",
+            direction=fallback,
+            target_kind="momentum",
+        )
     target = min(
         resources,
         key=lambda resource: squared_distance(resource.pos, memory.pos),
