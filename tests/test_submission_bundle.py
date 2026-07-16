@@ -85,6 +85,23 @@ def test_submission_fast_query_reader_preserves_framing_and_direct_validation() 
     assert connection.get_next_query() == payload
 
 
+def test_semantic_exploration_submission_flattens_parent_strategy() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        output, _ = build_submission(
+            Path(directory) / "semantic_exploration_beam.py",
+            strategy_name="semantic_exploration_beam",
+        )
+        source = output.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+    assert "class SemanticPotentialStrategy" in source
+    assert "class SemanticExplorationBeamStrategy(SemanticPotentialStrategy)" in source
+    assert "strategy = SemanticExplorationBeamStrategy()" in source
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert node.module.split(".", 1)[0] not in {"strategies", "telemetry"}
+
+
 def test_virus_hunter_submission_contains_only_required_strategy_classes() -> None:
     with tempfile.TemporaryDirectory() as directory:
         output, _ = build_submission(

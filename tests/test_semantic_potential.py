@@ -374,6 +374,36 @@ def test_observed_motion_enables_split_that_overlaps_next_enemy_position() -> No
     assert decision.diagnostics["secured_one_step_mass"]["enemy"] > 1.0
 
 
+def test_secured_prey_mass_is_not_outscored_by_duplicate_future_target_value() -> None:
+    strategy = SemanticPotentialStrategy()
+    own = (
+        BlobModel(
+            blob_id=0,
+            pos=(53.58476952526519, 11.25409603269731),
+            radius=6.415230474734815,
+        ),
+    )
+    previous_prey = _enemy(
+        player_id=7,
+        pos=(51.48490530855662, 19.92703133842147),
+        radius=3.1002903089701634,
+    )
+    current_prey = _enemy(
+        player_id=7,
+        pos=(51.75995628332453, 19.1171028556571),
+        radius=3.0971884669639533,
+    )
+
+    strategy.choose(_context(own, enemies=(previous_prey,)))
+    decision = strategy.choose(_context(own, enemies=(current_prey,)))
+
+    scores = decision.diagnostics["candidate_scores"]
+    assert decision.reason == "split_capture"
+    assert decision.split
+    assert scores["split_capture"] > scores["intercept_enemy"]
+    assert decision.diagnostics["secured_one_step_mass"]["enemy"] > 9.5
+
+
 def test_observed_motion_does_not_enable_split_when_child_cannot_eat_target() -> None:
     strategy = SemanticPotentialStrategy()
     own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.449),)

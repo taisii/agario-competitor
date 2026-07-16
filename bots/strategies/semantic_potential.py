@@ -95,6 +95,7 @@ class DirectionalPotential:
 
     food: float
     prey: float
+    target_prey: float
     virus: float
 
     @property
@@ -218,6 +219,12 @@ class SemanticPotentialStrategy:
             own,
             enemies,
         )
+        prey = _best_capture_target(
+            own,
+            enemies,
+            previous_directions=previous_directions,
+            arena_size=arena_size,
+        )
         routing_blob_ids = frozenset(
             blob.blob_id for blob in _routing_blobs(own, limit=4)
         )
@@ -243,6 +250,7 @@ class SemanticPotentialStrategy:
             arena_size=arena_size,
             previous_directions=previous_directions,
             escape_direction=escape_direction,
+            prey=prey,
             nearest_foods=nearest_foods[:2],
             nearest_viruses=nearest_viruses,
         )
@@ -335,10 +343,7 @@ class SemanticPotentialStrategy:
                 "candidate_count": len(candidates),
                 "safe_candidate_count": len(safe),
                 "unreachable_stationary_resources": (
-                    len(all_foods)
-                    + len(all_viruses)
-                    - len(foods)
-                    - len(viruses)
+                    len(all_foods) + len(all_viruses) - len(foods) - len(viruses)
                 ),
                 "current_safety_margin": _finite_or_none(current_safety_margin),
                 "selected_safety_margin": _finite_or_none(score.safety_margin),
@@ -377,6 +382,7 @@ class SemanticPotentialStrategy:
         arena_size: float,
         previous_directions: dict[tuple[int, int], tuple[float, float]],
         escape_direction: tuple[float, float],
+        prey: CaptureRoute | None,
         nearest_foods: tuple[tuple[FoodModel | VirusModel, BlobModel], ...],
         nearest_viruses: tuple[tuple[FoodModel | VirusModel, BlobModel], ...],
     ) -> tuple[DirectionCandidate, ...]:
@@ -442,12 +448,6 @@ class SemanticPotentialStrategy:
                 )
             )
 
-        prey = _best_capture_target(
-            own,
-            enemies,
-            previous_directions=previous_directions,
-            arena_size=arena_size,
-        )
         if prey is not None:
             candidates.append(
                 DirectionCandidate(
@@ -463,6 +463,7 @@ class SemanticPotentialStrategy:
                     target_id=f"{prey.enemy.player_id}:{prey.enemy.blob_id}",
                     target_pos=prey.target_pos,
                     contact_turns=prey.turns_to_contact,
+                    capture_mass=prey.enemy.radius * prey.enemy.radius,
                 )
             )
 
@@ -560,6 +561,9 @@ class SemanticPotentialStrategy:
             foods=scoring_foods,
             viruses=scoring_viruses,
             enemies=scoring_enemies,
+            target_id=(
+                candidate.target_id if candidate.target_kind == "prey" else None
+            ),
             previous_directions=previous_directions,
         )
         catastrophic, threat, safety_margin = _threat_potential(
@@ -584,12 +588,21 @@ class SemanticPotentialStrategy:
             )
         corridor = 0.0
         inertia = 0.002 * _dot(candidate.direction, self._last_direction)
-        intent = _target_mass_opportunity(
+        target_opportunity = _target_mass_opportunity(
             candidate=candidate,
             own=one_step,
             foods=(scoring_foods if candidate.split else all_foods),
             viruses=scoring_viruses,
             enemies=scoring_enemies,
+        )
+        # A prey target is already part of the directional fan.  Count its
+        # best reach estimate once while retaining every other fragment in the
+        # fan.  Exact one-step captures disappear from ``scoring_enemies`` and
+        # are credited below as secured mass instead of speculative value.
+        intent = (
+            max(0.0, target_opportunity - directional.target_prey)
+            if candidate.target_kind == "prey"
+            else target_opportunity
         )
         if outcome is not None:
             intent += (
@@ -832,11 +845,7 @@ def _intercept_point(
             roots.extend(((-b - root) / (2.0 * a), (-b + root) / (2.0 * a)))
     positive = [turns for turns in roots if turns > 0.0 and math.isfinite(turns)]
     gap = max(0.0, distance - hunter.radius)
-    turns = (
-        min(positive)
-        if positive
-        else gap / max(radial_closing_speed, EPSILON)
-    )
+    turns = min(positive) if positive else gap / max(radial_closing_speed, EPSILON)
     # Long constant-velocity predictions are brittle because opponents turn.
     # Aim only a few visible turns ahead while retaining the closing/no-closing
     # decision from the measured trajectory.
@@ -1196,9 +1205,7 @@ def _split_capture_route(
         else:
             capture_reach = math.dist(hunter.pos, endpoint) + child_radius
             prey_escape = player_speed(enemy.radius) * depth
-            reachable = (
-                math.dist(hunter.pos, enemy.pos) + prey_escape <= capture_reach
-            )
+            reachable = math.dist(hunter.pos, enemy.pos) + prey_escape <= capture_reach
         if reachable:
             return SplitCaptureRoute(
                 depth=depth,
@@ -1850,6 +1857,7 @@ def _directional_potential(
     foods: tuple[FoodModel, ...],
     viruses: tuple[VirusModel, ...],
     enemies: tuple[VisibleBlobModel, ...],
+    target_id: str | None,
     previous_directions: dict[tuple[int, int], tuple[float, float]],
 ) -> DirectionalPotential:
     """Estimate three-turn mass available in the candidate's fan.
@@ -1860,12 +1868,9 @@ def _directional_potential(
     only discount here; safety and actual one-step losses are scored elsewhere.
     """
 
-    source_speeds = {
-        source.blob_id: player_speed(source.radius) for source in own
-    }
+    source_speeds = {source.blob_id: player_speed(source.radius) for source in own}
     source_travels = {
-        blob_id: speed * DIRECTIONAL_HORIZON
-        for blob_id, speed in source_speeds.items()
+        blob_id: speed * DIRECTIONAL_HORIZON for blob_id, speed in source_speeds.items()
     }
     enemy_speeds = {
         (int(enemy.player_id), enemy.blob_id): player_speed(enemy.radius)
@@ -1883,35 +1888,38 @@ def _directional_potential(
         )
         for food in foods
     )
-    prey_value = sum(
-        enemy.radius
-        * enemy.radius
-        * max(
-            (
-                _prey_fan_weight(
-                    source,
-                    enemy,
-                    direction,
-                    previous_directions.get(
-                        (int(enemy.player_id), enemy.blob_id),
-                        (0.0, 0.0),
-                    ),
-                    source_speed=source_speeds[source.blob_id],
-                    enemy_speed=enemy_speeds[
-                        (int(enemy.player_id), enemy.blob_id)
-                    ],
-                )
-                for source in own
-                if can_eat_player_blob(
-                    source.radius,
-                    enemy.radius,
-                    radius_margin=1.03,
-                )
-            ),
-            default=0.0,
+    prey_value = 0.0
+    target_prey_value = 0.0
+    for enemy in enemies:
+        contribution = (
+            enemy.radius
+            * enemy.radius
+            * max(
+                (
+                    _prey_fan_weight(
+                        source,
+                        enemy,
+                        direction,
+                        previous_directions.get(
+                            (int(enemy.player_id), enemy.blob_id),
+                            (0.0, 0.0),
+                        ),
+                        source_speed=source_speeds[source.blob_id],
+                        enemy_speed=enemy_speeds[(int(enemy.player_id), enemy.blob_id)],
+                    )
+                    for source in own
+                    if can_eat_player_blob(
+                        source.radius,
+                        enemy.radius,
+                        radius_margin=1.03,
+                    )
+                ),
+                default=0.0,
+            )
         )
-        for enemy in enemies
-    )
+        prey_value += contribution
+        if f"{enemy.player_id}:{enemy.blob_id}" == target_id:
+            target_prey_value = contribution
 
     virus_value = sum(
         virus.radius
@@ -1935,6 +1943,7 @@ def _directional_potential(
     return DirectionalPotential(
         food=FUTURE_MASS_DISCOUNT * food_value,
         prey=FUTURE_MASS_DISCOUNT * prey_value,
+        target_prey=FUTURE_MASS_DISCOUNT * target_prey_value,
         virus=FUTURE_MASS_DISCOUNT * virus_value,
     )
 

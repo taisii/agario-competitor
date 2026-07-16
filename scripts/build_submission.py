@@ -30,6 +30,7 @@ LOCAL_IMPORTS = {
     "strategies.replay_imitation",
     "strategies.replay_profiles",
     "strategies.randomness",
+    "strategies.semantic_potential",
     "strategies.world_transition",
 }
 

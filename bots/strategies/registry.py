@@ -180,6 +180,16 @@ _BUILT_IN_SPECS = (
         ),
     ),
     _spec(
+        "semantic_exploration_beam",
+        "strategies.semantic_exploration_beam:SemanticExplorationBeamStrategy",
+        "potential_field",
+        submission=_submission(
+            "SemanticExplorationBeamStrategy",
+            "bots/strategies/semantic_potential.py",
+            "bots/strategies/semantic_exploration_beam.py",
+        ),
+    ),
+    _spec(
         "semantic_potential",
         "strategies.semantic_potential:SemanticPotentialStrategy",
         "potential_field",
