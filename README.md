@@ -94,6 +94,10 @@ randomly selected official-replay clone strategies, run:
 uv run simulation 1:bots/entries/replay_dominance.py 7:bots/entries/random_replay_opponent.py --headless
 ```
 
+The random replay pool contains all 42 observed enemy `team_id` values, not
+only the curated dedicated-entry panel. The same random seed, benchmark trial,
+and player slot reproduce the same selection.
+
 To screen it against every active replay opponent, with individual matches sharing one
 global parallel-job limit, run:
 

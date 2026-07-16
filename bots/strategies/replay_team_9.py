@@ -1,41 +1,40 @@
 from __future__ import annotations
 
-"""Replay-derived opponent strategy for official team 35.
+"""Replay-derived opponent strategy for official team 9.
 
-The movement profile is fitted from 29 official matches (38,050 turns).  Its
-split policy is stateful: team 35 rearms after 18 rounds and only attacks prey
-that is sufficiently smaller, close, and aligned with its chosen direction.
-Those conditions improve chronological 298xx holdout split F1 from 0.402 to
-0.787 while preserving the repeated 18-round split cadence in the recordings.
+Across 29 recent matches all 222 split commands had visible prey.  A rule
+fitted only on the first 18 matches generalises to the 11 later matches better
+than a prey-independent pseudo-random stream: it requires one merge-ready
+blob of radius at least 2, a sufficiently smaller prey within 15 units, no
+visible predator, and a 15-round rearm interval.  Its exact held-out split F1
+is 0.437 (0.508 with a +/-2-round tolerance); the rejected Bernoulli surrogate
+scored 0.011 exact F1 on the same held-out cohort.
 """
-
-import math
 
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.replay_imitation import (
     ImitationObservation,
     ReplayImitationStrategy,
-    _relations,
     observation_from_context,
     predict_direction,
+    split_feature_values,
 )
 from strategies.replay_profiles import PROFILES
 
 
-MIN_SPLIT_RADIUS = 2.5
-MAX_PREY_DISTANCE = 16.0
-MIN_PREY_RADIUS_RATIO = 1.5
-MIN_PREY_ALIGNMENT = 0.9
-SPLIT_REARM_ROUNDS = 18
+MIN_SPLIT_RADIUS = 2.0
+MAX_PREY_DISTANCE = 15.0
+MIN_PREY_RADIUS_RATIO = 3.0
+SPLIT_REARM_ROUNDS = 15
 
 
-class ReplayTeam35Strategy(ReplayImitationStrategy):
-    """Team-35 fitted movement with its replay-observed split invariant."""
+class ReplayTeam9Strategy(ReplayImitationStrategy):
+    """Team-9 fitted movement with its prey-split state machine."""
 
-    name = "replay_team_35"
+    name = "replay_team_9"
 
     def __init__(self) -> None:
-        super().__init__(PROFILES[35])
+        super().__init__(PROFILES[9])
         self._last_observed_round: int | None = None
         self._last_player_id: int | None = None
 
@@ -49,8 +48,7 @@ class ReplayTeam35Strategy(ReplayImitationStrategy):
         )
         split, split_reason = self._split_decision(
             observation,
-            direction,
-            self._last_split_round,
+            last_split_round=self._last_split_round,
         )
         if split:
             self._last_split_round = observation.round_number
@@ -60,12 +58,15 @@ class ReplayTeam35Strategy(ReplayImitationStrategy):
             direction=direction,
             split=split,
             target_kind="replay_imitation",
-            target_id="35",
-            reason=split_reason if split else "team35_fitted_direction",
+            target_id="9",
+            reason=split_reason if split else "team9_fitted_direction",
             diagnostics={
                 "source_matches": self.profile.source_matches,
                 "split_rule": split_reason,
+                "last_split_round": self._last_split_round,
                 "trace_reset": trace_reset,
+                "split_model": "deterministic_prey_geometry",
+                "split_exact_match_claimed": False,
                 "direction_median_error": self.profile.direction_median_error,
                 "direction_within_30_rate": self.profile.direction_within_30_rate,
             },
@@ -91,11 +92,9 @@ class ReplayTeam35Strategy(ReplayImitationStrategy):
     @staticmethod
     def _split_decision(
         observation: ImitationObservation,
-        direction: tuple[float, float],
+        *,
         last_split_round: int = -10_000,
     ) -> tuple[bool, str]:
-        if observation.round_number - last_split_round < SPLIT_REARM_ROUNDS:
-            return (False, "split_rearming")
         if len(observation.own_blobs) != 1:
             return (False, "requires_single_blob")
 
@@ -104,27 +103,16 @@ class ReplayTeam35Strategy(ReplayImitationStrategy):
             return (False, "below_observed_radius_floor")
         if own.merge_cooldown > 0:
             return (False, "merge_cooldown_active")
+        if observation.round_number - last_split_round < SPLIT_REARM_ROUNDS:
+            return (False, "split_rearming")
 
-        predators, prey, _ = _relations(observation)
-        if predators:
+        values = split_feature_values(observation)
+        if values[9] > 0.5:
             return (False, "predator_visible")
-        if not prey:
+        if values[6] <= 0.5:
             return (False, "no_visible_prey")
-
-        target = min(prey, key=lambda blob: math.dist((own.x, own.y), (blob.x, blob.y)))
-        distance = math.dist((own.x, own.y), (target.x, target.y))
-        if distance > MAX_PREY_DISTANCE:
-            return (False, "prey_beyond_split_horizon")
-        if own.radius / max(target.radius, 1e-9) < MIN_PREY_RADIUS_RATIO:
-            return (False, "prey_not_small_enough")
-
-        magnitude = math.hypot(target.x - own.x, target.y - own.y)
-        alignment = (
-            direction[0] * (target.x - own.x) / magnitude
-            + direction[1] * (target.y - own.y) / magnitude
-            if magnitude > 1e-9
-            else 1.0
-        )
-        if alignment < MIN_PREY_ALIGNMENT:
-            return (False, "prey_not_aligned")
-        return (True, "aligned_prey_split")
+        if values[7] * 20.0 > MAX_PREY_DISTANCE:
+            return (False, "prey_too_far")
+        if values[8] < MIN_PREY_RADIUS_RATIO:
+            return (False, "prey_too_large")
+        return (True, "single_blob_prey_split")

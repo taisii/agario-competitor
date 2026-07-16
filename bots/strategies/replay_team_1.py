@@ -2,49 +2,55 @@ from __future__ import annotations
 
 """Replay-derived opponent strategy for official team 1.
 
-Direction uses the fitted two-match policy.  Team 1 issued only nine split
-commands in 2,350 turns; eight of those aligned an eligible split child with a
-reachable prey blob.  The dedicated split gate models that geometric action
-instead of the generic classifier, which produced substantially more false
-split commands on this sparse trace.
+Twenty current matches show a resource-first movement policy and a stateful
+split rhythm.  With no visible predator, team 1 aims exactly at the nearest
+food or prey.  Splits are edge-triggered when at least one fragment is
+merge-ready, the largest blob is large enough, at most eight fragments exist,
+and prey or a consumable virus is visible.  A short rearm interval models the
+observed split/recombine cycle without firing on every frame while the same
+resource remains visible.
 """
 
-import math
-
 from strategies.base import StrategyContext, StrategyDecision
-from strategies.features import player_speed as _speed
 from strategies.replay_imitation import (
-    EAT_SIZE_RATIO,
-    ImitationBlob,
     ImitationObservation,
     ReplayImitationStrategy,
-    _relations,
-    _unit,
+    analyze_observation,
     observation_from_context,
     predict_direction,
 )
 from strategies.replay_profiles import PROFILES
 
 
-MAX_BLOB_COUNT = 16
-SPLIT_MIN_MASS = 2.0
-SPLIT_EJECT_SPEED = 1.6
+MAX_SPLIT_BLOB_COUNT = 8
+MIN_SPLIT_RADIUS = 2.0
+SPLIT_REARM_ROUNDS = 15
+
+
 class ReplayTeam1Strategy(ReplayImitationStrategy):
-    """Team-1 fitted direction with a replay-derived split corridor gate."""
+    """Team-1 resource tracking with its replay-observed split state machine."""
 
     name = "replay_team_1"
 
     def __init__(self) -> None:
         super().__init__(PROFILES[1])
+        self._last_observed_round: int | None = None
+        self._last_player_id: int | None = None
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         observation = observation_from_context(context)
+        trace_reset = self._begin_observation(observation)
         direction = predict_direction(
             self.profile,
             observation,
             self._previous_direction,
         )
-        split, split_reason = self._split_decision(observation, direction)
+        split, split_reason = self._split_decision(
+            observation,
+            last_split_round=self._last_split_round,
+        )
+        if split:
+            self._last_split_round = observation.round_number
         self._previous_direction = direction
 
         return StrategyDecision(
@@ -52,58 +58,49 @@ class ReplayTeam1Strategy(ReplayImitationStrategy):
             split=split,
             target_kind="replay_imitation",
             target_id="1",
-            reason=split_reason if split else "team1_fitted_direction",
+            reason=split_reason if split else "team1_resource_direction",
             diagnostics={
                 "source_matches": self.profile.source_matches,
                 "split_rule": split_reason,
+                "last_split_round": self._last_split_round,
+                "trace_reset": trace_reset,
                 "validation_passed": self.profile.validation_passed,
             },
         )
 
-    @classmethod
-    def _split_decision(
-        cls,
-        observation: ImitationObservation,
-        direction: tuple[float, float],
-    ) -> tuple[bool, str]:
-        if len(observation.own_blobs) >= MAX_BLOB_COUNT:
-            return (False, "blob_cap")
-        direction = _unit(direction)
-        if direction == (0.0, 0.0):
-            return (False, "zero_direction")
+    def _begin_observation(self, observation: ImitationObservation) -> bool:
+        """Reset history when one strategy instance is reused for a new trace."""
 
-        _, prey, _ = _relations(observation)
-        for own in observation.own_blobs:
-            if own.radius * own.radius < SPLIT_MIN_MASS:
-                continue
-            child_radius = own.radius / math.sqrt(2.0)
-            reach = 3.0 * child_radius + SPLIT_EJECT_SPEED + _speed(child_radius)
-            for target in prey:
-                if (
-                    child_radius * child_radius
-                    < target.radius * target.radius * EAT_SIZE_RATIO
-                ):
-                    continue
-                if cls._inside_split_corridor(
-                    own,
-                    target,
-                    child_radius,
-                    reach,
-                    direction,
-                ):
-                    return (True, "reachable_prey_split")
-        return (False, "no_reachable_split_prey")
+        player_id = (
+            observation.own_blobs[0].player_id if observation.own_blobs else None
+        )
+        trace_reset = self._last_observed_round is not None and (
+            observation.round_number < self._last_observed_round
+            or player_id != self._last_player_id
+        )
+        if trace_reset:
+            self._previous_direction = (0.0, 0.0)
+            self._last_split_round = -10_000
+        self._last_observed_round = observation.round_number
+        self._last_player_id = player_id
+        return trace_reset
 
     @staticmethod
-    def _inside_split_corridor(
-        own: ImitationBlob,
-        target: ImitationBlob,
-        child_radius: float,
-        reach: float,
-        direction: tuple[float, float],
-    ) -> bool:
-        dx = target.x - own.x
-        dy = target.y - own.y
-        forward = dx * direction[0] + dy * direction[1]
-        lateral = abs(dx * direction[1] - dy * direction[0])
-        return -0.1 <= forward <= reach and lateral <= child_radius
+    def _split_decision(
+        observation: ImitationObservation,
+        *,
+        last_split_round: int = -10_000,
+    ) -> tuple[bool, str]:
+        if len(observation.own_blobs) > MAX_SPLIT_BLOB_COUNT:
+            return (False, "fragment_cap")
+        if observation.round_number - last_split_round < SPLIT_REARM_ROUNDS:
+            return (False, "split_rearming")
+        if not any(blob.radius >= MIN_SPLIT_RADIUS for blob in observation.own_blobs):
+            return (False, "no_split_sized_blob")
+        if not any(blob.merge_cooldown <= 0 for blob in observation.own_blobs):
+            return (False, "no_merge_ready_blob")
+
+        analysis = analyze_observation(observation)
+        if not analysis.prey and not analysis.edible_viruses:
+            return (False, "no_visible_resource")
+        return (True, "merge_ready_resource_split")

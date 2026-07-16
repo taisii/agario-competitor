@@ -55,7 +55,7 @@ OBSERVED_REPLAY_TEAM_IDS = (
 )
 
 CUSTOM_REPLAY_TEAM_IDS = frozenset(
-    {1, 4, 13, 16, 22, 25, 29, 31, 35, 39, 44, 51, 53, 56, 68}
+    {1, 4, 9, 13, 16, 22, 25, 29, 31, 35, 39, 44, 51, 53, 56, 68}
 )
 PROFILED_OPPONENT_TEAM_IDS = frozenset({2, 6, 27, 30, 38, 75})
 
@@ -65,6 +65,11 @@ PROFILED_OPPONENT_TEAM_IDS = frozenset({2, 6, 27, 30, 38, 75})
 # count >= 1.  The selection excludes food-only and passive opponents even
 # when a small sample happens to give them a favourable placement.
 REPLAY_TEAM_IDS = (21,)
+
+# Random sparring prioritizes coverage over validation status.  Every opponent seen
+# in the official replay cohort remains eligible; custom policies are used
+# where available and the immutable fitted profile is the fallback.
+RANDOM_REPLAY_TEAM_IDS = OBSERVED_REPLAY_TEAM_IDS
 
 # Teams that pass the official-results gate before clone runtime measurements.
 # The evaluator tests these candidates and promotes only the measured subset
@@ -139,7 +144,7 @@ def select_replay_team_id(
     player_id: int,
     base_seed: int,
     trial: int,
-    team_ids: tuple[int, ...] = REPLAY_TEAM_IDS,
+    team_ids: tuple[int, ...] = RANDOM_REPLAY_TEAM_IDS,
 ) -> int:
     """Select a replay opponent reproducibly for one benchmark slot."""
 
@@ -173,7 +178,7 @@ class RandomReplayOpponent:
                 base_seed=self._base_seed,
                 trial=self._trial,
             )
-            self._selected = create_replay_opponent(team_id)
+            self._selected = create_replay_candidate(team_id)
             self.name = self._selected.name
             if self._on_selected is not None:
                 self._on_selected(self.name)
