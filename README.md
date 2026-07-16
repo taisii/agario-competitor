@@ -96,7 +96,7 @@ Entry files only select a policy. Process I/O and telemetry live in
 
 ## Building the official submission
 
-The default build remains `replay_dominance`:
+The default build is the current submission candidate, `semantic_lookahead`:
 
 ```bash
 uv run python scripts/build_submission.py
@@ -104,10 +104,11 @@ uv run python -m py_compile dist/my_bot.py
 uv run simulation 1:dist/my_bot.py 7:bots/entries/random_opponent.py --headless
 ```
 
-Build another member of the pool with `--strategy`:
+Build another member of the pool with `--strategy`; for example, the previous
+`replay_dominance` candidate remains available for an immediate rollback:
 
 ```bash
-uv run python scripts/build_submission.py --strategy semantic_lookahead
+uv run python scripts/build_submission.py --strategy replay_dominance
 ```
 
 The builder prints the SHA-256 hash. Record that hash with the corresponding

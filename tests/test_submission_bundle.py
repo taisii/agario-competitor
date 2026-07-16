@@ -38,8 +38,8 @@ def test_submission_bundle_is_single_file_without_local_imports() -> None:
         tree = ast.parse(source)
 
     assert len(digest) == 64
-    assert "class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy)" in source
-    assert "strategy = ReplayDominanceStrategy()" in source
+    assert "class SemanticLookaheadStrategy" in source
+    assert "strategy = SemanticLookaheadStrategy()" in source
     assert 'if __name__ == "__main__":' in source
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:

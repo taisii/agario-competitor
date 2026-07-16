@@ -17,7 +17,7 @@ from strategies.registry import (  # noqa: E402
 
 
 DEFAULT_OUTPUT = ROOT / "dist" / "my_bot.py"
-DEFAULT_STRATEGY = "replay_dominance"
+DEFAULT_STRATEGY = "semantic_lookahead"
 LOCAL_IMPORTS = {
     "simulation.rules",
     "strategies.base",
