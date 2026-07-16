@@ -83,6 +83,7 @@ def _semantic_capture_proposal(
             round_number
             < max_rounds * SEMANTIC_PROPOSAL_MAX_ROUND_FRACTION
         ),
+        "isolated_prey": len(enemies) == 1,
         "target_present": target is not None,
         "target_mass": target_mass >= SEMANTIC_PROPOSAL_MIN_TARGET_MASS,
         "target_mass_share": (
