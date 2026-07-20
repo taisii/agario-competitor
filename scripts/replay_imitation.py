@@ -849,6 +849,13 @@ def _fit_team(
 
 
 def write_profiles(path: Path, profiles: Sequence[ReplayProfile]) -> None:
+    def float_literal(value: float | None) -> str:
+        if value is None:
+            return "None"
+        if math.isinf(value):
+            return 'float("inf")' if value > 0 else '-float("inf")'
+        return repr(value)
+
     lines = [
         "from __future__ import annotations",
         "",
@@ -879,9 +886,11 @@ def write_profiles(path: Path, profiles: Sequence[ReplayProfile]) -> None:
                 f"        probabilistic_angle_bins={profile.probabilistic_angle_bins!r},",
                 f"        angle_grid_rates={profile.angle_grid_rates!r},",
                 f"        source_matches={profile.source_matches!r},",
-                f"        direction_median_error={profile.direction_median_error!r},",
-                f"        direction_within_30_rate={profile.direction_within_30_rate!r},",
-                f"        split_f1={profile.split_f1!r},",
+                "        direction_median_error="
+                f"{float_literal(profile.direction_median_error)},",
+                "        direction_within_30_rate="
+                f"{float_literal(profile.direction_within_30_rate)},",
+                f"        split_f1={float_literal(profile.split_f1)},",
                 f"        validation_passed={profile.validation_passed!r},",
                 "    ),",
             ]

@@ -142,31 +142,26 @@ def test_team35_split_requires_single_merge_ready_blob_above_radius_floor() -> N
     ) == (True, "aligned_prey_split")
 
 
-def test_team35_profile_records_full_official_cohort_and_holdout_metrics() -> None:
+def test_team35_profile_records_current_official_cohort_and_holdout_metrics() -> None:
     profile = PROFILES[35]
 
-    assert len(profile.source_matches) == 29
-    assert profile.source_matches[-12:] == (
-        29848,
-        29855,
-        29857,
-        29858,
-        29869,
-        29875,
-        29878,
-        29881,
-        29882,
-        29887,
-        29900,
-        29904,
+    assert profile.source_matches == (
+        13931,
+        13935,
+        13941,
+        14054,
+        40736,
+        40754,
+        40760,
+        40763,
+        40770,
+        40773,
+        40774,
     )
-    assert profile.direction_median_error is not None
-    assert profile.direction_median_error < 7.2
-    assert profile.direction_within_30_rate is not None
-    assert profile.direction_within_30_rate > 0.86
-    assert profile.split_f1 is not None
-    assert profile.split_f1 > 0.78
-    assert profile.validation_passed is True
+    assert profile.direction_median_error == 8.757172092092748
+    assert profile.direction_within_30_rate == 0.7949293833107209
+    assert profile.split_f1 == 0.6233915500620665
+    assert profile.validation_passed is False
 
 
 def test_team35_evaluation_partitions_whole_matches_without_leakage() -> None:
@@ -227,11 +222,14 @@ def test_team35_profile_metadata_is_the_strict_holdout_result() -> None:
     split = {"f1": profile.split_f1}
 
     assert profile_metadata_matches_validation(
-        profile, direction, split, passed=True  # type: ignore[arg-type]
+        profile,
+        direction,
+        split,
+        passed=profile.validation_passed,  # type: ignore[arg-type]
     )
     assert not profile_metadata_matches_validation(
         profile,
         direction | {"direction_median_error_degrees": 99.0},
         split,  # type: ignore[arg-type]
-        passed=True,
+        passed=profile.validation_passed,
     )

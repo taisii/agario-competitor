@@ -96,6 +96,7 @@ class PotentialScore:
     secured_virus_mass: float
     secured_food_mass: float
     own_mass_lost: float
+    exact_prey_uplift: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +154,7 @@ class CaptureRoute:
     enemy: VisibleBlobModel
     hunter: BlobModel
     target_pos: tuple[float, float]
+    one_step_target_pos: tuple[float, float]
     intercepting: bool
     turns_to_contact: float
 
@@ -180,6 +182,42 @@ class SemanticPotentialStrategy:
         self._last_direction = (1.0, 0.0)
         self._target_memory: TargetMemory | None = None
         self._enemy_positions: dict[tuple[int, int], tuple[float, float]] = {}
+        self._safety_reserve = _environment_nonnegative_float(
+            "SEMANTIC_SAFETY_RESERVE",
+            SAFETY_RESERVE,
+        )
+        self._safety_margin_slack = _environment_nonnegative_float(
+            "SEMANTIC_SAFETY_MARGIN_SLACK",
+            SAFETY_MARGIN_SLACK,
+        )
+        self._exact_prey_outcome = _environment_enabled(
+            "SEMANTIC_EXACT_PREY_OUTCOME",
+            default=True,
+        )
+        self._exact_prey_min_mass = _environment_nonnegative_float(
+            "SEMANTIC_EXACT_PREY_MIN_MASS",
+            20.0,
+        )
+        self._exact_prey_ahead_only = _environment_enabled(
+            "SEMANTIC_EXACT_PREY_AHEAD_ONLY",
+            default=True,
+        )
+        self._exact_prey_requires_safety_reserve = _environment_enabled(
+            "SEMANTIC_EXACT_PREY_REQUIRES_SAFETY_RESERVE",
+            default=True,
+        )
+        self._exact_prey_max_turn_degrees = min(
+            180.0,
+            _environment_nonnegative_float(
+                "SEMANTIC_EXACT_PREY_MAX_TURN_DEGREES",
+                90.0,
+            ),
+        )
+        self._exact_prey_preserve_split_choice = _environment_enabled(
+            "SEMANTIC_EXACT_PREY_PRESERVE_SPLIT_CHOICE",
+            default=True,
+        )
+        self._exact_prey_outcome_active = False
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         state = context.game.state
@@ -194,6 +232,22 @@ class SemanticPotentialStrategy:
         all_foods = tuple(state.visible_food)
         all_viruses = tuple(state.visible_viruses)
         enemies = tuple(state.visible_blobs)
+        current_safety_margin = _minimum_threat_margin(own, enemies)
+        rankings = tuple(getattr(state, "rankings", ()))
+        is_rank_one = bool(
+            rankings
+            and int(rankings[0]) == int(state.me.player_id)
+        )
+        total_mass = sum(blob.radius * blob.radius for blob in own)
+        self._exact_prey_outcome_active = (
+            self._exact_prey_outcome
+            and total_mass + EPSILON >= self._exact_prey_min_mass
+            and (not self._exact_prey_ahead_only or is_rank_one)
+            and (
+                not self._exact_prey_requires_safety_reserve
+                or current_safety_margin + EPSILON >= self._safety_reserve
+            )
+        )
         # A point in a corner can be visible yet physically unreachable: blob
         # centres are clamped to [radius, arena-radius], while eating requires
         # the point to lie inside the blob.  Routing such a point makes a blob
@@ -286,53 +340,18 @@ class SemanticPotentialStrategy:
             arena_size=arena_size,
             previous_directions=previous_directions,
         )
-        current_safety_margin = _minimum_threat_margin(own, enemies)
-        safe = tuple(item for item in scored if not item[1].catastrophic)
-        if safe:
-            if current_safety_margin < SAFETY_RESERVE:
-                non_split_safe = (
-                    tuple(item for item in safe if not item[0].split) or safe
-                )
-                best_margin = max(item[1].safety_margin for item in non_split_safe)
-                selection_pool = tuple(
-                    item
-                    for item in non_split_safe
-                    if item[1].safety_margin >= best_margin - SAFETY_MARGIN_SLACK
-                )
-            else:
-                reserve_safe = tuple(
-                    item for item in safe if item[1].safety_margin >= SAFETY_RESERVE
-                )
-                selection_pool = reserve_safe or safe
-            selected, score = max(
-                selection_pool,
-                key=lambda item: item[1].total,
+        selected, score, safe = self._select_scored_candidate(
+            scored,
+            current_safety_margin=current_safety_margin,
+        )
+        selected, score, baseline_split, split_choice_preserved = (
+            self._preserve_exact_prey_split_choice(
+                scored,
+                selected=selected,
+                score=score,
+                current_safety_margin=current_safety_margin,
             )
-            continuing = next(
-                (item for item in selection_pool if item[0].family == "continue"),
-                None,
-            )
-            if (
-                self._target_memory is not None
-                and continuing is not None
-                and selected.family != "continue"
-                and selected.target_pos != continuing[0].target_pos
-                and score.total < continuing[1].total + TARGET_SWITCH_MARGIN
-            ):
-                selected, score = continuing
-        else:
-            # Being inside every one-step attack envelope does not make the
-            # envelopes equivalent.  Maximise retained safety first and use
-            # strategic utility only to break an equal-risk tie. Never create
-            # additional vulnerable fragments while every option is already
-            # inside a predator envelope.
-            survival_pool = (
-                tuple(item for item in scored if not item[0].split) or scored
-            )
-            selected, score = max(
-                survival_pool,
-                key=lambda item: (item[1].threat, item[1].total),
-            )
+        )
         self._last_direction = selected.direction
         if (
             selected.target_kind in {"food", "virus"}
@@ -356,6 +375,22 @@ class SemanticPotentialStrategy:
             ),
             "current_safety_margin": _finite_or_none(current_safety_margin),
             "selected_safety_margin": _finite_or_none(score.safety_margin),
+            "safety_reserve": self._safety_reserve,
+            "safety_margin_slack": self._safety_margin_slack,
+            "exact_prey_outcome_enabled": self._exact_prey_outcome,
+            "exact_prey_outcome_active": self._exact_prey_outcome_active,
+            "exact_prey_min_mass": self._exact_prey_min_mass,
+            "exact_prey_ahead_only": self._exact_prey_ahead_only,
+            "exact_prey_requires_safety_reserve": (
+                self._exact_prey_requires_safety_reserve
+            ),
+            "exact_prey_max_turn_degrees": self._exact_prey_max_turn_degrees,
+            "exact_prey_preserve_split_choice": (
+                self._exact_prey_preserve_split_choice
+            ),
+            "exact_prey_baseline_split": baseline_split,
+            "exact_prey_split_choice_preserved": split_choice_preserved,
+            "exact_prey_selected_uplift": score.exact_prey_uplift,
             "mass_phase": mass_phase,
             "split_depth": selected.split_depth,
             "selected_contact_turns": selected.contact_turns,
@@ -390,6 +425,109 @@ class SemanticPotentialStrategy:
             score=score.total,
             diagnostics=diagnostics,
         )
+
+    def _select_scored_candidate(
+        self,
+        scored: tuple[tuple[DirectionCandidate, PotentialScore], ...],
+        *,
+        current_safety_margin: float,
+    ) -> tuple[
+        DirectionCandidate,
+        PotentialScore,
+        tuple[tuple[DirectionCandidate, PotentialScore], ...],
+    ]:
+        safe = tuple(item for item in scored if not item[1].catastrophic)
+        if safe:
+            if current_safety_margin < self._safety_reserve:
+                non_split_safe = (
+                    tuple(item for item in safe if not item[0].split) or safe
+                )
+                best_margin = max(item[1].safety_margin for item in non_split_safe)
+                selection_pool = tuple(
+                    item
+                    for item in non_split_safe
+                    if item[1].safety_margin
+                    >= best_margin - self._safety_margin_slack
+                )
+            else:
+                reserve_safe = tuple(
+                    item
+                    for item in safe
+                    if item[1].safety_margin >= self._safety_reserve
+                )
+                selection_pool = reserve_safe or safe
+            selected, score = max(
+                selection_pool,
+                key=lambda item: item[1].total,
+            )
+            continuing = next(
+                (item for item in selection_pool if item[0].family == "continue"),
+                None,
+            )
+            if (
+                self._target_memory is not None
+                and continuing is not None
+                and selected.family != "continue"
+                and selected.target_pos != continuing[0].target_pos
+                and score.total < continuing[1].total + TARGET_SWITCH_MARGIN
+            ):
+                selected, score = continuing
+            return selected, score, safe
+
+        # Being inside every one-step attack envelope does not make the
+        # envelopes equivalent. Maximise retained safety first and use
+        # strategic utility only to break an equal-risk tie. Never create
+        # additional vulnerable fragments while every option is already
+        # inside a predator envelope.
+        survival_pool = tuple(item for item in scored if not item[0].split) or scored
+        selected, score = max(
+            survival_pool,
+            key=lambda item: (item[1].threat, item[1].total),
+        )
+        return selected, score, safe
+
+    def _preserve_exact_prey_split_choice(
+        self,
+        scored: tuple[tuple[DirectionCandidate, PotentialScore], ...],
+        *,
+        selected: DirectionCandidate,
+        score: PotentialScore,
+        current_safety_margin: float,
+    ) -> tuple[DirectionCandidate, PotentialScore, bool | None, bool]:
+        if (
+            not self._exact_prey_preserve_split_choice
+            or not any(item[1].exact_prey_uplift > 0.0 for item in scored)
+        ):
+            return selected, score, None, False
+
+        baseline_scored = tuple(
+            (
+                candidate,
+                replace(
+                    candidate_score,
+                    total=(
+                        candidate_score.total - candidate_score.exact_prey_uplift
+                    ),
+                    intent=(
+                        candidate_score.intent - candidate_score.exact_prey_uplift
+                    ),
+                ),
+            )
+            for candidate, candidate_score in scored
+        )
+        baseline_selected, _, _ = self._select_scored_candidate(
+            baseline_scored,
+            current_safety_margin=current_safety_margin,
+        )
+        if baseline_selected.split == selected.split:
+            return selected, score, baseline_selected.split, False
+
+        baseline_score = next(
+            candidate_score
+            for candidate, candidate_score in scored
+            if candidate is baseline_selected
+        )
+        return baseline_selected, baseline_score, baseline_selected.split, True
 
     def _refine_scored_candidates(
         self,
@@ -509,6 +647,7 @@ class SemanticPotentialStrategy:
                     target_kind="prey",
                     target_id=f"{prey.enemy.player_id}:{prey.enemy.blob_id}",
                     target_pos=prey.target_pos,
+                    one_step_target_pos=prey.one_step_target_pos,
                     contact_turns=prey.turns_to_contact,
                 )
             )
@@ -570,6 +709,15 @@ class SemanticPotentialStrategy:
         scoring_enemies = enemies
         scoring_foods = foods
         scoring_viruses = viruses
+        exact_non_split_prey = (
+            self._exact_prey_outcome_active
+            and not candidate.split
+            and candidate.target_kind == "prey"
+            and candidate.contact_turns is not None
+            and candidate.contact_turns <= 1.0 + EPSILON
+            and _angle_degrees(candidate.direction, previous_own_direction)
+            <= self._exact_prey_max_turn_degrees + EPSILON
+        )
         if candidate.split or candidate.target_kind == "virus":
             outcome = _project_one_step_outcome(
                 own=own,
@@ -592,6 +740,31 @@ class SemanticPotentialStrategy:
             scoring_viruses = _reachable_stationary_resources(
                 one_step,
                 outcome.viruses,
+                arena_size=arena_size,
+            )
+        elif exact_non_split_prey:
+            # Keep the ordinary non-split score as the baseline and use the
+            # exact transition only as monotone evidence that contact really
+            # secures mass.  Replacing ``scoring_enemies`` with the projected
+            # world removes the just-eaten prey from directional potential;
+            # that can *lower* a non-split candidate and accidentally make an
+            # otherwise rejected split win.  The feature is specifically a
+            # non-split upside layer, so it must never demote the base route.
+            outcome = _project_one_step_outcome(
+                own=own,
+                direction=candidate.direction,
+                split=False,
+                foods=all_foods,
+                viruses=all_viruses,
+                enemies=enemies,
+                arena_size=arena_size,
+                target_id=candidate.target_id,
+                target_pos=candidate.one_step_target_pos,
+            )
+            one_step = _project_action_blobs(
+                own,
+                candidate.direction,
+                split=False,
                 arena_size=arena_size,
             )
         else:
@@ -639,13 +812,24 @@ class SemanticPotentialStrategy:
             viruses=scoring_viruses,
             enemies=scoring_enemies,
         )
+        exact_prey_uplift = 0.0
         if outcome is not None:
-            intent += (
-                outcome.enemy_mass_gained
-                + outcome.virus_mass_gained
-                + outcome.food_mass_gained
-                - outcome.own_mass_lost
-            )
+            if exact_non_split_prey:
+                # The route-level opportunity already credits this prey.  An
+                # exact contact may raise that estimate, but never lower it or
+                # add unrelated incidental food/virus collection twice.
+                exact_prey_uplift = max(
+                    0.0,
+                    outcome.enemy_mass_gained - intent,
+                )
+                intent += exact_prey_uplift
+            else:
+                intent += (
+                    outcome.enemy_mass_gained
+                    + outcome.virus_mass_gained
+                    + outcome.food_mass_gained
+                    - outcome.own_mass_lost
+                )
             if outcome.own_mass_lost > 0.0:
                 catastrophic = True
                 threat -= outcome.own_mass_lost
@@ -666,6 +850,7 @@ class SemanticPotentialStrategy:
             secured_virus_mass=(0.0 if outcome is None else outcome.virus_mass_gained),
             secured_food_mass=(0.0 if outcome is None else outcome.food_mass_gained),
             own_mass_lost=(0.0 if outcome is None else outcome.own_mass_lost),
+            exact_prey_uplift=exact_prey_uplift,
         )
 
 
@@ -1003,6 +1188,17 @@ def _environment_nonnegative_int(name: str, default: int) -> int:
     if value < 0:
         raise ValueError(f"{name} must be non-negative")
     return value
+
+
+def _environment_nonnegative_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if math.isfinite(value) and value >= 0.0 else default
 
 
 def _lookahead_relevant(
@@ -1621,6 +1817,15 @@ def _best_capture_target(
                 enemy=enemy,
                 hunter=hunter,
                 target_pos=target_pos,
+                one_step_target_pos=_project_enemy_position(
+                    enemy,
+                    velocity=(
+                        previous_direction[0] * player_speed(enemy.radius),
+                        previous_direction[1] * player_speed(enemy.radius),
+                    ),
+                    turns=1.0,
+                    arena_size=arena_size,
+                ),
                 intercepting=intercepting,
                 turns_to_contact=turns,
             )
@@ -2131,12 +2336,13 @@ def _project_one_step_outcome(
 ) -> OneStepOutcome:
     """Project one command through the engine's one-turn event order.
 
-    Exact projection is bounded to split and virus-target candidates.  Both
-    can change blob topology before cross-player eating, which makes scoring
-    the pre-command blobs materially wrong.  When a target has two consecutive
-    observations, its next center is projected; every deterministic event
-    after movement follows the engine: decay, viruses, food, then
-    largest-first cross-player eating.
+    Exact projection is bounded to split, virus-target, and selected prey
+    candidates.  The first two can change blob topology before cross-player
+    eating; the prey route needs exact contact credit rather than a geometric
+    opportunity estimate.  When a target has two consecutive observations,
+    its next center is projected; every deterministic event after movement
+    follows the engine: decay, viruses, food, then largest-first cross-player
+    eating.
     """
 
     projected_own = _project_action_blobs(
@@ -2648,7 +2854,23 @@ def _blocked_escape_wall_potential(
 
 
 def _one_step_attack_reach(predator_radius: float, prey_radius: float) -> float:
-    reach = predator_radius + player_speed(predator_radius)
+    return _horizon_attack_reach(predator_radius, prey_radius, 1.0)
+
+
+def _horizon_attack_reach(
+    predator_radius: float,
+    prey_radius: float,
+    turns: float,
+) -> float:
+    """Farthest prey-center reach after movement and an immediate split.
+
+    The split child may travel for the same horizon after its launch.  Keeping
+    movement inside this envelope prevents callers from adding a separate
+    predator-speed term and accidentally counting the first turn twice.
+    """
+
+    turns = max(0.0, turns)
+    reach = predator_radius + player_speed(predator_radius) * turns
     if predator_radius * predator_radius >= SPLIT_MIN_MASS and can_eat_player_blob(
         predator_radius / SQRT2,
         prey_radius,
@@ -2656,7 +2878,9 @@ def _one_step_attack_reach(predator_radius: float, prey_radius: float) -> float:
         child_radius = predator_radius / SQRT2
         reach = max(
             reach,
-            3.0 * child_radius + SPLIT_EJECT_SPEED + player_speed(child_radius),
+            3.0 * child_radius
+            + SPLIT_EJECT_SPEED
+            + player_speed(child_radius) * turns,
         )
     return reach
 
@@ -2672,6 +2896,18 @@ def _direction_or_fallback(
 
 def _dot(left: tuple[float, float], right: tuple[float, float]) -> float:
     return left[0] * right[0] + left[1] * right[1]
+
+
+def _angle_degrees(
+    left: tuple[float, float],
+    right: tuple[float, float],
+) -> float:
+    left_unit = normalise(left)
+    right_unit = normalise(right)
+    if left_unit == (0.0, 0.0) or right_unit == (0.0, 0.0):
+        return 180.0
+    cosine = min(1.0, max(-1.0, _dot(left_unit, right_unit)))
+    return math.degrees(math.acos(cosine))
 
 
 def _finite_or_none(value: float) -> float | None:

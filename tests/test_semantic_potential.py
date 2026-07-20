@@ -65,6 +65,13 @@ def _context(
     )
 
 
+def test_horizon_attack_reach_generalises_one_step_without_double_counting() -> None:
+    one_step = semantic_module._one_step_attack_reach(4.0, 1.0)
+
+    assert semantic_module._horizon_attack_reach(4.0, 1.0, 1.0) == one_step
+    assert semantic_module._horizon_attack_reach(4.0, 1.0, 3.0) > one_step
+
+
 def test_candidate_set_contains_each_available_semantic_slot_once() -> None:
     strategy = SemanticPotentialStrategy()
     own = (BlobModel(blob_id=0, pos=(4.0, 30.0), radius=3.0),)
@@ -394,6 +401,177 @@ def test_fragment_is_valid_prey_even_when_whole_enemy_player_is_too_large() -> N
     assert not decision.split
 
 
+def test_exact_prey_outcome_credits_safe_non_split_contact(monkeypatch) -> None:
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_OUTCOME", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_MIN_MASS", "0")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_AHEAD_ONLY", "0")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_REQUIRES_SAFETY_RESERVE", "0")
+    strategy = SemanticPotentialStrategy()
+    # Mass 1.69 is below SPLIT_MIN_MASS while radius 1.3 can still consume a
+    # radius-1 prey, isolating the normal-contact candidate.
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.3),)
+    prey = (_enemy(player_id=1, pos=(32.0, 30.0), radius=1.0),)
+
+    decision = strategy.choose(_context(own, enemies=prey))
+
+    assert decision.reason == "capture_enemy"
+    assert decision.diagnostics["exact_prey_outcome_enabled"] is True
+    assert decision.diagnostics["secured_one_step_mass"]["enemy"] > 0.0
+    assert decision.diagnostics["secured_one_step_mass"]["lost"] == 0.0
+
+
+def test_exact_prey_outcome_cannot_demote_contact_below_split(monkeypatch) -> None:
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=4.5),)
+    prey = (_enemy(player_id=1, pos=(35.0, 30.0), radius=0.9),)
+    context = _context(own, enemies=prey)
+    context.game.state.rankings = [0, 1]
+
+    baseline = SemanticPotentialStrategy().choose(context)
+    assert not baseline.split
+    assert (
+        baseline.diagnostics["candidate_scores"]["capture_enemy"]
+        > baseline.diagnostics["candidate_scores"]["split_capture"]
+    )
+
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_OUTCOME", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_AHEAD_ONLY", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_MIN_MASS", "20")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_REQUIRES_SAFETY_RESERVE", "1")
+    exact = SemanticPotentialStrategy().choose(context)
+
+    assert exact.diagnostics["secured_one_step_mass"]["enemy"] > 0.0
+    assert not exact.split
+    assert (
+        exact.diagnostics["candidate_scores"]["capture_enemy"]
+        >= baseline.diagnostics["candidate_scores"]["capture_enemy"]
+    )
+
+
+def test_exact_prey_outcome_does_not_reward_large_direction_reversal(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_OUTCOME", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_AHEAD_ONLY", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_MIN_MASS", "20")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_REQUIRES_SAFETY_RESERVE", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_MAX_TURN_DEGREES", "90")
+    strategy = SemanticPotentialStrategy()
+    strategy._last_direction = (1.0, 0.0)
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=4.5),)
+    prey = (_enemy(player_id=1, pos=(25.0, 30.0), radius=0.9),)
+    context = _context(own, enemies=prey)
+    context.game.state.rankings = [0, 1]
+
+    decision = strategy.choose(context)
+
+    assert decision.diagnostics["exact_prey_outcome_active"] is True
+    assert decision.diagnostics["exact_prey_max_turn_degrees"] == 90.0
+    assert not decision.split
+    assert decision.diagnostics["secured_one_step_mass"]["enemy"] == 0.0
+
+
+def test_exact_prey_outcome_preserves_baseline_split_choice(monkeypatch) -> None:
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_PRESERVE_SPLIT_CHOICE", "1")
+    strategy = SemanticPotentialStrategy()
+    split = semantic_module.DirectionCandidate(
+        family="split_capture",
+        direction=(1.0, 0.0),
+        target_kind="prey",
+        split=True,
+    )
+    contact = semantic_module.DirectionCandidate(
+        family="capture_enemy",
+        direction=(1.0, 0.0),
+        target_kind="prey",
+    )
+
+    def score(total: float, *, uplift: float = 0.0):
+        return semantic_module.PotentialScore(
+            total=total,
+            catastrophic=False,
+            safety_margin=float("inf"),
+            threat=0.0,
+            food=0.0,
+            prey=0.0,
+            virus=0.0,
+            wall=0.0,
+            corridor=0.0,
+            inertia=0.0,
+            intent=total,
+            secured_enemy_mass=0.0,
+            secured_virus_mass=0.0,
+            secured_food_mass=0.0,
+            own_mass_lost=0.0,
+            exact_prey_uplift=uplift,
+        )
+
+    split_score = score(3.0)
+    boosted_contact_score = score(4.5, uplift=2.0)
+    selected, selected_score, baseline_split, preserved = (
+        strategy._preserve_exact_prey_split_choice(
+            ((split, split_score), (contact, boosted_contact_score)),
+            selected=contact,
+            score=boosted_contact_score,
+            current_safety_margin=float("inf"),
+        )
+    )
+
+    assert selected is split
+    assert selected_score is split_score
+    assert baseline_split is True
+    assert preserved is True
+
+
+def test_exact_prey_outcome_does_not_change_multiturn_chase(monkeypatch) -> None:
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_OUTCOME", "1")
+    strategy = SemanticPotentialStrategy()
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.3),)
+    prey = (_enemy(player_id=1, pos=(38.0, 30.0), radius=1.0),)
+
+    decision = strategy.choose(_context(own, enemies=prey))
+
+    assert decision.reason == "capture_enemy"
+    assert decision.diagnostics["secured_one_step_mass"]["enemy"] == 0.0
+
+
+def test_exact_prey_outcome_can_be_limited_to_large_rank_one_state(monkeypatch) -> None:
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_OUTCOME", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_AHEAD_ONLY", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_MIN_MASS", "20")
+    strategy = SemanticPotentialStrategy()
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=5.0),)
+    prey = (_enemy(player_id=1, pos=(36.0, 30.0), radius=1.0),)
+    context = _context(own, enemies=prey)
+    context.game.state.rankings = [0, 1]
+
+    decision = strategy.choose(context)
+
+    assert decision.diagnostics["exact_prey_outcome_active"] is True
+    assert decision.diagnostics["exact_prey_min_mass"] == 20.0
+
+
+def test_exact_prey_outcome_safety_gate_disables_capture_bonus_under_threat(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_OUTCOME", "1")
+    monkeypatch.setenv("SEMANTIC_EXACT_PREY_REQUIRES_SAFETY_RESERVE", "1")
+    strategy = SemanticPotentialStrategy()
+    own = (
+        BlobModel(blob_id=0, pos=(30.0, 30.0), radius=3.0),
+        BlobModel(blob_id=1, pos=(30.0, 32.0), radius=1.0),
+    )
+    enemies = (
+        _enemy(player_id=1, pos=(34.0, 30.0), radius=1.0),
+        _enemy(player_id=2, pos=(31.0, 32.0), radius=3.0),
+    )
+
+    decision = strategy.choose(_context(own, enemies=enemies))
+
+    assert decision.diagnostics["current_safety_margin"] < 3.0
+    assert decision.diagnostics["exact_prey_outcome_active"] is False
+    assert decision.diagnostics["exact_prey_requires_safety_reserve"] is True
+
+
 def test_growth_phase_prioritises_food_before_virus_threshold() -> None:
     strategy = SemanticPotentialStrategy()
     strategy._last_direction = (0.0, 1.0)
@@ -671,6 +849,18 @@ def test_safety_reserve_turns_away_before_any_candidate_is_catastrophic() -> Non
     assert decision.reason == "escape"
     assert decision.direction[0] < 0.0
     assert decision.diagnostics["selected_safety_margin"] >= 3.0
+
+
+def test_safety_reserve_is_runtime_tunable(monkeypatch) -> None:
+    monkeypatch.setenv("SEMANTIC_SAFETY_RESERVE", "6.5")
+    monkeypatch.setenv("SEMANTIC_SAFETY_MARGIN_SLACK", "0.75")
+    strategy = SemanticPotentialStrategy()
+    own = (BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.0),)
+
+    decision = strategy.choose(_context(own))
+
+    assert decision.diagnostics["safety_reserve"] == 6.5
+    assert decision.diagnostics["safety_margin_slack"] == 0.75
 
 
 def test_directional_fan_has_angular_and_three_turn_radial_boundaries() -> None:

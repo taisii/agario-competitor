@@ -192,6 +192,7 @@ _BUILT_IN_SPECS = (
         submission=_submission(
             "ReplayDistilledStrategy",
             "bots/strategies/semantic_potential.py",
+            "bots/strategies/asset_preservation.py",
             "bots/strategies/replay_distilled.py",
         ),
     ),

@@ -12,13 +12,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bots"))
 
 from strategies.replay_opponents import (  # noqa: E402
+    CloudReplayOpponent,
     CUSTOM_REPLAY_TEAM_IDS,
+    OFFICIAL_CLOUD_LINEUPS,
+    OFFICIAL_CLOUD_HIGH_DAMAGE_TEAM_IDS,
+    OFFICIAL_CLOUD_PRESSURE_TEAM_IDS,
     OBSERVED_REPLAY_TEAM_IDS,
     REPLAY_OPPONENT_SPECS,
     REPLAY_TEAM_IDS,
     RANDOM_REPLAY_TEAM_IDS,
     RandomReplayOpponent,
     create_replay_opponent,
+    create_cloud_pressure_opponent,
+    select_cloud_replay_team_id,
     select_replay_team_id,
 )
 from strategies.registry import (  # noqa: E402
@@ -243,3 +249,121 @@ def test_random_replay_pool_covers_every_observed_enemy() -> None:
 
     assert RANDOM_REPLAY_TEAM_IDS == OBSERVED_REPLAY_TEAM_IDS
     assert selected == set(OBSERVED_REPLAY_TEAM_IDS)
+
+
+def test_cloud_replay_lineups_are_complete_observed_cohorts() -> None:
+    assert len(OFFICIAL_CLOUD_LINEUPS) == 30
+    for lineup in OFFICIAL_CLOUD_LINEUPS:
+        assert len(lineup) == 7
+        assert len(set(lineup)) == 7
+        assert 73 not in lineup
+        assert set(lineup) <= set(OBSERVED_REPLAY_TEAM_IDS)
+
+
+def test_cloud_replay_selection_uses_one_lineup_without_replacement() -> None:
+    selected = tuple(
+        select_cloud_replay_team_id(
+            player_id=slot,
+            target_slot=0,
+            base_seed=20260719,
+            trial=4,
+        )
+        for slot in range(1, 8)
+    )
+    repeated = tuple(
+        select_cloud_replay_team_id(
+            player_id=slot,
+            target_slot=0,
+            base_seed=20260719,
+            trial=4,
+        )
+        for slot in range(1, 8)
+    )
+
+    assert selected == repeated
+    assert len(set(selected)) == 7
+    assert frozenset(selected) in {
+        frozenset(lineup) for lineup in OFFICIAL_CLOUD_LINEUPS
+    }
+
+
+def test_cloud_replay_strategy_selects_lazily_and_reports_once(monkeypatch) -> None:
+    selected_names = []
+    constructed_names = []
+    expected_team_id = select_cloud_replay_team_id(
+        player_id=5,
+        target_slot=0,
+        base_seed=20260719,
+        trial=2,
+    )
+
+    class StubStrategy:
+        name = f"replay_team_{expected_team_id}"
+
+        def choose(self, context):
+            return "decision"
+
+    monkeypatch.setattr(
+        replay_opponents,
+        "create_replay_candidate",
+        lambda team_id: constructed_names.append(team_id) or StubStrategy(),
+    )
+    strategy = CloudReplayOpponent(
+        target_slot=0,
+        base_seed=20260719,
+        trial=2,
+        on_selected=selected_names.append,
+    )
+    context = SimpleNamespace(
+        game=SimpleNamespace(state=SimpleNamespace(me=SimpleNamespace(player_id=5)))
+    )
+
+    assert strategy.choose(context) == "decision"
+    assert strategy.choose(context) == "decision"
+    assert constructed_names == [expected_team_id]
+    assert selected_names == [f"replay_team_{expected_team_id}"]
+
+
+def test_cloud_pressure_set_is_observed_and_failed_imitation() -> None:
+    from strategies.replay_profiles import PROFILES
+
+    assert OFFICIAL_CLOUD_HIGH_DAMAGE_TEAM_IDS <= set(OBSERVED_REPLAY_TEAM_IDS)
+    assert all(
+        not PROFILES[team_id].validation_passed
+        for team_id in OFFICIAL_CLOUD_HIGH_DAMAGE_TEAM_IDS
+    )
+    assert OFFICIAL_CLOUD_HIGH_DAMAGE_TEAM_IDS <= OFFICIAL_CLOUD_PRESSURE_TEAM_IDS
+    assert OFFICIAL_CLOUD_PRESSURE_TEAM_IDS <= set(OBSERVED_REPLAY_TEAM_IDS)
+
+
+def test_cloud_pressure_substitutes_only_high_damage_team(monkeypatch) -> None:
+    import strategies.receding_horizon as receding_horizon
+
+    selected_team = next(iter(OFFICIAL_CLOUD_PRESSURE_TEAM_IDS))
+    monkeypatch.setattr(
+        replay_opponents,
+        "select_cloud_replay_team_id",
+        lambda **_kwargs: selected_team,
+    )
+    monkeypatch.setenv("BOT_RANDOM_SEED", "20260719")
+    monkeypatch.setenv("BOT_BENCHMARK_TRIAL", "0")
+
+    class StubDominance:
+        name = "replay_dominance"
+
+        def choose(self, context):
+            return "decision"
+
+    monkeypatch.setattr(
+        receding_horizon,
+        "ReplayDominanceStrategy",
+        StubDominance,
+    )
+    strategy = create_cloud_pressure_opponent(target_slot=0)
+    context = SimpleNamespace(
+        game=SimpleNamespace(state=SimpleNamespace(me=SimpleNamespace(player_id=1)))
+    )
+
+    assert strategy.choose(context) == "decision"
+
+    assert strategy.name == "replay_dominance"

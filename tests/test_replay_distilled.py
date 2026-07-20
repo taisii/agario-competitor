@@ -17,6 +17,7 @@ from strategies.replay_distilled import (  # noqa: E402
     REPLAY_DIRECTION_WEIGHTS,
     REPLAY_REGIME_DIRECTION_WEIGHTS,
     REPLAY_TEACHER_SOURCE_MATCHES,
+    ReplayDistilledStrategy,
     _replay_feature_vectors,
     _rotate_toward,
     _weighted_direction,
@@ -145,3 +146,33 @@ def test_zero_teacher_correction_preserves_semantic_direction() -> None:
     source = (0.6, 0.8)
 
     assert _rotate_toward(source, (-1.0, 0.0), 0.0) == source
+
+
+def test_teacher_correction_can_be_suppressed_near_threats(monkeypatch) -> None:
+    monkeypatch.setenv("REPLAY_DISTILLED_CORRECTION_SAFETY_MARGIN", "100")
+    own = BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.0)
+    predator = VisibleBlobModel(
+        player_id=1,
+        team_id=1,
+        blob_id=0,
+        pos=(39.0, 30.0),
+        radius=3.0,
+    )
+    state = SimpleNamespace(
+        me=SimpleNamespace(player_id=0, blobs={0: own}),
+        visible_blobs=[predator],
+        visible_food=[],
+        visible_viruses=[],
+        map=SimpleNamespace(size=60.0),
+        round=0,
+        max_rounds=1400,
+    )
+    context = StrategyContext(
+        game=SimpleNamespace(state=state),
+        query=SimpleNamespace(),
+    )
+
+    decision = ReplayDistilledStrategy().choose(context)
+
+    assert decision.diagnostics["replay_teacher_correction_suppressed"] is True
+    assert decision.diagnostics["replay_teacher_correction_degrees"] == 0.0

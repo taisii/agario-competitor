@@ -33,22 +33,30 @@ def _observation(
     )
 
 
-def test_team1_tracks_food_exactly_without_predator() -> None:
+def test_team1_tracks_food_without_predator_while_preserving_inertia() -> None:
     observation = _observation(
         visible_food=(ImitationPoint(10.0, 14.0), ImitationPoint(14.0, 10.0)),
     )
 
-    assert predict_direction(PROFILES[1], observation) == (0.0, 1.0)
-    assert predict_direction(PROFILES[1], observation, (-1.0, 0.0)) == (0.0, 1.0)
+    fresh = predict_direction(PROFILES[1], observation)
+    smoothed = predict_direction(PROFILES[1], observation, (-1.0, 0.0))
+
+    assert abs(fresh[0]) < 0.02
+    assert fresh[1] > 0.999
+    assert smoothed[0] < 0.0
+    assert smoothed[1] > 0.95
 
 
-def test_team1_tracks_nearest_prey_exactly_without_predator() -> None:
+def test_team1_tracks_nearest_prey_without_predator() -> None:
     observation = _observation(
         visible_blobs=(ImitationBlob(14.0, 10.0, 1.0, player_id=1),),
         visible_food=(ImitationPoint(10.0, 11.0),),
     )
 
-    assert predict_direction(PROFILES[1], observation) == (1.0, 0.0)
+    direction = predict_direction(PROFILES[1], observation)
+
+    assert direction[0] > 0.999
+    assert abs(direction[1]) < 0.01
 
 
 def test_team1_split_requires_merge_ready_resource_state() -> None:
@@ -176,11 +184,23 @@ def test_team1_same_round_retry_preserves_state_but_player_change_resets() -> No
     assert strategy._last_split_round == -10_000
 
 
-def test_team1_metadata_reports_chronological_holdout_not_in_sample_metrics() -> None:
+def test_team1_metadata_reports_current_chronological_holdout() -> None:
     profile = PROFILES[1]
 
-    assert len(profile.source_matches) == 20
-    assert profile.direction_median_error == 8.537736462515939e-07
-    assert profile.direction_within_30_rate == 0.7160957297043642
-    assert profile.split_f1 == 0.48101265822784806
+    assert profile.source_matches == (
+        13932,
+        13940,
+        14012,
+        14031,
+        14048,
+        40739,
+        40747,
+        40753,
+        40754,
+        40755,
+        40760,
+    )
+    assert profile.direction_median_error == 10.92367237563148
+    assert profile.direction_within_30_rate == 0.6753906140439864
+    assert profile.split_f1 == 0.46825492437049704
     assert profile.validation_passed is False

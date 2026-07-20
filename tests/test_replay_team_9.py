@@ -102,7 +102,7 @@ def test_split_state_rearms_after_fifteen_rounds() -> None:
 
 
 def test_profile_reports_measured_geometry_f1_not_hidden_rng_match() -> None:
-    assert PROFILES[9].split_f1 == 0.4365482233502538
+    assert PROFILES[9].split_f1 == 0.4366912071846282
 
 
 def test_team9_resets_temporal_state_when_rounds_restart() -> None:

@@ -187,7 +187,7 @@ uv run python scripts/rank_replay_opponents.py \
 ## Building the official submission
 
 The 2026 submission portal accepts one `.py` file. The default candidate is
-`semantic_lookahead`; keep the modular strategy sources for development and
+`replay_distilled`; keep the modular strategy sources for development and
 generate the upload artifact with:
 
 ```bash
