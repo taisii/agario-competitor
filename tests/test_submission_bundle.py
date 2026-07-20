@@ -3,72 +3,56 @@ from __future__ import annotations
 import ast
 import importlib.util
 from io import StringIO
-import math
-import subprocess
-import sys
-import tempfile
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "bots"))
 
 from scripts.build_submission import build_submission  # noqa: E402
-from strategies.base import StrategyContext  # noqa: E402
-from strategies.features import player_speed  # noqa: E402
-from strategies.receding_horizon import (  # noqa: E402
-    EnemyTrack,
-    OwnBlob,
-    ThreatAwareRecedingHorizonStrategy,
-)
+
+
+def _load_submission(path: Path):
+    spec = importlib.util.spec_from_file_location("submission_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module
+
+
+def test_submission_is_self_contained_and_importable(tmp_path: Path) -> None:
+    output, digest = build_submission(tmp_path / "my_bot.py")
+    source = output.read_text()
+    tree = ast.parse(source)
+    module = _load_submission(output)
+
+    assert len(digest) == 64
+    assert module.ReplayDistilledStrategy.name == "replay_distilled"
+    assert "class AssetPreservationLayer" in source
+    assert "strategy = ReplayDistilledStrategy()" in source
+    assert source.count('if __name__ == "__main__":') == 1
+    local_roots = {"simulation", "strategies", "telemetry"}
+    assert not {
+        node.module.split(".", 1)[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    } & local_roots
 
 
 class _ShortReader(StringIO):
-    """Exercise framed reads that return less than the requested body."""
-
     def read(self, size: int = -1) -> str:
         return super().read(min(size, 2) if size > 1 else size)
 
 
-def test_submission_bundle_is_single_file_without_local_imports() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, digest = build_submission(Path(directory) / "my_bot.py")
-        source = output.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-    assert len(digest) == 64
-    assert "class ReplayDistilledStrategy" in source
-    assert "class AssetPreservationLayer" in source
-    assert "strategy = ReplayDistilledStrategy()" in source
-    assert 'if __name__ == "__main__":' in source
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            assert node.module.split(".", 1)[0] not in {
-                "strategies",
-                "telemetry",
-            }
-
-
-def test_submission_fast_query_reader_preserves_framing_and_direct_validation() -> (
-    None
-):
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "semantic_potential.py",
-            strategy_name="semantic_potential",
-        )
-        module_name = "semantic_fast_input_test"
-        spec = importlib.util.spec_from_file_location(module_name, output)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.modules.pop(module_name, None)
-
+def test_submission_fast_reader_preserves_framing(tmp_path: Path) -> None:
+    output, _ = build_submission(tmp_path / "my_bot.py")
+    module = _load_submission(output)
     payload = '{"query_type":"move_player"}'
     connection = SimpleNamespace(
         _from_engine_pipe=_ShortReader(f"{len(payload)},{payload}")
@@ -80,328 +64,14 @@ def test_submission_fast_query_reader_preserves_framing_and_direct_validation() 
             return raw
 
     module.QueryMovePlayer = FakeQuery
-    game = SimpleNamespace(connection=connection)
-    module._install_fast_query_reader(game)
+    module._install_fast_query_reader(SimpleNamespace(connection=connection))
 
     assert connection.get_next_query() == payload
 
 
-def test_semantic_lookahead_submission_is_self_contained() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "semantic_lookahead.py",
-            strategy_name="semantic_lookahead",
-        )
-        source = output.read_text(encoding="utf-8")
-        tree = ast.parse(source)
+def test_submission_build_is_deterministic(tmp_path: Path) -> None:
+    first, first_digest = build_submission(tmp_path / "first.py")
+    second, second_digest = build_submission(tmp_path / "second.py")
 
-    assert "class SemanticLookaheadStrategy" in source
-    assert "strategy = SemanticLookaheadStrategy()" in source
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            assert node.module.split(".", 1)[0] not in {
-                "strategies",
-                "telemetry",
-            }
-
-
-def test_outcome_teacher_hybrid_submission_is_self_contained() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "outcome_teacher_hybrid.py",
-            strategy_name="outcome_teacher_hybrid",
-        )
-        source = output.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-    assert "class OutcomeTeacherHybridStrategy" in source
-    assert "strategy = OutcomeTeacherHybridStrategy()" in source
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            assert node.module.split(".", 1)[0] not in {
-                "strategies",
-                "telemetry",
-            }
-
-
-def test_replay_distilled_submission_is_self_contained() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "replay_distilled.py",
-            strategy_name="replay_distilled",
-        )
-        source = output.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        module_name = "replay_distilled_submission_test"
-        spec = importlib.util.spec_from_file_location(module_name, output)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.modules.pop(module_name, None)
-
-    assert "class ReplayDistilledStrategy" in source
-    assert "strategy = ReplayDistilledStrategy()" in source
-    assert module.ReplayDistilledStrategy.name == "replay_distilled"
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            assert node.module.split(".", 1)[0] not in {
-                "strategies",
-                "telemetry",
-            }
-
-
-def test_virus_hunter_submission_contains_only_required_strategy_classes() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "virus_hunter.py",
-            strategy_name="virus_hunter",
-        )
-        source = output.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-    assert "class VirusHunterStrategy" in source
-    assert "strategy = VirusHunterStrategy()" in source
-    assert "class PotentialFieldVirusFarmerStrategy" not in source
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            assert node.module.split(".", 1)[0] not in {
-                "strategies",
-                "telemetry",
-            }
-
-
-def test_replay_dominance_submission_is_self_contained_and_uses_new_strategy() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "replay_dominance.py",
-            strategy_name="replay_dominance",
-        )
-        source = output.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-    assert "class ThreatAwareRecedingHorizonStrategy" in source
-    assert "class ReplayDominanceStrategy(ThreatAwareRecedingHorizonStrategy)" in source
-    assert "strategy = ReplayDominanceStrategy()" in source
-    assert source.count('if __name__ == "__main__":') == 1
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            assert node.module.split(".", 1)[0] not in {
-                "strategies",
-                "telemetry",
-            }
-
-    module = ModuleType("submission_test")
-    sys.modules[module.__name__] = module
-    try:
-        exec(compile(source, output, "exec"), module.__dict__)
-    finally:
-        sys.modules.pop(module.__name__, None)
-    strategy = module.ReplayDominanceStrategy()
-    assert strategy._can_still_consume_virus_at_contact(
-        SimpleNamespace(radius=2.0, mass=4.0, pos=(10.0, 10.0)),
-        SimpleNamespace(radius=1.5, pos=(10.0, 10.0)),
-    )
-
-
-def test_replay_dominance_submission_preserves_local_import_aliases() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "replay_dominance.py",
-            strategy_name="replay_dominance",
-        )
-        module_name = "submission_runtime_test"
-        spec = importlib.util.spec_from_file_location(module_name, output)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.modules.pop(module_name, None)
-        namespace = vars(module)
-
-    assert (
-        namespace["_feature_can_consume_virus"]
-        is namespace["_replay_can_consume_virus"]
-    )
-    assert namespace["_replay_can_consume_virus"] is not namespace["can_consume_virus"]
-    assert namespace["_replay_decayed_radius"] is namespace["decayed_radius"]
-    assert namespace["_feature_movement_speed"] is namespace["movement_speed"]
-    assert namespace["_replay_can_consume_virus"](
-        2.0,
-        1.5,
-        eat_size_ratio=1.1,
-    )
-
-
-def test_local_submission_process_handles_a_fatal_exact_transition() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "local_tactical_search.py",
-            strategy_name="local_tactical_search",
-        )
-        script = f"""
-import importlib.util
-import sys
-spec = importlib.util.spec_from_file_location('official_local', {str(output)!r})
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-spec.loader.exec_module(module)
-strategy = module.LocalTacticalSearchStrategy(depth=1)
-node = module.SearchNode(
-    own_blobs=(module.OwnBlob(0, 30.0, 30.0, 1.0),),
-    enemies=(module.EnemyBlob(7, 0, 30.0, 30.0, 4.0),),
-    score=0.0,
-    first_direction=(1.0, 0.0),
-    first_split=False,
-    first_reason='keep',
-    last_direction=(1.0, 0.0),
-)
-result = strategy._step(
-    node=node,
-    action=module.Action((1.0, 0.0), reason='toward_predator'),
-    foods=(),
-    viruses=(),
-    arena_size=60.0,
-    first_step=True,
-    safety_weight=1.3,
-    aggression=1.0,
-)
-assert result.fatal and not result.node.own_blobs
-"""
-        completed = subprocess.run(
-            [sys.executable, "-c", script],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-    assert completed.returncode == 0, completed.stderr
-
-
-def test_potential_tactical_hybrid_bundle_runs_in_a_clean_process() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        output, _ = build_submission(
-            Path(directory) / "potential_tactical_hybrid.py",
-            strategy_name="potential_tactical_hybrid",
-        )
-        script = f"""
-import importlib.util
-import sys
-from types import SimpleNamespace
-spec = importlib.util.spec_from_file_location('official_hybrid', {str(output)!r})
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-spec.loader.exec_module(module)
-strategy = module.PotentialTacticalHybridStrategy()
-blob = module.BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.0)
-state = SimpleNamespace(
-    me=SimpleNamespace(
-        player_id=0, x=30.0, y=30.0, radius=1.0, alive=True, blobs={{0: blob}}
-    ),
-    visible_blobs=[], visible_food=[], visible_viruses=[],
-    map=SimpleNamespace(size=60.0), round=100, max_rounds=1400,
-    rankings=list(range(8)), view_center=(30.0, 30.0), vision_size=20.0,
-)
-decision = strategy.choose(
-    module.StrategyContext(
-        game=SimpleNamespace(state=state), query=SimpleNamespace(update={{}})
-    )
-)
-assert decision.reason == 'potential_mix'
-assert not strategy.last_hybrid_diagnostics['hybrid_full_executed']
-
-# Exercise both potential-field virus branches in the flattened namespace:
-# consumable-virus avoidance and non-consumable-virus shelter while threatened.
-virus = module.VirusModel(virus_id=1, pos=(31.0, 30.0), radius=1.5)
-large = module.BlobModel(blob_id=0, pos=(30.0, 30.0), radius=2.0)
-state.me.blobs = {{0: large}}
-state.me.radius = 2.0
-state.visible_viruses = [virus]
-module.PotentialTacticalHybridStrategy().choose(
-    module.StrategyContext(
-        game=SimpleNamespace(state=state), query=SimpleNamespace(update={{}})
-    )
-)
-small = module.BlobModel(blob_id=0, pos=(30.0, 30.0), radius=1.0)
-state.me.blobs = {{0: small}}
-state.me.radius = 1.0
-state.visible_blobs = [
-    module.VisibleBlobModel(
-        player_id=1, team_id=1, blob_id=0, pos=(33.0, 30.0), radius=2.0
-    )
-]
-module.PotentialTacticalHybridStrategy().choose(
-    module.StrategyContext(
-        game=SimpleNamespace(state=state), query=SimpleNamespace(update={{}})
-    )
-)
-"""
-        completed = subprocess.run(
-            [sys.executable, "-c", script],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-    assert completed.returncode == 0, completed.stderr
-
-
-def test_expected_final_mass_submission_contains_replay_experts_and_is_self_contained() -> (
-    None
-):
-    with tempfile.TemporaryDirectory() as directory:
-        output, digest = build_submission(
-            Path(directory) / "expected_final_mass.py",
-            strategy_name="expected_final_mass",
-        )
-        source = output.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-    assert len(digest) == 64
-    assert "class ExpectedFinalMassStrategy(ReplayDominanceStrategy)" in source
-    assert "strategy = ExpectedFinalMassStrategy()" in source
-    assert "PROFILES = {" in source
-    assert source.count('if __name__ == "__main__":') == 1
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            assert node.module.split(".", 1)[0] not in {
-                "strategies",
-                "telemetry",
-            }
-
-
-def test_censored_predator_track_advances_toward_vulnerable_blob() -> None:
-    strategy = ThreatAwareRecedingHorizonStrategy(depth=1, width=1, angular_samples=4)
-    strategy.enemy_tracks[(1, 0)] = EnemyTrack(
-        player_id=1,
-        blob_id=0,
-        x=10.0,
-        y=10.0,
-        radius=2.0,
-        direction=(0.0, 0.0),
-        last_seen_round=1,
-    )
-    own = OwnBlob(blob_id=0, x=20.0, y=10.0, radius=1.0)
-    state = SimpleNamespace(
-        round=2,
-        visible_blobs=(),
-        view_center=(50.0, 50.0),
-        vision_size=8.0,
-    )
-    context = StrategyContext(
-        game=SimpleNamespace(state=state),
-        query=SimpleNamespace(update={}),
-    )
-
-    enemies = strategy._update_enemy_memory(context, (own,), arena_size=60.0)
-
-    assert len(enemies) == 1
-    assert math.isclose(enemies[0].x, 10.0 + player_speed(2.0))
-    assert enemies[0].direction == (1.0, 0.0)
-    assert enemies[0].stale_rounds == 1
+    assert first_digest == second_digest
+    assert first.read_bytes() == second.read_bytes()

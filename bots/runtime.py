@@ -7,15 +7,12 @@ is exercised under the same runtime semantics.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-import os
+from collections.abc import Callable
 from time import perf_counter
 
 from helper.game import Game
 from lib.interface.queries.query_move import QueryMovePlayer
 from strategies.base import Strategy, StrategyContext
-from strategies.replay_opponents import create_replay_candidate, create_replay_opponent
-from strategies.registry import create_strategy
 from telemetry import MetricsLogger
 
 
@@ -62,48 +59,3 @@ def run_bot(
                     raise RuntimeError(f"Unsupported query type: {type(query)}")
     finally:
         metrics.close()
-
-
-def run_strategy(
-    strategy_name: str,
-    *,
-    environment_defaults: Mapping[str, str] | None = None,
-) -> None:
-    """Run a catalogued strategy with optional, externally overridable defaults."""
-
-    defaults = environment_defaults or {}
-    added_keys = tuple(key for key in defaults if key not in os.environ)
-    for key, value in defaults.items():
-        os.environ.setdefault(key, value)
-    try:
-        run_bot(lambda: create_strategy(strategy_name))
-    finally:
-        # Entry defaults belong to this invocation, not to a later bot run in
-        # the same interpreter (for example a contract test or tournament host).
-        for key in added_keys:
-            os.environ.pop(key, None)
-
-
-def run_configured_strategy(
-    default_strategy_name: str,
-    *,
-    environment_defaults: Mapping[str, str] | None = None,
-) -> None:
-    """Run ``BOT_STRATEGY`` when set, otherwise the entry's named default."""
-
-    run_strategy(
-        os.environ.get("BOT_STRATEGY", default_strategy_name),
-        environment_defaults=environment_defaults,
-    )
-
-
-def run_replay_opponent(team_id: int) -> None:
-    """Run one official replay-derived opponent by team ID."""
-
-    run_bot(lambda: create_replay_opponent(team_id))
-
-
-def run_replay_candidate(team_id: int) -> None:
-    """Run an archived replay clone for offline strength evaluation."""
-
-    run_bot(lambda: create_replay_candidate(team_id))

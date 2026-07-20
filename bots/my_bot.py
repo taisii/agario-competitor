@@ -1,8 +1,9 @@
-from runtime import run_configured_strategy
+from runtime import run_bot
+from strategies.replay_distilled import ReplayDistilledStrategy
 
 
 def main() -> None:
-    run_configured_strategy("replay_distilled")
+    run_bot(ReplayDistilledStrategy)
 
 
 if __name__ == "__main__":
