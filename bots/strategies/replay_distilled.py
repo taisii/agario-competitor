@@ -12,6 +12,7 @@ import math
 import os
 
 from lib.config.player import EAT_SIZE_RATIO
+from strategies.asset_preservation import AssetPreservationLayer
 from strategies.base import StrategyContext, StrategyDecision
 from strategies.features import normalise
 from strategies.semantic_potential import SemanticPotentialStrategy
@@ -238,6 +239,10 @@ class ReplayDistilledStrategy(SemanticPotentialStrategy):
                 ),
             )
         )
+        self._correction_safety_margin = _environment_optional_nonnegative_float(
+            "REPLAY_DISTILLED_CORRECTION_SAFETY_MARGIN"
+        )
+        self._asset_preservation = AssetPreservationLayer()
 
     def choose(self, context: StrategyContext) -> StrategyDecision:
         semantic = super().choose(context)
@@ -251,25 +256,44 @@ class ReplayDistilledStrategy(SemanticPotentialStrategy):
             features,
             fallback=semantic.direction,
         )
-        corrected = _rotate_toward(
-            semantic.direction,
-            teacher_direction,
-            self._max_teacher_correction,
+        safety_margins = tuple(
+            float(value)
+            for value in (
+                semantic.diagnostics.get("current_safety_margin"),
+                semantic.diagnostics.get("selected_safety_margin"),
+            )
+            if isinstance(value, int | float) and math.isfinite(float(value))
         )
-        self._distilled_previous_direction = corrected
-        self._last_direction = corrected
+        correction_suppressed = (
+            self._correction_safety_margin is not None
+            and safety_margins
+            and min(safety_margins) < self._correction_safety_margin
+        )
+        corrected = (
+            semantic.direction
+            if correction_suppressed
+            else _rotate_toward(
+                semantic.direction,
+                teacher_direction,
+                self._max_teacher_correction,
+            )
+        )
         correction_degrees = _angle_degrees(semantic.direction, corrected)
         diagnostics = dict(semantic.diagnostics)
         diagnostics.update(
             {
                 "replay_teacher_regime": regime,
                 "replay_teacher_correction_degrees": correction_degrees,
+                "replay_teacher_correction_suppressed": correction_suppressed,
+                "replay_teacher_correction_safety_margin": (
+                    self._correction_safety_margin
+                ),
                 "replay_teacher_source_matches": len(
                     REPLAY_TEACHER_SOURCE_MATCHES
                 ),
             }
         )
-        return replace(
+        distilled = replace(
             semantic,
             direction=corrected,
             reason=(
@@ -279,6 +303,10 @@ class ReplayDistilledStrategy(SemanticPotentialStrategy):
             ),
             diagnostics=diagnostics,
         )
+        final = self._asset_preservation.adjust(context, distilled)
+        self._distilled_previous_direction = final.direction
+        self._last_direction = final.direction
+        return final
 
 
 def _weighted_direction(
@@ -342,6 +370,17 @@ def _environment_float(name: str, default: float) -> float:
     except ValueError:
         return default
     return value if math.isfinite(value) else default
+
+
+def _environment_optional_nonnegative_float(name: str) -> float | None:
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) and value >= 0.0 else None
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
-name = "agario-competitor-template"
+name = "agario-competitor"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
@@ -37,7 +37,7 @@ dependencies = [
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/15/0e/334c72d5d0e40399b32debeb1dcf8eeb3eb3f2bb0c6c91d1db00ac1f9ecd/agario_kit-2026.1.15.tar.gz", hash = "sha256:e25216d5fd3eb8b0589ea739afccd077c9739733a88165bc8e6fc084f5c785a9", size = 47214, upload-time = "2026-07-15T14:09:11.104Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/cb/7d9330578fab41ef7a0528a5da779f1464a4a10fc1e3dbd358555cdf4e27/agario_kit-2026.1.15-py3-none-any.whl", hash = "sha256:ffe8fb3ccb4b8c7db9a0f975a559de9106b9be7a67c8d05221e65d3381c40a5e", size = 56927, upload-time = "2026-07-15T14:09:09.312Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/cb/7d9330578fab41ef7a0528a5da779f1464a4a10fc1e3dbd358555cdf4e27/agario_kit-2026.1.15-py3-none-any.whl", hash = "sha256:ffe8fb3ccb4b8c7db9a0f975a559de9106b9be7a67c8d05221e65d3381c40a5e", size = 56927, upload-time = "2026-07-15T14:09:09.311Z" },
 ]
 
 [[package]]
