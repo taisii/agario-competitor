@@ -33,8 +33,8 @@ Large replay files and generated match workspaces belong under ignored
 ## Official match evidence
 
 The submitted bot placed 3rd out of 71 teams as team 73. Two official
-first-place matches from submission 53 are preserved below. Click an animation
-to play the high-quality MP4 replay directly.
+first-place matches from submission 53 are preserved below. GitHub embeds the
+high-quality MP4 replays so they can be played directly from this README.
 
 ### Match 40742 — 1st place
 
