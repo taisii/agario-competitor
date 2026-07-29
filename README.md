@@ -30,6 +30,23 @@ knowledge/                    evidence and historical strategy decisions
 Large replay files and generated match workspaces belong under ignored
 `.agario/`; they are not source files.
 
+## Official match evidence
+
+The submitted bot placed 3rd out of 71 teams as team 73. Two official
+first-place matches from submission 53 are preserved as compact full-arena
+replays:
+
+| Match | Result | Evidence |
+|---|---|---|
+| 40742 | 1st, final mass 93.21, 24 eliminations | [Watch replay](docs/assets/bot-battle/match-40742-official-win.mp4) |
+| 40806 | 1st, final mass 77.08, 29 eliminations | [Watch replay](docs/assets/bot-battle/match-40806-official-win.mp4) |
+
+The tracked bot is outlined in white and marked `TRACK` in the live ranking.
+The final frame shows the official winner event. Render parameters and exact
+values derived from the downloaded official event logs are recorded in the
+[video manifest](docs/assets/bot-battle/manifest.json). The large source event
+logs remain intentionally excluded from Git.
+
 The runtime and submission dependency flow is intentionally one-way:
 
 ```text
