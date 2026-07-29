@@ -1,0 +1,32 @@
+{
+  "competition": "SYNCS x Susquehanna Bot Battle 2026",
+  "team_id": 73,
+  "submission_id": 53,
+  "source": "Downloaded official competition event logs",
+  "render": {
+    "resolution": "1080x720",
+    "fps": 20,
+    "round_stride": 5,
+    "scope": "full arena"
+  },
+  "matches": [
+    {
+      "match_id": 40742,
+      "tracked_player_id": 5,
+      "winner_player_id": 5,
+      "final_mass": 93.20692534915922,
+      "eliminations": 24,
+      "video": "match-40742-official-win.mp4",
+      "sha256": "7d932a606b5b17ae91be7a1ad92c727ddee5af6fca6fdf0b7916f11e34d68982"
+    },
+    {
+      "match_id": 40806,
+      "tracked_player_id": 1,
+      "winner_player_id": 1,
+      "final_mass": 77.07972037095524,
+      "eliminations": 29,
+      "video": "match-40806-official-win.mp4",
+      "sha256": "bd9f2b6d8b8a0a457d193d5d13915aaf19df1cdab7ceb9ded55fde542e2b3f53"
+    }
+  ]
+}
