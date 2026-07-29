@@ -33,23 +33,25 @@ Large replay files and generated match workspaces belong under ignored
 ## Official match evidence
 
 The submitted bot placed 3rd out of 71 teams as team 73. Two official
-first-place matches from submission 53 are preserved below. The GIF previews
-play in this README; click either preview or the MP4 link to open the tracked
-high-quality replay stored in this repository.
+first-place matches from submission 53 are preserved below. GitHub embeds the
+high-quality MP4 players directly in this README. The same MP4 files are also
+committed under `docs/assets/bot-battle/`, so every clone contains them.
 
 ### Match 40742 — 1st place
 
-[![Official win replay for match 40742](docs/assets/bot-battle/match-40742-official-win.gif)](docs/assets/bot-battle/match-40742-official-win.mp4)
+[![Official win replay for match 40742](docs/assets/bot-battle/match-40742-official-win.gif)](https://github.com/user-attachments/assets/74305888-b574-41a8-88bb-fc7e1860ca19)
 
 Final mass **93.21** · **24 eliminations** ·
-[Play high-quality MP4](docs/assets/bot-battle/match-40742-official-win.mp4)
+[Play high-quality MP4](https://github.com/user-attachments/assets/74305888-b574-41a8-88bb-fc7e1860ca19) ·
+[Git-managed MP4](docs/assets/bot-battle/match-40742-official-win.mp4)
 
 ### Match 40806 — 1st place
 
-[![Official win replay for match 40806](docs/assets/bot-battle/match-40806-official-win.gif)](docs/assets/bot-battle/match-40806-official-win.mp4)
+[![Official win replay for match 40806](docs/assets/bot-battle/match-40806-official-win.gif)](https://github.com/user-attachments/assets/fb66fcf2-fc51-4524-83f8-44d6ca5a8e11)
 
 Final mass **77.08** · **29 eliminations** ·
-[Play high-quality MP4](docs/assets/bot-battle/match-40806-official-win.mp4)
+[Play high-quality MP4](https://github.com/user-attachments/assets/fb66fcf2-fc51-4524-83f8-44d6ca5a8e11) ·
+[Git-managed MP4](docs/assets/bot-battle/match-40806-official-win.mp4)
 
 The tracked bot is outlined in white and marked `TRACK` in the live ranking.
 The final frame shows the official winner event. Render parameters and exact
