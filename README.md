@@ -34,21 +34,21 @@ Large replay files and generated match workspaces belong under ignored
 
 The submitted bot placed 3rd out of 71 teams as team 73. Two official
 first-place matches from submission 53 are preserved below. Click an animation
-to open the high-quality MP4 replay.
+to play the high-quality MP4 replay directly.
 
 ### Match 40742 — 1st place
 
-[![Official win replay for match 40742](docs/assets/bot-battle/match-40742-official-win.gif)](docs/assets/bot-battle/match-40742-official-win.mp4)
+[![Official win replay for match 40742](docs/assets/bot-battle/match-40742-official-win.gif)](https://github.com/user-attachments/assets/59326cc3-6f36-4f8c-b168-2eaa0d966d0d)
 
 Final mass **93.21** · **24 eliminations** ·
-[Open high-quality MP4](docs/assets/bot-battle/match-40742-official-win.mp4)
+[Play high-quality MP4](https://github.com/user-attachments/assets/59326cc3-6f36-4f8c-b168-2eaa0d966d0d)
 
 ### Match 40806 — 1st place
 
-[![Official win replay for match 40806](docs/assets/bot-battle/match-40806-official-win.gif)](docs/assets/bot-battle/match-40806-official-win.mp4)
+[![Official win replay for match 40806](docs/assets/bot-battle/match-40806-official-win.gif)](https://github.com/user-attachments/assets/bc7357d1-61f3-41c9-b903-fd3ea419c22e)
 
 Final mass **77.08** · **29 eliminations** ·
-[Open high-quality MP4](docs/assets/bot-battle/match-40806-official-win.mp4)
+[Play high-quality MP4](https://github.com/user-attachments/assets/bc7357d1-61f3-41c9-b903-fd3ea419c22e)
 
 The tracked bot is outlined in white and marked `TRACK` in the live ranking.
 The final frame shows the official winner event. Render parameters and exact
