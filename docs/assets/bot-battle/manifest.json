@@ -9,6 +9,12 @@
     "round_stride": 5,
     "scope": "full arena"
   },
+  "preview_render": {
+    "resolution": "560x373",
+    "fps": 6,
+    "colors": 96,
+    "loop": true
+  },
   "matches": [
     {
       "match_id": 40742,
@@ -17,7 +23,9 @@
       "final_mass": 93.20692534915922,
       "eliminations": 24,
       "video": "match-40742-official-win.mp4",
-      "sha256": "7d932a606b5b17ae91be7a1ad92c727ddee5af6fca6fdf0b7916f11e34d68982"
+      "sha256": "7d932a606b5b17ae91be7a1ad92c727ddee5af6fca6fdf0b7916f11e34d68982",
+      "preview": "match-40742-official-win.gif",
+      "preview_sha256": "cb648f385e4d18f2905d51b1e2e1cde45593523fb34488fbd7d6429ac9eae7ca"
     },
     {
       "match_id": 40806,
@@ -26,7 +34,9 @@
       "final_mass": 77.07972037095524,
       "eliminations": 29,
       "video": "match-40806-official-win.mp4",
-      "sha256": "bd9f2b6d8b8a0a457d193d5d13915aaf19df1cdab7ceb9ded55fde542e2b3f53"
+      "sha256": "bd9f2b6d8b8a0a457d193d5d13915aaf19df1cdab7ceb9ded55fde542e2b3f53",
+      "preview": "match-40806-official-win.gif",
+      "preview_sha256": "cd0dd531ea4fe1c68304c7cc9816ae37a7770f5ca9d077da8860610478346f15"
     }
   ]
 }

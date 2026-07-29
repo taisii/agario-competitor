@@ -33,13 +33,22 @@ Large replay files and generated match workspaces belong under ignored
 ## Official match evidence
 
 The submitted bot placed 3rd out of 71 teams as team 73. Two official
-first-place matches from submission 53 are preserved as compact full-arena
-replays:
+first-place matches from submission 53 are preserved below. Click an animation
+to open the high-quality MP4 replay.
 
-| Match | Result | Evidence |
-|---|---|---|
-| 40742 | 1st, final mass 93.21, 24 eliminations | [Watch replay](docs/assets/bot-battle/match-40742-official-win.mp4) |
-| 40806 | 1st, final mass 77.08, 29 eliminations | [Watch replay](docs/assets/bot-battle/match-40806-official-win.mp4) |
+### Match 40742 — 1st place
+
+[![Official win replay for match 40742](docs/assets/bot-battle/match-40742-official-win.gif)](docs/assets/bot-battle/match-40742-official-win.mp4)
+
+Final mass **93.21** · **24 eliminations** ·
+[Open high-quality MP4](docs/assets/bot-battle/match-40742-official-win.mp4)
+
+### Match 40806 — 1st place
+
+[![Official win replay for match 40806](docs/assets/bot-battle/match-40806-official-win.gif)](docs/assets/bot-battle/match-40806-official-win.mp4)
+
+Final mass **77.08** · **29 eliminations** ·
+[Open high-quality MP4](docs/assets/bot-battle/match-40806-official-win.mp4)
 
 The tracked bot is outlined in white and marked `TRACK` in the live ranking.
 The final frame shows the official winner event. Render parameters and exact
